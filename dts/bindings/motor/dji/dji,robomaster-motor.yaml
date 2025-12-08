@@ -1,0 +1,13 @@
+compatible: "dji,robomaster-motor"
+
+description: "Binding for each DJI RoboMaster motor"
+include:
+  - motor-controller.yaml
+properties:
+  motor-id:
+    required: true
+    type: int
+    description: "ID of the motor on the CAN bus"
+    enum: [1, 2, 3, 4, 5, 6, 7, 8]
+
+on-bus: dji,robomaster

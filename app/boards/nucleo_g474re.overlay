@@ -10,18 +10,15 @@
  */
 
 / {
-	example_sensor: example-sensor {
-		compatible = "zephyr,example-sensor";
-		input-gpios = <&gpioc 13 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-	};
+	robomaster_controller: robomaster_controller {
+		compatible = "dji,robomaster";
 
-	blink_led: blink-led {
-		compatible = "blink-gpio-led";
-		led-gpios = <&gpiob 13 GPIO_ACTIVE_HIGH>;
-		blink-period-ms = <1000>;
-	};
-};
+		canbus = <&fdcan1>;
+		auto-probe;
 
-&gpioc {
-	status = "okay";
+		motor_0: motor_0 {
+			compatible = "dji,robomaster-motor";
+			motor-id = <1>;
+		};
+	};
 };

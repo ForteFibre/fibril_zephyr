@@ -1,0 +1,14 @@
+compatible: "dji,robomaster"
+
+description: DJI RoboMaster C610/C620 motor driver binding
+properties:
+  canbus:
+    required: true
+    type: phandles
+    description: "CAN bus controller to which the motor is connected"
+  auto-probe:
+    required: false
+    type: boolean
+    description: "In case of multiple CAN buses, automatically detect the correct bus for each motor"
+
+bus: dji,robomaster
