@@ -1,0 +1,22 @@
+menuconfig MOTOR
+	bool "Motor driver support"
+	help
+	  Enable motor driver support
+
+if MOTOR
+
+config MOTOR_INIT_PRIORITY
+	int "Motor driver init priority"
+	default 85
+	help
+	  Motor driver initialization priority.
+module = MOTOR
+module-str = motor
+source "subsys/logging/Kconfig.template.log_config"
+
+# zephyr-keep-sorted-start
+rsource "Kconfig.robomaster"
+
+# zephyr-keep-sorted-stop
+
+endif # MOTOR

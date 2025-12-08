@@ -1,0 +1,29 @@
+description: DJI RoboMaster C610/C620 motor node
+
+compatible: "dji,robomaster-motor"
+
+include: base.yaml
+
+on-bus: dji,robomaster
+
+properties:
+  reg:
+    required: true
+    description: Motor ID on the RoboMaster bus, in the range 1..8.
+  model:
+    type: string
+    required: true
+    enum:
+      - c610
+      - c620
+    description: Motor controller model.
+  can-bus:
+    type: int
+    default: 0
+    description: Index into the parent node's `cans` property.
+  max-current:
+    type: int
+    description: Maximum absolute current command accepted by this motor node.
+  gear-ratio:
+    type: int
+    description: Optional motor gear ratio metadata for higher-level control.

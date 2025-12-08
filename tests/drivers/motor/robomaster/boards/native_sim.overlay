@@ -1,0 +1,43 @@
+/ {
+	test_can0: fake_can0 {
+		compatible = "zephyr,fake-can";
+		status = "okay";
+	};
+
+	test_can1: fake_can1 {
+		compatible = "zephyr,fake-can";
+		status = "okay";
+	};
+
+	robomaster_test: robomaster-controller {
+		compatible = "dji,robomaster";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cans = <&test_can0 &test_can1>;
+		feedback-timeout-ms = <10>;
+
+		motor0: motor@1 {
+			compatible = "dji,robomaster-motor";
+			reg = <1>;
+			model = "c620";
+			can-bus = <0>;
+			max-current = <10000>;
+		};
+
+		motor1: motor@2 {
+			compatible = "dji,robomaster-motor";
+			reg = <2>;
+			model = "c620";
+			can-bus = <0>;
+			max-current = <10000>;
+		};
+
+		motor2: motor@5 {
+			compatible = "dji,robomaster-motor";
+			reg = <5>;
+			model = "c610";
+			can-bus = <1>;
+			max-current = <8000>;
+		};
+	};
+};

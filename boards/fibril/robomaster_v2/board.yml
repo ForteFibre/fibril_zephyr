@@ -1,0 +1,9 @@
+# Copyright (c) 2024 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+board:
+  name: fibril_robomaster_v2
+  full_name: Fibril RoboMaster Bridge V2
+  vendor: fibril
+  socs:
+    - name: stm32g474xx
