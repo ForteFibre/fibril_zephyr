@@ -1,6 +1,8 @@
 #ifndef FIBRIL_ZEPHYR_INCLUDE_DRIVERS_MOTOR_H_
 #define FIBRIL_ZEPHYR_INCLUDE_DRIVERS_MOTOR_H_
 
+#include <stdbool.h>
+
 #include <zephyr/device.h>
 
 #ifdef __cplusplus
@@ -23,6 +25,24 @@ enum motor_feedback_type {
    */
   MOTOR_FEEDBACK_ORIENTATION = 1 << 3,
   MOTOR_FEEDBACK_TEMPERATURE = 1 << 4,
+};
+
+struct motor_feedback
+{
+  /**
+   * @brief Bit-mask of valid fields in this snapshot.
+   *
+   * This uses values from @ref motor_feedback_type.
+   */
+  uint32_t valid_mask;
+  int16_t current;
+  int16_t velocity;
+  int32_t position;
+  int32_t orientation;
+  int16_t temperature;
+  bool online;
+  bool stale;
+  int64_t timestamp_ms;
 };
 
 typedef int (*motor_enable_t)(const struct device * dev);

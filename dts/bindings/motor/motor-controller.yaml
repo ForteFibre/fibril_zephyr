@@ -1,3 +1,13 @@
-description: Motor interface binding
+description: Common properties for motor controller buses
 
-properties: {}
+include: base.yaml
+
+bus: dji,robomaster
+
+properties:
+  "#address-cells":
+    required: true
+    const: 1
+  "#size-cells":
+    required: true
+    const: 0

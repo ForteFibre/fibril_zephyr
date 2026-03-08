@@ -18,6 +18,7 @@ LOG_MODULE_REGISTER(main, CONFIG_APP_LOG_LEVEL);
 int main(void)
 {
   const struct device * robomaster = DEVICE_DT_GET(DT_NODELABEL(robomaster_controller));
+  ARG_UNUSED(robomaster);
 
   return 0;
 }

@@ -10,15 +10,25 @@
  */
 
 / {
-	robomaster_controller: robomaster_controller {
-		compatible = "dji,robomaster";
+    robomaster_controller: robomaster-controller {
+        compatible = "dji,robomaster";
+        #address-cells = <1>;
+        #size-cells = <0>;
+        cans = <&fdcan1>;
+        feedback-timeout-ms = <100>;
 
-		canbus = <&fdcan1>;
-		auto-probe;
+        motor_front_left: motor@1 {
+            compatible = "dji,robomaster-motor";
+            reg = <1>;
+            model = "c620";
+            max-current = <10000>;
+        };
 
-		motor_0: motor_0 {
-			compatible = "dji,robomaster-motor";
-			motor-id = <1>;
-		};
-	};
+        motor_front_right: motor@2 {
+            compatible = "dji,robomaster-motor";
+            reg = <2>;
+            model = "c620";
+            max-current = <10000>;
+        };
+    };
 };
