@@ -1,0 +1,235 @@
+/*
+ * Copyright (c) 2026
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+#include <st/g4/stm32g474Xe.dtsi>
+#include "robomaster_miniv1-pinctrl.dtsi"
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	model = "Fibril RoboMaster Mini V1";
+	compatible = "fibril,robomaster-miniv1";
+
+	chosen {
+		zephyr,console = &usart2;
+		zephyr,shell-uart = &usart2;
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,canbus = &fdcan1;
+	};
+
+	aliases {
+		led0 = &red_led;
+		led1 = &green_led;
+		led2 = &blue_led;
+		sw0 = &rotary_1;
+		sw1 = &rotary_2;
+		sw2 = &rotary_4;
+		sw3 = &rotary_8;
+		watchdog0 = &iwdg;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		red_led: led_r {
+			gpios = <&gpioc 10 GPIO_ACTIVE_HIGH>;
+			label = "LED_R";
+		};
+
+		green_led: led_g {
+			gpios = <&gpioc 11 GPIO_ACTIVE_HIGH>;
+			label = "LED_G";
+		};
+
+		blue_led: led_b {
+			gpios = <&gpioc 12 GPIO_ACTIVE_HIGH>;
+			label = "LED_B";
+		};
+	};
+
+	rotary_switch: rotary_switch {
+		compatible = "gpio-keys";
+
+		rotary_1: rotary_1 {
+			label = "ROT1";
+			gpios = <&gpiob 1 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <INPUT_KEY_1>;
+		};
+
+		rotary_2: rotary_2 {
+			label = "ROT2";
+			gpios = <&gpioa 3 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <INPUT_KEY_2>;
+		};
+
+		rotary_4: rotary_4 {
+			label = "ROT4";
+			gpios = <&gpiob 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <INPUT_KEY_3>;
+		};
+
+		rotary_8: rotary_8 {
+			label = "ROT8";
+			gpios = <&gpioa 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <INPUT_KEY_4>;
+		};
+	};
+
+	gs_usb0: gs_usb0 {
+		compatible = "gs_usb";
+		label = "gs_usb";
+	};
+
+	cannectivity: cannectivity {
+		compatible = "cannectivity";
+
+		channel0 {
+			compatible = "cannectivity-channel";
+			can-controller = <&fdcan1>;
+		};
+	};
+
+	robomaster_controller: robomaster-controller {
+		compatible = "dji,robomaster";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cans = <&fdcan2 &fdcan3>;
+		feedback-timeout-ms = <100>;
+
+		motor_1: motor@1 {
+			compatible = "dji,robomaster-motor";
+			reg = <1>;
+			model = "c620";
+			max-current = <10000>;
+		};
+
+		motor_2: motor@2 {
+			compatible = "dji,robomaster-motor";
+			reg = <2>;
+			model = "c620";
+			max-current = <10000>;
+		};
+
+		motor_3: motor@3 {
+			compatible = "dji,robomaster-motor";
+			reg = <3>;
+			model = "c620";
+			max-current = <10000>;
+		};
+
+		motor_4: motor@4 {
+			compatible = "dji,robomaster-motor";
+			reg = <4>;
+			model = "c620";
+			max-current = <10000>;
+		};
+
+		motor_5: motor@5 {
+			compatible = "dji,robomaster-motor";
+			reg = <5>;
+			can-bus = <1>;
+			model = "c620";
+			max-current = <10000>;
+		};
+
+		motor_6: motor@6 {
+			compatible = "dji,robomaster-motor";
+			reg = <6>;
+			can-bus = <1>;
+			model = "c620";
+			max-current = <10000>;
+		};
+
+		motor_7: motor@7 {
+			compatible = "dji,robomaster-motor";
+			reg = <7>;
+			can-bus = <1>;
+			model = "c620";
+			max-current = <10000>;
+		};
+
+		motor_8: motor@8 {
+			compatible = "dji,robomaster-motor";
+			reg = <8>;
+			can-bus = <1>;
+			model = "c620";
+			max-current = <10000>;
+		};
+	};
+};
+
+&clk_lsi {
+	status = "okay";
+};
+
+&clk_hsi48 {
+	status = "okay";
+};
+
+&clk_hse {
+	clock-frequency = <DT_FREQ_M(24)>;
+	status = "okay";
+};
+
+&pll {
+	div-m = <6>;
+	mul-n = <80>;
+	div-p = <8>;
+	div-q = <2>;
+	div-r = <2>;
+	clocks = <&clk_hse>;
+	status = "okay";
+};
+
+&rcc {
+	clocks = <&pll>;
+	clock-frequency = <DT_FREQ_M(160)>;
+	ahb-prescaler = <1>;
+	apb1-prescaler = <1>;
+	apb2-prescaler = <1>;
+};
+
+&usart2 {
+	pinctrl-0 = <&usart2_tx_pd5 &usart2_rx_pd6>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};
+
+&fdcan1 {
+	clocks = <&rcc STM32_CLOCK(APB1, 25)>,
+		 <&rcc STM32_SRC_HSE FDCAN_SEL(0)>;
+	pinctrl-0 = <&fdcan1_rx_pd0 &fdcan1_tx_pd1>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&fdcan2 {
+	clocks = <&rcc STM32_CLOCK(APB1, 25)>,
+		 <&rcc STM32_SRC_HSE FDCAN_SEL(0)>;
+	pinctrl-0 = <&fdcan2_rx_pb12 &fdcan2_tx_pb13>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&fdcan3 {
+	clocks = <&rcc STM32_CLOCK(APB1, 25)>,
+		 <&rcc STM32_SRC_HSE FDCAN_SEL(0)>;
+	pinctrl-0 = <&fdcan3_rx_pa8 &fdcan3_tx_pa15>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&iwdg {
+	status = "okay";
+};
+
+zephyr_udc0: &usb {
+	pinctrl-0 = <&usb_dm_pa11 &usb_dp_pa12>;
+	pinctrl-names = "default";
+	status = "okay";
+};

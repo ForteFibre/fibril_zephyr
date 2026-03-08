@@ -6,6 +6,8 @@
 #include <app/drivers/blink.h>
 #include <app_version.h>
 #include <drivers/motor.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -17,8 +19,37 @@ LOG_MODULE_REGISTER(main, CONFIG_APP_LOG_LEVEL);
 
 int main(void)
 {
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(robomaster_controller), okay)
   const struct device * robomaster = DEVICE_DT_GET(DT_NODELABEL(robomaster_controller));
-  ARG_UNUSED(robomaster);
+
+  if (!device_is_ready(robomaster)) {
+    LOG_ERR("RoboMaster transport is not ready");
+    return -ENODEV;
+  }
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(fdcan1), okay)
+  if (!device_is_ready(DEVICE_DT_GET(DT_NODELABEL(fdcan1)))) {
+    LOG_ERR("Control CAN is not ready");
+    return -ENODEV;
+  }
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(fdcan2), okay)
+  if (!device_is_ready(DEVICE_DT_GET(DT_NODELABEL(fdcan2)))) {
+    LOG_ERR("Motor CAN0 is not ready");
+    return -ENODEV;
+  }
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(fdcan3), okay)
+  if (!device_is_ready(DEVICE_DT_GET(DT_NODELABEL(fdcan3)))) {
+    LOG_ERR("Motor CAN1 is not ready");
+    return -ENODEV;
+  }
+#endif
+
+  LOG_INF("Baseline bring-up complete");
 
   return 0;
 }

@@ -1,0 +1,5 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_ROBOMASTER_MINIV1
+	select SOC_STM32G474XX

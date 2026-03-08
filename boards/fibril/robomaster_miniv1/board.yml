@@ -1,0 +1,9 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+board:
+  name: robomaster_miniv1
+  full_name: Fibril RoboMaster Mini V1
+  vendor: fibril
+  socs:
+    - name: stm32g474xx
