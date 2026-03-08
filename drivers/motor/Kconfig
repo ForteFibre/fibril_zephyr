@@ -15,7 +15,7 @@ module-str = motor
 source "subsys/logging/Kconfig.template.log_config"
 
 # zephyr-keep-sorted-start
-rsource "Kconfig.dji"
+
 # zephyr-keep-sorted-stop
 
 endif # MOTOR
