@@ -67,35 +67,6 @@ struct robomaster_motor_data
   struct motor_feedback feedback;
 };
 
-static int16_t robomaster_motor_get_effective_current(
-  const struct device * motor_dev, uint8_t can_bus)
-{
-  struct robomaster_motor_data * motor = motor_dev->data;
-  int16_t current = 0;
-  k_spinlock_key_t key = k_spin_lock(&motor->lock);
-
-  if (motor->detected_can_bus == can_bus && motor->enabled) {
-    current = motor->requested_current;
-  }
-
-  k_spin_unlock(&motor->lock, key);
-
-  return current;
-}
-
-static bool robomaster_motor_is_on_can_bus(const struct device * motor_dev, uint8_t can_bus)
-{
-  struct robomaster_motor_data * motor = motor_dev->data;
-  bool matches;
-  k_spinlock_key_t key = k_spin_lock(&motor->lock);
-
-  matches = motor->detected_can_bus == can_bus;
-
-  k_spin_unlock(&motor->lock, key);
-
-  return matches;
-}
-
 static int robomaster_transport_find_can_bus(
   const struct robomaster_transport_config * config, const struct device * can_dev)
 {
@@ -115,31 +86,24 @@ static void robomaster_transport_tx_work_handler(struct k_work * work)
   const struct device * transport_dev = transport->dev;
   const struct robomaster_transport_config * config = transport_dev->config;
   struct can_frame frame = {
-    .flags = 0U,
     .dlc = can_bytes_to_dlc(8U),
+    .flags = 0U,
   };
+  memset(frame.data, 0, sizeof(frame.data));
 
+  int16_t current = 0;
   for (size_t can_bus = 0; can_bus < config->can_count; ++can_bus) {
     for (size_t group = 0; group < ROBOMASTER_GROUP_COUNT; ++group) {
-      const struct device * motor_devs[ROBOMASTER_GROUP_SIZE];
-      k_spinlock_key_t key = k_spin_lock(&transport->lock);
-      for (size_t slot = 0; slot < ROBOMASTER_GROUP_SIZE; ++slot) {
-        motor_devs[slot] = transport->motors[group * ROBOMASTER_GROUP_SIZE + slot];
-      }
-      k_spin_unlock(&transport->lock, key);
-
       bool has_motor_on_bus = false;
       for (size_t slot = 0; slot < ROBOMASTER_GROUP_SIZE; ++slot) {
-        int16_t current = 0;
-
-        if (
-          (motor_devs[slot] != NULL) &&
-          robomaster_motor_is_on_can_bus(motor_devs[slot], (uint8_t)can_bus)) {
+        const struct device * motor_dev = transport->motors[group * ROBOMASTER_GROUP_SIZE + slot];
+        if (motor_dev != NULL && motor_dev->data != NULL) {
+          const struct robomaster_motor_data * motor = motor_dev->data;
           has_motor_on_bus = true;
-          current = robomaster_motor_get_effective_current(motor_devs[slot], (uint8_t)can_bus);
+          current =
+            motor->enabled && motor->detected_can_bus == can_bus ? motor->requested_current : 0;
+          sys_put_be16((uint16_t)current, &frame.data[slot * sizeof(int16_t)]);
         }
-
-        sys_put_be16((uint16_t)current, &frame.data[slot * sizeof(int16_t)]);
       }
 
       if (!has_motor_on_bus) {
@@ -162,20 +126,6 @@ static void robomaster_transport_tx_timer_handler(struct k_timer * timer)
 static void robomaster_rx_callback(
   const struct device * can_dev, struct can_frame * frame, void * user_data)
 {
-  const struct device * transport_dev = user_data;
-  const struct robomaster_transport_config * config = transport_dev->config;
-  struct robomaster_transport_data * transport = transport_dev->data;
-  const struct device * motor_dev;
-  struct robomaster_motor_data * motor;
-  uint8_t motor_id;
-  int can_bus;
-  uint16_t orientation_raw;
-  int16_t velocity;
-  int16_t current;
-  uint8_t temperature;
-  int32_t delta;
-  k_spinlock_key_t key;
-
   ARG_UNUSED(can_dev);
 
   if (
@@ -188,31 +138,33 @@ static void robomaster_rx_callback(
     return;
   }
 
-  motor_id = (uint8_t)(frame->id - ROBOMASTER_RX_ID_BASE);
+  uint8_t motor_id = (uint8_t)(frame->id - ROBOMASTER_RX_ID_BASE);
   if ((motor_id < 1U) || (motor_id > ROBOMASTER_MAX_MOTORS)) {
     return;
   }
 
-  can_bus = robomaster_transport_find_can_bus(config, can_dev);
+  const struct device * transport_dev = user_data;
+  const struct robomaster_transport_config * config = transport_dev->config;
+  struct robomaster_transport_data * transport = transport_dev->data;
+
+  int can_bus = robomaster_transport_find_can_bus(config, can_dev);
   if (can_bus < 0) {
     return;
   }
 
-  key = k_spin_lock(&transport->lock);
-  motor_dev = transport->motors[motor_id - 1U];
-  k_spin_unlock(&transport->lock, key);
+  const struct device * motor_dev = transport->motors[motor_id - 1U];
 
   if (motor_dev == NULL) {
     return;
   }
 
-  motor = motor_dev->data;
-  orientation_raw = sys_get_be16(&frame->data[0]);
-  velocity = (int16_t)sys_get_be16(&frame->data[2]);
-  current = (int16_t)sys_get_be16(&frame->data[4]);
-  temperature = frame->data[6];
+  struct robomaster_motor_data * motor = motor_dev->data;
+  uint16_t orientation_raw = sys_get_be16(&frame->data[0]);
+  int16_t velocity = (int16_t)sys_get_be16(&frame->data[2]);
+  int16_t current = (int16_t)sys_get_be16(&frame->data[4]);
+  uint8_t temperature = frame->data[6];
 
-  key = k_spin_lock(&motor->lock);
+  k_spinlock_key_t key = k_spin_lock(&motor->lock);
 
   if (motor->detected_can_bus != ROBOMASTER_CANBUS_UNKNOWN && motor->detected_can_bus != can_bus) {
     k_spin_unlock(&motor->lock, key);
@@ -222,7 +174,7 @@ static void robomaster_rx_callback(
   }
 
   if (motor->has_last_orientation) {
-    delta = (int32_t)orientation_raw - (int32_t)motor->last_orientation_raw;
+    int32_t delta = (int32_t)orientation_raw - (int32_t)motor->last_orientation_raw;
     if (delta > ROBOMASTER_ENCODER_HALF_WRAP) {
       delta -= ROBOMASTER_ENCODER_WRAP;
     } else if (delta < -ROBOMASTER_ENCODER_HALF_WRAP) {
