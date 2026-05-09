@@ -17,10 +17,6 @@ properties:
       - c610
       - c620
     description: Motor controller model.
-  can-bus:
-    type: int
-    default: 0
-    description: Index into the parent node's `cans` property.
   max-current:
     type: int
     description: Maximum absolute current command accepted by this motor node.

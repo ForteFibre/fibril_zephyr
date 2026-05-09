@@ -21,7 +21,7 @@ enum motor_feedback_type {
   MOTOR_FEEDBACK_VELOCITY = 1 << 1,
   MOTOR_FEEDBACK_POSITION = 1 << 2,
   /**
-   * @brief Orientation feedback (e.g., mechanical angle)
+   * @brief Orientation feedback (for RoboMaster, this is the Mechanical Angle)
    */
   MOTOR_FEEDBACK_ORIENTATION = 1 << 3,
   MOTOR_FEEDBACK_TEMPERATURE = 1 << 4,

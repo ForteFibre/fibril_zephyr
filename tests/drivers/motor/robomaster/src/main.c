@@ -23,6 +23,7 @@
 #define TEST_MOTOR0_NODE DT_NODELABEL(motor0)
 #define TEST_MOTOR1_NODE DT_NODELABEL(motor1)
 #define TEST_MOTOR2_NODE DT_NODELABEL(motor2)
+#define TEST_MOTOR3_NODE DT_NODELABEL(motor3)
 
 static const struct device * const test_can_devs[TEST_CAN_COUNT] = {
 	DEVICE_DT_GET(TEST_CAN0_NODE),
@@ -32,6 +33,7 @@ static const struct device * const test_can_devs[TEST_CAN_COUNT] = {
 static const struct device * const motor0 = DEVICE_DT_GET(TEST_MOTOR0_NODE);
 static const struct device * const motor1 = DEVICE_DT_GET(TEST_MOTOR1_NODE);
 static const struct device * const motor2 = DEVICE_DT_GET(TEST_MOTOR2_NODE);
+static const struct device * const motor3 = DEVICE_DT_GET(TEST_MOTOR3_NODE);
 
 struct captured_filter {
 	can_rx_callback_t callback;
@@ -41,8 +43,10 @@ struct captured_filter {
 };
 
 struct captured_tx {
-	struct can_frame frame;
-	int count;
+	struct can_frame group0_frame;
+	struct can_frame group1_frame;
+	int group0_count;
+	int group1_count;
 };
 
 static struct captured_filter captured_filters[TEST_CAN_COUNT];
@@ -89,8 +93,13 @@ static int test_fake_can_send(const struct device *dev, const struct can_frame *
 		return -EINVAL;
 	}
 
-	captured_tx[idx].frame = *frame;
-	captured_tx[idx].count++;
+	if (frame->id == 0x200) {
+		captured_tx[idx].group0_frame = *frame;
+		captured_tx[idx].group0_count++;
+	} else if (frame->id == 0x1FF) {
+		captured_tx[idx].group1_frame = *frame;
+		captured_tx[idx].group1_count++;
+	}
 
 	if (callback != NULL) {
 		callback(dev, 0, user_data);
@@ -126,11 +135,30 @@ static void reset_runtime_state(void)
 	fake_can_start_fake.custom_fake = test_fake_can_start;
 }
 
+static void wait_for_tx_flush(void)
+{
+	k_msleep(2);
+}
+
+static int32_t wrapped_delta(uint16_t current, int32_t previous)
+{
+	int32_t delta = (int32_t)current - previous;
+
+	if (delta > 4096) {
+		delta -= 8192;
+	} else if (delta < -4096) {
+		delta += 8192;
+	}
+
+	return delta;
+}
+
 static void *robomaster_setup(void)
 {
 	zassert_true(device_is_ready(motor0), "motor0 not ready");
 	zassert_true(device_is_ready(motor1), "motor1 not ready");
 	zassert_true(device_is_ready(motor2), "motor2 not ready");
+	zassert_true(device_is_ready(motor3), "motor3 not ready");
 
 	for (int i = 0; i < TEST_CAN_COUNT; ++i) {
 		zassert_true(captured_filters[i].valid, "missing captured filter %d", i);
@@ -149,6 +177,8 @@ static void robomaster_before(void *fixture)
 	zassert_ok(motor_disable(motor0));
 	zassert_ok(motor_disable(motor1));
 	zassert_ok(motor_disable(motor2));
+	zassert_ok(motor_disable(motor3));
+	wait_for_tx_flush();
 	reset_runtime_state();
 }
 
@@ -183,44 +213,58 @@ ZTEST_SUITE(robomaster_motor, NULL, robomaster_setup, robomaster_before, NULL, N
 
 ZTEST(robomaster_motor, test_set_output_routes_to_expected_can_group)
 {
+	inject_feedback(test_can_devs[0], 0x201, 10, 0, 0, 20);
+	inject_feedback(test_can_devs[0], 0x202, 20, 0, 0, 20);
+	inject_feedback(test_can_devs[1], 0x205, 30, 0, 0, 20);
 	zassert_ok(motor_enable(motor0));
 	zassert_ok(motor_enable(motor1));
 	zassert_ok(motor_enable(motor2));
+	wait_for_tx_flush();
 	reset_runtime_state();
 
 	zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 100));
 	zassert_ok(motor_set_output(motor1, MOTOR_OUTPUT_MODE_TORQUE, -200));
 	zassert_ok(motor_set_output(motor2, MOTOR_OUTPUT_MODE_CURRENT, 300));
+	wait_for_tx_flush();
 
-	zassert_equal(captured_tx[0].count, 2, "expected two sends on can0");
-	zassert_equal(captured_tx[1].count, 1, "expected one send on can1");
+	zassert_true(captured_tx[0].group0_count > 0, "expected at least one batched send on can0");
+	zassert_true(captured_tx[1].group1_count > 0, "expected at least one send on can1");
 
-	zassert_equal(captured_tx[0].frame.id, 0x200, "wrong group frame id for can0");
-	expect_be16_slot(&captured_tx[0].frame, 0, 100);
-	expect_be16_slot(&captured_tx[0].frame, 1, -200);
-	expect_be16_slot(&captured_tx[0].frame, 2, 0);
-	expect_be16_slot(&captured_tx[0].frame, 3, 0);
+	expect_be16_slot(&captured_tx[0].group0_frame, 0, 100);
+	expect_be16_slot(&captured_tx[0].group0_frame, 1, -200);
+	expect_be16_slot(&captured_tx[0].group0_frame, 2, 0);
+	expect_be16_slot(&captured_tx[0].group0_frame, 3, 0);
 
-	zassert_equal(captured_tx[1].frame.id, 0x1FF, "wrong group frame id for can1");
-	expect_be16_slot(&captured_tx[1].frame, 0, 300);
-	expect_be16_slot(&captured_tx[1].frame, 1, 0);
-	expect_be16_slot(&captured_tx[1].frame, 2, 0);
-	expect_be16_slot(&captured_tx[1].frame, 3, 0);
+	expect_be16_slot(&captured_tx[1].group1_frame, 0, 300);
+	expect_be16_slot(&captured_tx[1].group1_frame, 1, 0);
+	expect_be16_slot(&captured_tx[1].group1_frame, 2, 0);
+	expect_be16_slot(&captured_tx[1].group1_frame, 3, 0);
 }
 
 ZTEST(robomaster_motor, test_enable_uses_cached_output_and_disable_clears_slot)
 {
+	int previous_group0_count;
+
+	inject_feedback(test_can_devs[0], 0x201, 10, 0, 0, 20);
+
 	zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 512));
-	zassert_equal(captured_tx[0].count, 1, "disabled motor should still flush zeroed frame");
-	expect_be16_slot(&captured_tx[0].frame, 0, 0);
+	wait_for_tx_flush();
+	zassert_true(captured_tx[0].group0_count > 0, "disabled motor should still flush zeroed frame");
+	expect_be16_slot(&captured_tx[0].group0_frame, 0, 0);
 
+	previous_group0_count = captured_tx[0].group0_count;
 	zassert_ok(motor_enable(motor0));
-	zassert_equal(captured_tx[0].count, 2, "enable should resend cached output");
-	expect_be16_slot(&captured_tx[0].frame, 0, 512);
+	wait_for_tx_flush();
+	zassert_true(captured_tx[0].group0_count > previous_group0_count,
+		     "enable should resend cached output");
+	expect_be16_slot(&captured_tx[0].group0_frame, 0, 512);
 
+	previous_group0_count = captured_tx[0].group0_count;
 	zassert_ok(motor_disable(motor0));
-	zassert_equal(captured_tx[0].count, 3, "disable should send zero output");
-	expect_be16_slot(&captured_tx[0].frame, 0, 0);
+	wait_for_tx_flush();
+	zassert_true(captured_tx[0].group0_count > previous_group0_count,
+		     "disable should send zero output");
+	expect_be16_slot(&captured_tx[0].group0_frame, 0, 0);
 }
 
 ZTEST(robomaster_motor, test_rejects_unsupported_output_modes)
@@ -242,7 +286,7 @@ ZTEST(robomaster_motor, test_get_feedback_reports_no_data_and_stale)
 	zassert_false(feedback.stale, "feedback should be fresh");
 	zassert_true(feedback.online, "feedback should be online");
 
-	k_msleep(20);
+	k_msleep(60);
 
 	zassert_equal(motor_get_feedback(motor1, &feedback), -EAGAIN, "expected stale feedback");
 	zassert_true(feedback.stale, "feedback should be stale");
@@ -251,6 +295,14 @@ ZTEST(robomaster_motor, test_get_feedback_reports_no_data_and_stale)
 ZTEST(robomaster_motor, test_feedback_decode_and_wraparound)
 {
 	struct motor_feedback feedback;
+	struct motor_feedback previous;
+	int32_t expected_position;
+
+	if (motor_get_feedback(motor0, &previous) != -ENODATA) {
+		expected_position = previous.position + wrapped_delta(8000, previous.orientation);
+	} else {
+		expected_position = 8000;
+	}
 
 	inject_feedback(test_can_devs[0], 0x201, 8000, 120, 230, 55);
 	zassert_ok(motor_get_feedback(motor0, &feedback));
@@ -262,13 +314,13 @@ ZTEST(robomaster_motor, test_feedback_decode_and_wraparound)
 	zassert_equal(feedback.current, 230, "wrong current");
 	zassert_equal(feedback.velocity, 120, "wrong velocity");
 	zassert_equal(feedback.orientation, 8000, "wrong orientation");
-	zassert_equal(feedback.position, 8000, "wrong initial position");
+	zassert_equal(feedback.position, expected_position, "wrong initial position");
 	zassert_equal(feedback.temperature, 55, "wrong temperature");
 
 	inject_feedback(test_can_devs[0], 0x201, 10, -10, -20, 56);
 	zassert_ok(motor_get_feedback(motor0, &feedback));
 	zassert_equal(feedback.orientation, 10, "wrong updated orientation");
-	zassert_equal(feedback.position, 8202, "wrong wrapped position");
+	zassert_equal(feedback.position, expected_position + 202, "wrong wrapped position");
 	zassert_equal(feedback.current, -20, "wrong updated current");
 	zassert_equal(feedback.velocity, -10, "wrong updated velocity");
 	zassert_equal(feedback.temperature, 56, "wrong updated temperature");
@@ -288,4 +340,40 @@ ZTEST(robomaster_motor, test_feedback_is_routed_by_can_bus_and_motor_id)
 	zassert_equal(feedback2.velocity, 77, "wrong can1 velocity");
 	zassert_equal(feedback2.current, 88, "wrong can1 current");
 	zassert_equal(feedback2.temperature, 40, "wrong can1 temperature");
+}
+
+ZTEST(robomaster_motor, test_feedback_autodetects_can_bus_and_flushes_cached_output)
+{
+	struct motor_feedback feedback;
+
+	zassert_ok(motor_set_output(motor3, MOTOR_OUTPUT_MODE_CURRENT, 321));
+	zassert_equal(captured_tx[1].group0_count, 0,
+		      "auto-detect motor should not transmit on can1 before feedback");
+
+	zassert_ok(motor_enable(motor3));
+	zassert_equal(captured_tx[1].group0_count, 0, "enable should remain cached before feedback");
+
+	inject_feedback(test_can_devs[1], 0x203, 2048, 33, 44, 41);
+	wait_for_tx_flush();
+
+	zassert_true(captured_tx[1].group0_count > 0,
+		     "feedback should flush cached output on detected bus");
+	expect_be16_slot(&captured_tx[1].group0_frame, 2, 321);
+
+	zassert_ok(motor_get_feedback(motor3, &feedback));
+	zassert_equal(feedback.orientation, 2048, "wrong mechanical angle");
+	zassert_equal(feedback.position, 2048, "wrong initial position");
+	zassert_equal(feedback.velocity, 33, "wrong velocity");
+	zassert_equal(feedback.current, 44, "wrong current");
+	zassert_equal(feedback.temperature, 41, "wrong temperature");
+
+	reset_runtime_state();
+	inject_feedback(test_can_devs[0], 0x203, 3000, 99, 100, 42);
+	zassert_ok(motor_get_feedback(motor3, &feedback));
+	zassert_equal(feedback.orientation, 2048, "feedback from a different bus should be ignored");
+
+	zassert_ok(motor_set_output(motor3, MOTOR_OUTPUT_MODE_CURRENT, -222));
+	wait_for_tx_flush();
+	zassert_true(captured_tx[1].group0_count > 0, "detected motor should transmit on can1");
+	expect_be16_slot(&captured_tx[1].group0_frame, 2, -222);
 }
