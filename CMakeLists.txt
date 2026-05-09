@@ -10,6 +10,8 @@
 zephyr_syscall_include_directories(include)
 
 zephyr_include_directories(include)
+zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../fibril_common/include)
 
 add_subdirectory(drivers)
 add_subdirectory(lib)
+add_subdirectory(subsys)

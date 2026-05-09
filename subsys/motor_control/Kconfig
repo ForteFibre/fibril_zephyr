@@ -1,0 +1,7 @@
+menuconfig FIBRIL_MOTOR_CONTROL
+	bool "Fibril motor control subsystem"
+	depends on CPP
+	depends on MOTOR
+	default y
+	help
+	  Enable the reusable C++ motor-control service used by RoboMaster Mini V1.

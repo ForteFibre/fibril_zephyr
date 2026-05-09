@@ -3,12 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <app/drivers/blink.h>
+#include <array>
+#include <cerrno>
+
 #include <app_version.h>
 #include <drivers/motor.h>
+#include <fibril/motor_control.hpp>
+#include <fibril/robomaster_protocol.hpp>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -20,9 +23,6 @@
 #endif
 
 LOG_MODULE_REGISTER(main, CONFIG_APP_LOG_LEVEL);
-
-#define BLINK_PERIOD_MS_STEP 100U
-#define BLINK_PERIOD_MS_MAX 1000U
 
 #if defined(CONFIG_USB_DEVICE_GS_USB)
 USB_DEVICE_BOS_DESC_DEFINE_CAP const struct usb_bos_capability_lpm bos_cap_lpm = {
@@ -40,7 +40,33 @@ static int app_usb_init(void)
 }
 #endif
 
-int main(void)
+namespace
+{
+constexpr std::array<const struct device *, fibril::MotorControlService::MotorCount> motor_devices = {
+  DEVICE_DT_GET(DT_NODELABEL(motor_1)),
+  DEVICE_DT_GET(DT_NODELABEL(motor_2)),
+  DEVICE_DT_GET(DT_NODELABEL(motor_3)),
+  DEVICE_DT_GET(DT_NODELABEL(motor_4)),
+  DEVICE_DT_GET(DT_NODELABEL(motor_5)),
+  DEVICE_DT_GET(DT_NODELABEL(motor_6)),
+  DEVICE_DT_GET(DT_NODELABEL(motor_7)),
+  DEVICE_DT_GET(DT_NODELABEL(motor_8)),
+};
+
+constexpr std::array<fibril::MotorControlConfig, fibril::MotorControlService::MotorCount>
+  motor_configs = {{
+    {DEVICE_DT_GET(DT_NODELABEL(motor_1)), DT_PROP(DT_NODELABEL(motor_1), max_current)},
+    {DEVICE_DT_GET(DT_NODELABEL(motor_2)), DT_PROP(DT_NODELABEL(motor_2), max_current)},
+    {DEVICE_DT_GET(DT_NODELABEL(motor_3)), DT_PROP(DT_NODELABEL(motor_3), max_current)},
+    {DEVICE_DT_GET(DT_NODELABEL(motor_4)), DT_PROP(DT_NODELABEL(motor_4), max_current)},
+    {DEVICE_DT_GET(DT_NODELABEL(motor_5)), DT_PROP(DT_NODELABEL(motor_5), max_current)},
+    {DEVICE_DT_GET(DT_NODELABEL(motor_6)), DT_PROP(DT_NODELABEL(motor_6), max_current)},
+    {DEVICE_DT_GET(DT_NODELABEL(motor_7)), DT_PROP(DT_NODELABEL(motor_7), max_current)},
+    {DEVICE_DT_GET(DT_NODELABEL(motor_8)), DT_PROP(DT_NODELABEL(motor_8), max_current)},
+  }};
+}  // namespace
+
+extern "C" int main(void)
 {
   int ret;
 
@@ -53,11 +79,22 @@ int main(void)
   }
 #endif
 
+  for (const struct device * motor : motor_devices) {
+    if (!device_is_ready(motor)) {
+      LOG_ERR("A motor device is not ready");
+      return -ENODEV;
+    }
+  }
+
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(fdcan1), okay)
-  if (!device_is_ready(DEVICE_DT_GET(DT_NODELABEL(fdcan1)))) {
+  const struct device * control_can = DEVICE_DT_GET(DT_NODELABEL(fdcan1));
+  if (!device_is_ready(control_can)) {
     LOG_ERR("Control CAN is not ready");
     return -ENODEV;
   }
+#else
+  LOG_ERR("Control CAN is missing");
+  return -ENODEV;
 #endif
 
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(fdcan2), okay)
@@ -99,7 +136,26 @@ int main(void)
   }
 #endif
 
-  LOG_INF("Baseline bring-up complete");
+  static fibril::MotorControlService motor_control;
+  ret = motor_control.init(motor_configs);
+  if (ret != 0) {
+    LOG_ERR("Failed to initialize motor control: %d", ret);
+    return ret;
+  }
 
+  ret = motor_control.start();
+  if (ret != 0) {
+    LOG_ERR("Failed to start motor control: %d", ret);
+    return ret;
+  }
+
+  static fibril::RoboMasterProtocolService protocol(control_can, motor_control, motor_devices);
+  ret = protocol.start();
+  if (ret != 0) {
+    LOG_ERR("Failed to start RoboMaster protocol: %d", ret);
+    return ret;
+  }
+
+  LOG_INF("RoboMaster Mini V1 control stack ready");
   return 0;
 }
