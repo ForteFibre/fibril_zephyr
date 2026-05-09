@@ -89,21 +89,27 @@ static void robomaster_transport_tx_work_handler(struct k_work * work)
     .dlc = can_bytes_to_dlc(8U),
     .flags = 0U,
   };
-  memset(frame.data, 0, sizeof(frame.data));
 
-  int16_t current = 0;
   for (size_t can_bus = 0; can_bus < config->can_count; ++can_bus) {
     for (size_t group = 0; group < ROBOMASTER_GROUP_COUNT; ++group) {
+      memset(frame.data, 0, sizeof(frame.data));
+
       bool has_motor_on_bus = false;
       for (size_t slot = 0; slot < ROBOMASTER_GROUP_SIZE; ++slot) {
         const struct device * motor_dev = transport->motors[group * ROBOMASTER_GROUP_SIZE + slot];
-        if (motor_dev != NULL && motor_dev->data != NULL) {
-          const struct robomaster_motor_data * motor = motor_dev->data;
-          has_motor_on_bus = true;
-          current =
-            motor->enabled && motor->detected_can_bus == can_bus ? motor->requested_current : 0;
-          sys_put_be16((uint16_t)current, &frame.data[slot * sizeof(int16_t)]);
+        if (motor_dev == NULL || motor_dev->data == NULL) {
+          continue;
         }
+
+        const struct robomaster_motor_data * motor = motor_dev->data;
+        if (motor->detected_can_bus != can_bus) {
+          continue;
+        }
+
+        has_motor_on_bus = true;
+        sys_put_be16(
+          motor->enabled ? (uint16_t)motor->requested_current : 0,
+          &frame.data[slot * sizeof(int16_t)]);
       }
 
       if (!has_motor_on_bus) {
@@ -111,6 +117,7 @@ static void robomaster_transport_tx_work_handler(struct k_work * work)
       }
 
       frame.id = (group == 0U) ? ROBOMASTER_TX_ID_GROUP0 : ROBOMASTER_TX_ID_GROUP1;
+      // Ignore return value since the transport will retry on the next timer tick if the bus is busy
       (void)can_send(config->can_devs[can_bus], &frame, K_NO_WAIT, NULL, NULL);
     }
   }
