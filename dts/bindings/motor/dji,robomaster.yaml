@@ -1,0 +1,19 @@
+description: DJI RoboMaster motor transport
+
+compatible: "dji,robomaster"
+
+include: motor-controller.yaml
+
+properties:
+  cans:
+    type: phandles
+    required: true
+    description: >
+      One or more CAN controller devices used to talk to RoboMaster motors.
+      Motor IDs must be unique within this transport.
+  feedback-timeout-ms:
+    type: int
+    default: 100
+    description: >
+      Feedback is reported stale when no update has been received within this
+      timeout.

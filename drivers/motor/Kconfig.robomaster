@@ -1,0 +1,8 @@
+config MOTOR_DJI_ROBOMASTER
+	bool "DJI RoboMaster C610/C620 motor driver"
+	default y
+	depends on CAN
+	depends on DT_HAS_DJI_ROBOMASTER_ENABLED
+	help
+	  Enable support for DJI RoboMaster C610/C620 motor controllers exposed
+	  as one logical motor device per motor.
