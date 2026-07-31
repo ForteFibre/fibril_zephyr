@@ -1,0 +1,74 @@
+/ {
+	test_uart: uart_emul {
+		compatible = "zephyr,uart-emul";
+		status = "okay";
+		current-speed = <2000000>;
+		rx-fifo-size = <64>;
+		tx-fifo-size = <64>;
+
+		amt21_bus: amt21 {
+			compatible = "cui,amt21";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			poll-interval-us = <1000>;
+			response-timeout-us = <200>;
+			inter-command-delay-us = <100>;
+			rx-quiet-period-us = <20>;
+			max-retries = <2>;
+			offline-threshold = <3>;
+
+			enc14: encoder@54 {
+				compatible = "cui,amt21-encoder";
+				reg = <0x54>;
+				resolution = <14>;
+			};
+
+			enc12: encoder@58 {
+				compatible = "cui,amt21-encoder";
+				reg = <0x58>;
+				resolution = <12>;
+			};
+
+			enc_mt: encoder@5c {
+				compatible = "cui,amt21-encoder";
+				reg = <0x5c>;
+				resolution = <14>;
+				multiturn;
+			};
+		};
+	};
+
+	/*
+	 * A second bus on its own UART, standing in for a board whose RS485
+	 * transceiver has its receiver permanently enabled and therefore echoes
+	 * the transmitted command byte back. The echo behaviour of a board is
+	 * fixed by its wiring, so it is declared here rather than changed at
+	 * runtime.
+	 */
+	test_uart_echo: uart_emul_echo {
+		compatible = "zephyr,uart-emul";
+		status = "okay";
+		current-speed = <2000000>;
+		rx-fifo-size = <64>;
+		tx-fifo-size = <64>;
+
+		amt21_bus_echo: amt21-echo {
+			compatible = "cui,amt21";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			poll-interval-us = <1000>;
+			response-timeout-us = <200>;
+			inter-command-delay-us = <100>;
+			rx-quiet-period-us = <20>;
+			max-retries = <2>;
+			offline-threshold = <3>;
+			tx-echo;
+
+			enc_echo: encoder@60 {
+				compatible = "cui,amt21-encoder";
+				reg = <0x60>;
+				resolution = <14>;
+			};
+		};
+	};
+};
