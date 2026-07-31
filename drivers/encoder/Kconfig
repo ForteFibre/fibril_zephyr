@@ -1,0 +1,18 @@
+menuconfig ENCODER
+	bool "Encoder driver support"
+	help
+	  Enable rotary encoder driver support
+
+if ENCODER
+
+config ENCODER_INIT_PRIORITY
+	int "Encoder driver init priority"
+	default 85
+	help
+	  Encoder driver initialization priority.
+
+module = ENCODER
+module-str = encoder
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # ENCODER
