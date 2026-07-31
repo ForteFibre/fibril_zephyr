@@ -12,7 +12,7 @@ manifest:
   projects:
     - name: zephyr
       remote: zephyrproject-rtos
-      revision: main
+      revision: v4.4.1
       import:
         # By using name-allowlist we can clone only the modules that are
         # strictly needed by the application.
@@ -22,5 +22,5 @@ manifest:
           - hal_stm32 # required by the nucleo_f302r8 board (STM32 based)
     - name: cannectivity
       url: https://github.com/CANnectivity/cannectivity.git
-      revision: main
+      revision: v1.4.0
       path: modules/third_party/cannectivity
