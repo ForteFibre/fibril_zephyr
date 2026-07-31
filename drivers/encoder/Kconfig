@@ -15,4 +15,9 @@ module = ENCODER
 module-str = encoder
 source "subsys/logging/Kconfig.template.log_config"
 
+# zephyr-keep-sorted-start
+rsource "Kconfig.amt21"
+
+# zephyr-keep-sorted-stop
+
 endif # ENCODER
