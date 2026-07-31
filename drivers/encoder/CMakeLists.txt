@@ -3,6 +3,7 @@
 
 zephyr_library()
 zephyr_library_sources_ifdef(CONFIG_ENCODER_AMT21 amt21.c)
+zephyr_library_sources_ifdef(CONFIG_ENCODER_AMT21_SHELL amt21_shell.c)
 
 # CONFIG_ENCODER can be selected without any encoder present in the devicetree,
 # which would otherwise leave this library without any source file.
