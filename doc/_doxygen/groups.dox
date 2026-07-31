@@ -4,6 +4,13 @@
  *
  * @brief Custom driver classes
  *
+ * @defgroup encoder_interface Encoder driver class
+ * @brief Generic rotary encoder interface
+ *
+ * @defgroup encoder_amt21 AMT21x driver
+ * @ingroup encoder_interface
+ * @brief Diagnostics specific to the Same Sky AMT21x driver
+ *
  * @}
  */
 
