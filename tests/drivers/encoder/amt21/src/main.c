@@ -104,9 +104,16 @@ static struct tx_record tx_log[TX_LOG_SIZE];
 static uint32_t tx_log_count;
 static struct k_spinlock log_lock;
 
-/** Extra bytes to inject into the receive path before the next response. */
+/** Extra bytes to inject into the receive path before the next response, along
+ *  with the encoder they should precede. Scoping the injection lets a test that
+ *  starves one encoder leave the others alone: without the target field, a
+ *  stray byte queued for ENC14 could be consumed by whichever encoder is polled
+ *  first, which is not always the intended one.
+ */
 static uint8_t inject_bytes[4];
 static uint8_t inject_len;
+static const struct device *inject_target_bus;
+static uint8_t inject_target_addr;
 
 static struct emul_encoder *emul_lookup(const struct device *uart, uint8_t addr)
 {
@@ -167,9 +174,13 @@ static void emul_respond(struct emul_encoder *enc, uint8_t command, uint16_t val
 		(void)uart_emul_put_rx_data(enc->uart, &command, 1U);
 	}
 
-	if (inject_len > 0U) {
+	if ((inject_len > 0U) &&
+	    ((inject_target_bus == NULL) ||
+	     ((inject_target_bus == enc->uart) && (inject_target_addr == enc->addr)))) {
 		(void)uart_emul_put_rx_data(enc->uart, inject_bytes, inject_len);
 		inject_len = 0U;
+		inject_target_bus = NULL;
+		inject_target_addr = 0U;
 	}
 
 	switch (mode) {
@@ -226,8 +237,12 @@ static void emul_tx_ready(const struct device *dev, size_t size, void *user_data
 		}
 	}
 
-	if (len == 2U) {
-		/* Extended command: node address plus the command itself. */
+	if ((len == 2U) && ((buf[0] & 0x3U) == CMD_EXTENDED)) {
+		/* Extended command: node address plus the command itself. Guarding
+		 * on the command bits keeps two back-to-back single-byte commands
+		 * that happen to be drained together from being misread as one
+		 * extended command.
+		 */
 		struct emul_encoder *enc = emul_lookup(dev, (uint8_t)(buf[0] & ~0x3U));
 
 		if (enc != NULL) {
@@ -273,6 +288,8 @@ static void reset_emul(void)
 	}
 
 	inject_len = 0U;
+	inject_target_bus = NULL;
+	inject_target_addr = 0U;
 
 	for (size_t i = 0; i < ARRAY_SIZE(emul); ++i) {
 		emul[i].mode = EMUL_MODE_NORMAL;
@@ -548,9 +565,14 @@ ZTEST(encoder_amt21, test_stray_byte_before_response_recovers)
 	emul[0].position14 = 1000U;
 	zassert_ok(wait_fresh(ENC14, &fb));
 
-	/* A late byte from a previous exchange arriving just before the response. */
+	/* A late byte from a previous exchange arriving just before the response.
+	 * Scoped to ENC14 so it does not accidentally hit the other encoders on
+	 * the same bus when the poll thread services them first.
+	 */
 	inject_bytes[0] = 0xFFU;
 	inject_len = 1U;
+	inject_target_bus = TEST_UART;
+	inject_target_addr = ADDR14;
 	wait_scans(2);
 
 	emul[0].position14 = 2000U;
@@ -638,9 +660,12 @@ ZTEST(encoder_amt21, test_inter_command_gap_is_observed)
 				(uint32_t)k_cyc_to_us_floor64(tx_log[i].cycle - prev);
 
 			/* Only the lower bound is meaningful: the gap between two scans
-			 * is governed by the poll interval, which is longer.
+			 * is governed by the poll interval, which is longer. Allow one
+			 * timer tick (10 us at CONFIG_SYS_CLOCK_TICKS_PER_SEC=100000) of
+			 * rounding, otherwise a gap that lands exactly on the boundary
+			 * flakes when k_cyc_to_us_floor64 rounds it down.
 			 */
-			zassert_true(delta_us >= INTER_COMMAND_DELAY_US,
+			zassert_true(delta_us + 10U >= INTER_COMMAND_DELAY_US,
 				     "commands %u and %u were only %u us apart, expected at "
 				     "least %u us",
 				     i - 1, i, delta_us, (unsigned int)INTER_COMMAND_DELAY_US);
@@ -848,7 +873,7 @@ ZTEST(encoder_amt21, test_error_log_keeps_raw_bytes)
 	zassert_equal(records[0].cause, AMT21_ERROR_CHECKSUM);
 	zassert_equal(records[0].node_addr, ADDR14);
 	zassert_equal(records[0].command, ADDR14 | CMD_POSITION);
-	zassert_equal(records[0].rx_len, 2, "rx_len %u", records[0].rx_bytes[0]);
+	zassert_equal(records[0].rx_len, 2, "rx_len %u", records[0].rx_len);
 
 	/* The raw bytes are what make the failure diagnosable: this is the correct
 	 * frame with its check bits flipped.
