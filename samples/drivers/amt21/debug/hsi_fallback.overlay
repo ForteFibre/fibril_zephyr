@@ -33,16 +33,6 @@
 	status = "okay";
 };
 
-/* FDCAN1 in the board dts uses HSE as its kernel clock source. Detach it here
- * so the clock control layer does not try to look up a disabled HSE. Overlays
- * that need CAN under this fallback have to pick a different source, typically
- * PLL_Q with div-q raised so the kernel clock stays under 80 MHz.
- */
-&fdcan1 {
-	/delete-property/ clocks;
-	clocks = <&rcc STM32_CLOCK(APB1, 25)>;
-};
-
 /* Pin the console USART's kernel clock to HSI16 instead of PCLK1. HSI16 is a
  * fixed 16 MHz reference, so the baud divisor no longer depends on what the
  * PLL actually settles at. If the mojibake goes away with this override, the
@@ -52,3 +42,10 @@
 	clocks = <&rcc STM32_CLOCK(APB1, 17)>,
 		 <&rcc STM32_SRC_HSI USART2_SEL(2)>;
 };
+
+/*
+ * FDCAN1 stays disabled in this sample, so its HSE-based clock reference in
+ * the board dts is never evaluated. When enabling CAN under this fallback,
+ * override the kernel clock source in the enabling overlay - HSI16 or PLL_Q
+ * constrained under 80 MHz are the sensible picks - alongside status = "okay".
+ */

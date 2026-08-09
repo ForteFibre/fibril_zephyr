@@ -38,9 +38,10 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		/* Relaxed set to leave headroom while diagnosing retries. 5 ms
-		 * polling is still 200 Hz per encoder, well above what a control
-		 * loop typically consumes. Tighten these once the bus is clean.
+		/* Values that ran clean on the bring-up hardware. The timeouts,
+		 * inter-command gap and retry count are more generous than the
+		 * binding defaults so the sample keeps running through short
+		 * bursts of noise or retries. Tighten them once the bus is clean.
 		 */
 		poll-interval-us = <1000>;
 		response-timeout-us = <500>;
