@@ -1,0 +1,126 @@
+description: |
+  Same Sky (CUI Devices) AMT21x absolute encoder bus.
+
+  This node owns a half-duplex RS485 UART and polls every encoder child node in
+  turn. It must be a child of the UART node it drives.
+
+  The transport keeps the UART receiver permanently enabled instead of arming it
+  per transaction: at 2 Mbps the encoder starts replying about 3 us after the
+  command byte, which is far too soon to re-arm a receiver in software.
+
+  Give each bus node a distinct name when a target has more than one. The device
+  name comes from the node name, and anything that looks a device up by name,
+  such as the shell, cannot tell two identically named buses apart.
+
+    &usart2 {
+        current-speed = <2000000>;
+        de-enable;
+        de-assert-time = <2>;
+        de-deassert-time = <2>;
+
+        amt21_bus: amt21 {
+            compatible = "cui,amt21";
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            encoder0: encoder@54 {
+                compatible = "cui,amt21-encoder";
+                reg = <0x54>;
+                resolution = <14>;
+                multiturn;
+            };
+        };
+    };
+
+compatible: "cui,amt21"
+
+include: uart-device.yaml
+
+bus: amt21
+
+properties:
+  "#address-cells":
+    required: true
+    const: 1
+  "#size-cells":
+    required: true
+    const: 0
+
+  poll-interval-us:
+    type: int
+    default: 1000
+    description: |
+      Interval between the start of two consecutive scans of every encoder on
+      this bus.
+
+      Polling faster than the absolute position update rate of the encoder
+      gains nothing: that rate is 100 us for 14-bit devices and 25 us for
+      12-bit devices. A scan that overruns this interval causes the next scan
+      to be skipped rather than queued, so the bus never accumulates a backlog.
+
+  response-timeout-us:
+    type: int
+    default: 200
+    description: |
+      Time to wait for a complete two byte response before the transaction is
+      counted as timed out. The encoder turnaround time is 3 us at 2 Mbps and
+      up to 110 us at 9600 bps, so this must be raised for the adjustable data
+      rate variants running at a low baud rate.
+
+  inter-command-delay-us:
+    type: int
+    default: 100
+    description: |
+      Quiet time inserted after a transaction completes, before the next
+      command byte is sent. This applies both between the position and turns
+      reads of one encoder and between two different encoders.
+
+      Sending commands back to back without this gap is the most common cause
+      of dropped responses. The value matches the delay used by the vendor
+      sample code.
+
+  rx-quiet-period-us:
+    type: int
+    default: 20
+    description: |
+      Minimum time the receive line must have been idle before a command byte
+      is sent. A byte arriving inside this window means a previous response was
+      late, so the transport flushes and retries instead of transmitting on top
+      of it.
+
+  max-retries:
+    type: int
+    default: 2
+    description: |
+      Number of times a failed transaction is retried before the reading is
+      given up on for the current scan. Each retry observes
+      inter-command-delay-us.
+
+  offline-threshold:
+    type: int
+    default: 3
+    description: |
+      Number of consecutive failed transactions after which an encoder is
+      reported offline. Below this threshold the last good reading is kept and
+      reported as stale, so a single dropped response does not disturb a
+      control loop.
+
+  tx-echo:
+    type: boolean
+    description: |
+      Set this when the RS485 transceiver has its receiver permanently enabled,
+      which makes the transmitted command byte appear back on the receive line.
+      The transport then expects the echo before the response and discards it.
+
+      When this property is absent the transport determines the behaviour from
+      the first successful transaction.
+
+  de-gpios:
+    type: phandle-array
+    description: |
+      Driver enable output of the RS485 transceiver, for SoCs whose UART cannot
+      drive it in hardware.
+
+      Prefer hardware driver enable where available, such as the de-enable
+      property of an STM32 UART. Toggling this GPIO from software adds latency
+      around the turnaround window and is not usable at 2 Mbps.

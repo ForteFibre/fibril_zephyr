@@ -1,0 +1,67 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * AMT21x reader wiring for the Fibril RoboMaster Mini V1. The board DTS already
+ * assigns USART3 to the RS485 pins (TX=PB10, RX=PE15, DE=PB14); this overlay
+ * switches the port on, attaches DMA, and declares the AMT21x bus.
+ */
+
+&usart3 {
+	/* 2 Mbps for the A/D options of the AMT21 family. Lower this and raise
+	 * response-timeout-us on the amt21 node for the slower E/H options.
+	 */
+	current-speed = <2000000>;
+
+	/* The transceiver's DE line is driven by the USART itself; toggling it
+	 * from software cannot keep up with the 3 us turnaround at 2 Mbps.
+	 *
+	 * de-assert-time raised to 8 (0.5 bit @ 2 Mbps ~= 250 ns) so the DE line
+	 * has settled before the start bit begins. de-deassert-time kept small
+	 * so DE drops right after the stop bit, before the encoder starts
+	 * replying inside its own 3 us turnaround window.
+	 */
+	de-enable;
+	de-assert-time = <8>;
+	de-deassert-time = <2>;
+
+	/* USART3 DMAMUX request lines on STM32G4: 28 for RX, 29 for TX. The
+	 * async UART API used by the AMT21 driver needs DMA on STM32.
+	 */
+	dmas = <&dma1 1 29 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH)>,
+	       <&dma1 2 28 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH)>;
+	dma-names = "tx", "rx";
+
+	status = "okay";
+
+	amt21_bus: amt21 {
+		compatible = "cui,amt21";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/* Values that ran clean on the bring-up hardware. The timeouts,
+		 * inter-command gap and retry count are more generous than the
+		 * binding defaults so the sample keeps running through short
+		 * bursts of noise or retries. Tighten them once the bus is clean.
+		 */
+		poll-interval-us = <1000>;
+		response-timeout-us = <500>;
+		inter-command-delay-us = <300>;
+		rx-quiet-period-us = <100>;
+		max-retries = <3>;
+		offline-threshold = <5>;
+
+		encoder_left: encoder@54 {
+			compatible = "cui,amt21-encoder";
+			reg = <0x54>;
+			resolution = <14>;
+		};
+	};
+};
+
+&dma1 {
+	status = "okay";
+};
+
+&dmamux1 {
+	status = "okay";
+};

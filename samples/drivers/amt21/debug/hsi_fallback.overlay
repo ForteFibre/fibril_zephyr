@@ -1,0 +1,51 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Debug fallback that ignores the HSE crystal and clocks the SoC from HSI16.
+ * Apply on top of the board dts with:
+ *
+ *   west build -b fibril_robomaster_miniv1 \
+ *              -s fibril_zephyr/samples/drivers/amt21 \
+ *              -- -DEXTRA_DTC_OVERLAY_FILE=debug/hsi_fallback.overlay
+ *
+ * If the target boots under this overlay but not under the board default, the
+ * board's 24 MHz HSE circuit (crystal, load caps, layout) is the suspect.
+ *
+ * HSI16 / 4 = 4 MHz PLL input, * 80 = 320 MHz VCO, / 2 = 160 MHz SYSCLK, which
+ * matches the board dts and keeps peripheral clocks unchanged.
+ */
+
+&clk_hse {
+	status = "disabled";
+};
+
+&clk_hsi {
+	status = "okay";
+};
+
+&pll {
+	div-m = <4>;
+	mul-n = <80>;
+	div-p = <2>;
+	div-q = <2>;
+	div-r = <2>;
+	clocks = <&clk_hsi>;
+	status = "okay";
+};
+
+/* Pin the console USART's kernel clock to HSI16 instead of PCLK1. HSI16 is a
+ * fixed 16 MHz reference, so the baud divisor no longer depends on what the
+ * PLL actually settles at. If the mojibake goes away with this override, the
+ * PLL is not delivering the 160 MHz that the board dts claims.
+ */
+&usart2 {
+	clocks = <&rcc STM32_CLOCK(APB1, 17)>,
+		 <&rcc STM32_SRC_HSI USART2_SEL(2)>;
+};
+
+/*
+ * FDCAN1 stays disabled in this sample, so its HSE-based clock reference in
+ * the board dts is never evaluated. When enabling CAN under this fallback,
+ * override the kernel clock source in the enabling overlay - HSI16 or PLL_Q
+ * constrained under 80 MHz are the sensible picks - alongside status = "okay".
+ */
