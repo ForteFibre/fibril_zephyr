@@ -20,7 +20,7 @@ extern "C" {
  * protocol, so they live in this driver-specific header rather than in the class
  * API.
  *
- * Statistics are only recorded when @kconfig{CONFIG_ENCODER_AMT21_STATS} is
+ * Statistics are only recorded when ``CONFIG_ENCODER_AMT21_STATS`` is
  * enabled. The types and functions below are always declared, so callers do not
  * need to guard their code; the accessors return @c -ENOTSUP instead.
  *
@@ -128,7 +128,7 @@ struct amt21_error_record
  * @param stats Destination for the statistics.
  * @retval 0 Success.
  * @retval -EINVAL @p dev is not an AMT21 encoder, or @p stats is NULL.
- * @retval -ENOTSUP @kconfig{CONFIG_ENCODER_AMT21_STATS} is disabled.
+ * @retval -ENOTSUP ``CONFIG_ENCODER_AMT21_STATS`` is disabled.
  */
 int amt21_get_stats(const struct device * dev, struct amt21_stats * stats);
 
@@ -138,7 +138,7 @@ int amt21_get_stats(const struct device * dev, struct amt21_stats * stats);
  * @param dev AMT21 encoder device instance.
  * @retval 0 Success.
  * @retval -EINVAL @p dev is not an AMT21 encoder.
- * @retval -ENOTSUP @kconfig{CONFIG_ENCODER_AMT21_STATS} is disabled.
+ * @retval -ENOTSUP ``CONFIG_ENCODER_AMT21_STATS`` is disabled.
  */
 int amt21_clear_stats(const struct device * dev);
 
@@ -146,7 +146,7 @@ int amt21_clear_stats(const struct device * dev);
  * @brief Read back recorded transaction failures for an AMT21 encoder.
  *
  * Records are returned newest first. The log holds
- * @kconfig{CONFIG_ENCODER_AMT21_ERROR_LOG_SIZE} entries and overwrites the
+ * ``CONFIG_ENCODER_AMT21_ERROR_LOG_SIZE`` entries and overwrites the
  * oldest one when full.
  *
  * @param dev AMT21 encoder device instance.
@@ -166,7 +166,7 @@ int amt21_get_error_log(
  * @param stats Destination for the statistics.
  * @retval 0 Success.
  * @retval -EINVAL @p bus_dev is not an AMT21 bus, or @p stats is NULL.
- * @retval -ENOTSUP @kconfig{CONFIG_ENCODER_AMT21_STATS} is disabled.
+ * @retval -ENOTSUP ``CONFIG_ENCODER_AMT21_STATS`` is disabled.
  */
 int amt21_bus_get_stats(const struct device * bus_dev, struct amt21_bus_stats * stats);
 
@@ -176,7 +176,7 @@ int amt21_bus_get_stats(const struct device * bus_dev, struct amt21_bus_stats * 
  * @param bus_dev AMT21 bus device instance.
  * @retval 0 Success.
  * @retval -EINVAL @p bus_dev is not an AMT21 bus.
- * @retval -ENOTSUP @kconfig{CONFIG_ENCODER_AMT21_STATS} is disabled.
+ * @retval -ENOTSUP ``CONFIG_ENCODER_AMT21_STATS`` is disabled.
  */
 int amt21_bus_clear_stats(const struct device * bus_dev);
 
