@@ -35,6 +35,14 @@ static const char * const amt21_cause_names[AMT21_ERROR_CAUSE_COUNT] = {
   [AMT21_ERROR_BUS] = "bus",
 };
 
+/* Guard against a new enum value being added without a matching label: without
+ * this the missing slot would be NULL and later shell_fprintf() calls that
+ * pass it as %s would either print garbage or crash.
+ */
+BUILD_ASSERT(
+  (AMT21_ERROR_BUS + 1) == AMT21_ERROR_CAUSE_COUNT,
+  "amt21_cause_names does not cover every AMT21_ERROR_CAUSE_COUNT entry");
+
 static const struct device * amt21_find(
   const struct shell * sh, const struct device * const * list, size_t count, const char * name)
 {

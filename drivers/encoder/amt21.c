@@ -595,7 +595,11 @@ static int amt21_send(const struct device * bus_dev, const uint8_t * bytes, size
   struct amt21_bus_data * bus = bus_dev->data;
   int ret;
 
-  memcpy(bus->tx_buf, bytes, MIN(len, sizeof(bus->tx_buf)));
+  if ((len == 0U) || (len > sizeof(bus->tx_buf))) {
+    return -EINVAL;
+  }
+
+  memcpy(bus->tx_buf, bytes, len);
 
   k_sem_reset(&bus->tx_sem);
   amt21_de_set(bus_dev, true);
@@ -635,9 +639,8 @@ static int amt21_transact(
   *raw_len = 0;
   *cause = AMT21_ERROR_BUS;
 
-  if (atomic_get(&bus->rx_restart_needed) != 0) {
-    (void)amt21_rx_restart(bus_dev, chunk);
-  } else if (bus->rx_chunk != chunk) {
+  /* Restart when reception stopped, or when the chunk length must change. */
+  if ((atomic_get(&bus->rx_restart_needed) != 0) || (bus->rx_chunk != chunk)) {
     (void)amt21_rx_restart(bus_dev, chunk);
   }
 
@@ -667,6 +670,15 @@ static int amt21_transact(
       bus->echo = AMT21_ECHO_PRESENT;
     } else if (got == AMT21_RESP_LEN) {
       bus->echo = AMT21_ECHO_ABSENT;
+    } else if (got == AMT21_MAX_CHUNK) {
+      /* Full chunk arrived but the first byte is not our echo. The
+       * transport is out of sync with the frame boundaries; treat as
+       * DESYNC and rearm before returning so the next transaction starts
+       * from a clean state.
+       */
+      *cause = AMT21_ERROR_DESYNC;
+      (void)amt21_rx_restart(bus_dev, chunk);
+      return -EIO;
     }
   }
 

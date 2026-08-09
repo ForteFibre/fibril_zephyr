@@ -119,6 +119,7 @@ struct encoder_driver_api
  * @retval 0 Success.
  * @retval -ENODATA No reading has been obtained yet.
  * @retval -EAGAIN A reading is available but no longer fresh.
+ * @retval -EIO The encoder is currently offline.
  * @retval negative_errno Failed to retrieve feedback.
  */
 __syscall int encoder_get_feedback(const struct device * dev, void * feedback);
@@ -163,6 +164,10 @@ __syscall int encoder_reset(const struct device * dev);
 static inline int z_impl_encoder_get_feedback(const struct device * dev, void * feedback)
 {
   const struct encoder_driver_api * api = (const struct encoder_driver_api *)dev->api;
+
+  if (api->get_feedback == NULL) {
+    return -ENOSYS;
+  }
 
   return api->get_feedback(dev, feedback);
 }
