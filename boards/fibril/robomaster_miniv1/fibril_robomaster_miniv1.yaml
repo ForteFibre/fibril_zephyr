@@ -1,0 +1,15 @@
+identifier: fibril_robomaster_miniv1
+name: Fibril RoboMaster Mini V1
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+  - gnuarmemb
+ram: 128
+flash: 512
+supported:
+  - gpio
+  - uart
+  - dma
+  - can
+vendor: fibril

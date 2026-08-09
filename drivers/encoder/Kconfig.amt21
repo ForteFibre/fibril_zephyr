@@ -1,0 +1,72 @@
+config ENCODER_AMT21
+	bool "Same Sky (CUI Devices) AMT21x absolute encoder driver"
+	default y
+	depends on SERIAL
+	depends on UART_ASYNC_API
+	depends on DT_HAS_CUI_AMT21_ENABLED
+	help
+	  Enable support for AMT21x series absolute encoders on a half-duplex
+	  RS485 bus. One AMT21 bus device owns the UART and polls every encoder
+	  child node in turn, so each encoder is exposed as its own logical
+	  device.
+
+if ENCODER_AMT21
+
+config ENCODER_AMT21_MAX_ENCODERS
+	int "Maximum encoders per AMT21 bus"
+	default 8
+	range 1 64
+	help
+	  Number of encoder child nodes a single AMT21 bus can serve. The RS485
+	  addressing scheme allows up to 64, but each slot costs a pointer, so
+	  the default is sized for typical use.
+
+config ENCODER_AMT21_THREAD_STACK_SIZE
+	int "AMT21 poll thread stack size"
+	default 1024
+	help
+	  Stack size of the thread that sequences transactions on an AMT21 bus.
+
+config ENCODER_AMT21_THREAD_PRIORITY
+	int "AMT21 poll thread priority"
+	default 5
+	help
+	  Priority of the thread that sequences transactions on an AMT21 bus.
+	  The transport keeps the UART receiver permanently enabled, so being
+	  preempted mid-transaction does not lose data. A cooperative priority
+	  is still preferable when the bus is polled at a high rate.
+
+config ENCODER_AMT21_STATS
+	bool "AMT21 detailed error statistics"
+	help
+	  Track a per-cause breakdown of failed transactions, exposed through
+	  amt21_get_stats() and amt21_bus_get_stats(). This costs roughly 60
+	  bytes per encoder plus 24 bytes per bus. When disabled, the counters
+	  are compiled out entirely and only the aggregate error count in
+	  struct encoder_feedback remains available.
+
+if ENCODER_AMT21_STATS
+
+config ENCODER_AMT21_ERROR_LOG_SIZE
+	int "AMT21 error log depth"
+	default 0
+	range 0 64
+	help
+	  Number of recent failed transactions to record per encoder, including
+	  the raw bytes that were received. Reading the log back with
+	  amt21_get_error_log() is the most direct way to tell a framing
+	  desync apart from a checksum failure or a stray echo byte. Each entry
+	  costs 16 bytes. Set to 0 to disable the log.
+
+endif # ENCODER_AMT21_STATS
+
+config ENCODER_AMT21_SHELL
+	bool "AMT21 shell commands"
+	depends on SHELL
+	help
+	  Add an "amt21" command for inspecting encoders on a running target:
+	  the latest snapshot, the statistics, and the recorded failures with
+	  the raw bytes that were received. This is the quickest way to tell
+	  why responses are being dropped on real hardware.
+
+endif # ENCODER_AMT21

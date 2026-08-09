@@ -1,0 +1,11 @@
+sample:
+  name: AMT21 encoder read
+  description: Poll AMT21x absolute encoders on an RS485 bus and log their state.
+
+tests:
+  sample.drivers.amt21:
+    tags:
+      - drivers
+      - encoder
+    filter: dt_compat_enabled("cui,amt21")
+    harness: console

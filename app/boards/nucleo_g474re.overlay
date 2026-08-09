@@ -32,3 +32,83 @@
         };
     };
 };
+
+/*
+ * AMT21x absolute encoders on a half-duplex RS485 bus.
+ *
+ * PLACEHOLDER PIN ASSIGNMENT. USART1 is used because the board already brings it
+ * out on PC4/PC5 and because LPUART1 is taken by the console. The driver enable
+ * output is put on PA12, which nothing else on this board claims. Confirm all
+ * three against the actual wiring before relying on this.
+ */
+&usart1 {
+    /* 2 Mbps is the rate of the A to D options of the series. The E to H options
+     * default to 115200; lower this and raise response-timeout-us for those.
+     */
+    current-speed = <2000000>;
+
+    pinctrl-0 = <&usart1_tx_pc4 &usart1_rx_pc5 &usart1_de_pa12>;
+    pinctrl-names = "default";
+
+    /*
+     * Let the USART drive the transceiver itself. Toggling driver enable from
+     * software would add latency around the 3 us turnaround window and is not
+     * viable at 2 Mbps.
+     *
+     * Keep the assert and deassert times small. They are in sixteenths of a bit
+     * time, and a large deassert time holds the transceiver enabled past our own
+     * stop bit, straight into the window where the encoder starts replying. That
+     * collision corrupts both frames.
+     */
+    de-enable;
+    de-assert-time = <2>;
+    de-deassert-time = <2>;
+
+    /* The asynchronous API is backed by DMA on STM32: uart_rx_enable() returns
+     * -ENODEV without it. 24 and 25 are the DMAMUX request lines for USART1 RX
+     * and TX on this SoC.
+     */
+    dmas = <&dma1 1 25 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH)>,
+           <&dma1 2 24 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH)>;
+    dma-names = "tx", "rx";
+
+    status = "okay";
+
+    amt21_bus: amt21 {
+        compatible = "cui,amt21";
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        /* The absolute position update rate of the encoder is 100 us for 14-bit
+         * and 25 us for 12-bit devices, so polling faster gains nothing.
+         */
+        poll-interval-us = <1000>;
+        response-timeout-us = <200>;
+        inter-command-delay-us = <100>;
+        rx-quiet-period-us = <20>;
+        max-retries = <2>;
+        offline-threshold = <3>;
+
+        encoder_left: encoder@54 {
+            compatible = "cui,amt21-encoder";
+            reg = <0x54>;
+            resolution = <14>;
+            multiturn;
+        };
+
+        encoder_right: encoder@58 {
+            compatible = "cui,amt21-encoder";
+            reg = <0x58>;
+            resolution = <14>;
+            multiturn;
+        };
+    };
+};
+
+&dma1 {
+    status = "okay";
+};
+
+&dmamux1 {
+    status = "okay";
+};

@@ -1,0 +1,31 @@
+common:
+  tags:
+    - drivers
+    - encoder
+    - uart
+  platform_allow:
+    - native_sim
+    - native_sim/native/64
+  integration_platforms:
+    - native_sim
+    - native_sim/native/64
+
+tests:
+  drivers.encoder.amt21:
+    # Aggregate error count only, no per-cause statistics.
+    extra_configs:
+      - CONFIG_ENCODER_AMT21_STATS=n
+
+  drivers.encoder.amt21.stats:
+    extra_configs:
+      - CONFIG_ENCODER_AMT21_STATS=y
+      - CONFIG_ENCODER_AMT21_ERROR_LOG_SIZE=8
+
+  drivers.encoder.amt21.shell:
+    extra_configs:
+      - CONFIG_ENCODER_AMT21_STATS=y
+      - CONFIG_ENCODER_AMT21_ERROR_LOG_SIZE=8
+      - CONFIG_SHELL=y
+      - CONFIG_SHELL_BACKEND_DUMMY=y
+      - CONFIG_SHELL_BACKEND_SERIAL=n
+      - CONFIG_ENCODER_AMT21_SHELL=y

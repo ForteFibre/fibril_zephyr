@@ -1,0 +1,6 @@
+board:
+  name: fibril_robomaster_miniv1
+  full_name: Fibril RoboMaster Mini V1
+  vendor: fibril
+  socs:
+    - name: stm32g474xx

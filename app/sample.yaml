@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Twister descriptor for the application. Only the metadata twister needs to
+# discover the app lives here; the source under src/ and the overlays under
+# boards/ are unchanged.
+
+sample:
+  name: example-application
+  description: Example application
+
+common:
+  build_only: true
+  integration_platforms:
+    - nucleo_g474re
+
+tests:
+  app.default: {}
+  app.debug:
+    extra_overlay_confs:
+      - debug.conf

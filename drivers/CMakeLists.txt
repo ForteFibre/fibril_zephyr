@@ -9,3 +9,4 @@ add_subdirectory_ifdef(CONFIG_SENSOR sensor)
 
 # Out-of-tree drivers
 add_subdirectory_ifdef(CONFIG_MOTOR motor)
+add_subdirectory_ifdef(CONFIG_ENCODER encoder)

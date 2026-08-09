@@ -1,0 +1,37 @@
+description: |
+  Same Sky (CUI Devices) AMT21x absolute encoder node.
+
+  Each encoder on an AMT21 bus is one of these, addressed by its RS485 node
+  address.
+
+compatible: "cui,amt21-encoder"
+
+include: base.yaml
+
+on-bus: amt21
+
+properties:
+  reg:
+    required: true
+    description: |
+      RS485 node address of the encoder. The low two bits must be zero because
+      they encode the command, so valid addresses are the multiples of four,
+      giving up to 64 encoders per bus. The factory default is 0x54.
+
+  resolution:
+    type: int
+    required: true
+    enum:
+      - 12
+      - 14
+    description: Absolute position resolution in bits.
+
+  multiturn:
+    type: boolean
+    description: |
+      Set this for multi-turn devices, which support reading a signed 14-bit
+      turns counter in addition to the single-turn position. The turns counter
+      is reset to zero by a power cycle and is not retained.
+
+      Only single-turn devices can store a zero point, so encoder_set_zero()
+      returns -ENOTSUP when this property is present.
