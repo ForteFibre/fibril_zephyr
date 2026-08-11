@@ -24,3 +24,10 @@ manifest:
       url: https://github.com/CANnectivity/cannectivity.git
       revision: v1.4.0
       path: modules/third_party/cannectivity
+    # TODO: switch to a tagged revision once ForteFibre/fibril_can#29 is merged.
+    # The branch carries the Zephyr module that exposes the CAN router as a
+    # CAN device (see samples/drivers/can_router).
+    - name: fibril_can
+      url: https://github.com/ForteFibre/fibril_can.git
+      revision: feat/zephyr-router-can-device
+      path: modules/lib/fibril_can

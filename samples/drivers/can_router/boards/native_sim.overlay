@@ -1,0 +1,29 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Two zephyr,can-loopback controllers stand in for the slave-side buses. The
+ * router owns them exclusively and forces CAN_MODE_FD on them, so no frame is
+ * echoed back into the router's RX path -- the sample stays deterministic. On
+ * real hardware the downlinks would be FDCAN peripherals wired to CAN
+ * transceivers.
+ */
+
+/ {
+	dl0: dl0 {
+		compatible = "zephyr,can-loopback";
+		status = "okay";
+	};
+
+	dl1: dl1 {
+		compatible = "zephyr,can-loopback";
+		status = "okay";
+	};
+
+	fcan_router: fcan_router {
+		compatible = "fibril,can-router";
+		status = "okay";
+		downlinks = <&dl0>, <&dl1>;
+		max-stdids = <256>;
+		max-node-ids = <32>;
+	};
+};
