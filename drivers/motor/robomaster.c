@@ -26,6 +26,7 @@ LOG_MODULE_REGISTER(motor_dji_robomaster, CONFIG_MOTOR_LOG_LEVEL);
 #define ROBOMASTER_ENCODER_HALF_WRAP (ROBOMASTER_ENCODER_WRAP / 2)
 #define ROBOMASTER_DEFAULT_MAX_CURRENT 10000
 #define ROBOMASTER_CANBUS_UNKNOWN 0xFF
+#define ROBOMASTER_START_RETRY_MS 500
 
 enum robomaster_model {
   ROBOMASTER_MODEL_C610 = 0,
@@ -46,6 +47,9 @@ struct robomaster_transport_data
   const struct device * motors[ROBOMASTER_MAX_MOTORS];
   struct k_work tx_work;
   struct k_timer tx_timer;
+  /* Cleared for a bus that has not been started yet; see the retry below. */
+  bool started[ROBOMASTER_MAX_CANS];
+  int64_t last_start_retry;
 };
 
 struct robomaster_motor_config
@@ -79,6 +83,37 @@ static int robomaster_transport_find_can_bus(
   return -ENODEV;
 }
 
+/*
+ * Bring up any bus that would not start earlier. Called from the transmit work
+ * but throttled to ROBOMASTER_START_RETRY_MS, because can_start() on a
+ * controller stuck in initialisation mode costs a hardware timeout.
+ */
+static void robomaster_transport_retry_start(const struct device * dev)
+{
+  const struct robomaster_transport_config * config = dev->config;
+  struct robomaster_transport_data * data = dev->data;
+  const int64_t now = k_uptime_get();
+
+  if ((now - data->last_start_retry) < ROBOMASTER_START_RETRY_MS) {
+    return;
+  }
+
+  data->last_start_retry = now;
+
+  for (size_t i = 0; i < config->can_count; ++i) {
+    if (data->started[i]) {
+      continue;
+    }
+
+    const int ret = can_start(config->can_devs[i]);
+
+    if ((ret == 0) || (ret == -EALREADY)) {
+      data->started[i] = true;
+      LOG_INF("CAN bus %u started", (unsigned int)i);
+    }
+  }
+}
+
 static void robomaster_transport_tx_work_handler(struct k_work * work)
 {
   struct robomaster_transport_data * transport =
@@ -90,7 +125,13 @@ static void robomaster_transport_tx_work_handler(struct k_work * work)
     .flags = 0U,
   };
 
+  robomaster_transport_retry_start(transport_dev);
+
   for (size_t can_bus = 0; can_bus < config->can_count; ++can_bus) {
+    if (!transport->started[can_bus]) {
+      continue;
+    }
+
     for (size_t group = 0; group < ROBOMASTER_GROUP_COUNT; ++group) {
       memset(frame.data, 0, sizeof(frame.data));
 
@@ -223,6 +264,7 @@ static int robomaster_transport_init(const struct device * dev)
   }
 
   data->dev = dev;
+  data->last_start_retry = k_uptime_get();
   k_work_init(&data->tx_work, robomaster_transport_tx_work_handler);
   k_timer_init(&data->tx_timer, robomaster_transport_tx_timer_handler, NULL);
   k_timer_user_data_set(&data->tx_timer, data);
@@ -240,11 +282,20 @@ static int robomaster_transport_init(const struct device * dev)
       return filter_id;
     }
 
+    /*
+     * A bus whose transceiver has no power holds RX dominant, and a controller
+     * then never leaves initialisation mode. That is the normal state of a
+     * board powered from the debug probe alone, so it must not be fatal. Keep
+     * the other buses and the motor devices usable and retry the start from
+     * the transmit work, so the bus comes up whenever the motor supply does.
+     */
     int ret = can_start(config->can_devs[i]);
     if ((ret < 0) && (ret != -EALREADY)) {
-      LOG_ERR("Failed to start CAN bus %u (%d)", (unsigned int)i, ret);
-      return ret;
+      LOG_WRN("CAN bus %u not startable yet (%d), retrying", (unsigned int)i, ret);
+      continue;
     }
+
+    data->started[i] = true;
   }
 
   k_timer_start(&data->tx_timer, K_MSEC(1), K_MSEC(1));
