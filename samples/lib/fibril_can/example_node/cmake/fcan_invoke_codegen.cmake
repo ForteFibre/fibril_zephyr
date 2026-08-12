@@ -63,7 +63,7 @@ function(fcan_invoke_codegen)
     return()
   endif()
 
-  # --- resolve fcan_codegen CLI (precedence: cache > env > PATH)
+  # --- resolve fcan_codegen CLI
   set(_fcan_codegen "")
   if(FCAN_CODEGEN)
     set(_fcan_codegen "${FCAN_CODEGEN}")

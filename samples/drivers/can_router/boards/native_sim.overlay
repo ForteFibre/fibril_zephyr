@@ -3,9 +3,7 @@
  *
  * Two zephyr,can-loopback controllers stand in for the slave-side buses. The
  * router owns them exclusively and forces CAN_MODE_FD on them, so no frame is
- * echoed back into the router's RX path -- the sample stays deterministic. On
- * real hardware the downlinks would be FDCAN peripherals wired to CAN
- * transceivers.
+ * echoed back into the router's RX path -- the sample stays deterministic.
  */
 
 / {
