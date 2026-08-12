@@ -264,7 +264,6 @@ static int robomaster_transport_init(const struct device * dev)
   }
 
   data->dev = dev;
-  data->last_start_retry = k_uptime_get();
   k_work_init(&data->tx_work, robomaster_transport_tx_work_handler);
   k_timer_init(&data->tx_timer, robomaster_transport_tx_timer_handler, NULL);
   k_timer_user_data_set(&data->tx_timer, data);
@@ -298,6 +297,7 @@ static int robomaster_transport_init(const struct device * dev)
     data->started[i] = true;
   }
 
+  data->last_start_retry = k_uptime_get();
   k_timer_start(&data->tx_timer, K_MSEC(1), K_MSEC(1));
 
   return 0;

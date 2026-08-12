@@ -12,6 +12,7 @@
 #include <zephyr/fff.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/ztest.h>
 
@@ -41,11 +42,11 @@ struct captured_filter {
 };
 
 static struct captured_filter captured_filters[TEST_CAN_COUNT];
-static int captured_tx_count[TEST_CAN_COUNT];
-static int captured_start_count[TEST_CAN_COUNT];
+static atomic_t captured_tx_count[TEST_CAN_COUNT];
+static atomic_t captured_start_count[TEST_CAN_COUNT];
 
 /* Bus 0 has no transceiver power until the test grants it. */
-static bool can0_startable;
+static atomic_t can0_startable;
 
 DEFINE_FFF_GLOBALS;
 
@@ -90,7 +91,7 @@ static int test_fake_can_send(const struct device *dev, const struct can_frame *
 	}
 
 	if ((frame->id == 0x200) || (frame->id == 0x1FF)) {
-		captured_tx_count[idx]++;
+		atomic_inc(&captured_tx_count[idx]);
 	}
 
 	if (callback != NULL) {
@@ -108,9 +109,9 @@ static int test_fake_can_start(const struct device *dev)
 		return -EINVAL;
 	}
 
-	captured_start_count[idx]++;
+	atomic_inc(&captured_start_count[idx]);
 
-	if ((idx == 0) && !can0_startable) {
+	if ((idx == 0) && !atomic_get(&can0_startable)) {
 		/* What a bxCAN/FDCAN controller reports when RX stays dominant. */
 		return -EIO;
 	}
@@ -189,27 +190,27 @@ ZTEST(robomaster_start_retry, test_unstartable_bus_recovers_without_dropping_mot
 	inject_feedback(test_can_devs[0], 0x201);
 	inject_feedback(test_can_devs[1], 0x202);
 
-	captured_tx_count[0] = 0;
-	captured_tx_count[1] = 0;
+	atomic_set(&captured_tx_count[0], 0);
+	atomic_set(&captured_tx_count[1], 0);
 	wait_for_tx_flush();
 
-	zassert_equal(captured_tx_count[0], 0, "transmitted on a bus that never started");
-	zassert_true(captured_tx_count[1] > 0, "started bus stopped transmitting");
+	zassert_equal(atomic_get(&captured_tx_count[0]), 0, "transmitted on a bus that never started");
+	zassert_true(atomic_get(&captured_tx_count[1]) > 0, "started bus stopped transmitting");
 
 	/* Motor power comes up late; the retry has to pick the bus up. */
-	captured_start_count[0] = 0;
-	can0_startable = true;
+	atomic_set(&captured_start_count[0], 0);
+	atomic_set(&can0_startable, 1);
 	k_msleep(TEST_RETRY_WAIT_MS);
 
-	zassert_true(captured_start_count[0] > 0, "bus 0 was never retried");
+	zassert_true(atomic_get(&captured_start_count[0]) > 0, "bus 0 was never retried");
 
-	captured_tx_count[0] = 0;
+	atomic_set(&captured_tx_count[0], 0);
 	wait_for_tx_flush();
 
-	zassert_true(captured_tx_count[0] > 0, "bus 0 did not transmit after the retry");
+	zassert_true(atomic_get(&captured_tx_count[0]) > 0, "bus 0 did not transmit after the retry");
 
 	/* An already started bus is not restarted. */
-	captured_start_count[0] = 0;
+	atomic_set(&captured_start_count[0], 0);
 	k_msleep(TEST_RETRY_WAIT_MS);
-	zassert_equal(captured_start_count[0], 0, "bus 0 restarted after coming up");
+	zassert_equal(atomic_get(&captured_start_count[0]), 0, "bus 0 restarted after coming up");
 }
