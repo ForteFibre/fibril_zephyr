@@ -39,8 +39,9 @@
 #include <fibril_can/fcan.h>
 #include <fibril_can/fcan_protocol.h>
 
+#include <fibril_can_zephyr/can_hal.h>
+
 #include "schema_gen.h"
-#include "zephyr_can_hal.h"
 #include "app_logic.h"
 #include "rgb_state.h"
 
@@ -73,7 +74,7 @@ K_HEAP_DEFINE(fcan_heap, 16 * 1024);
  * can drain them. Loss on overflow is preferable to blocking the CAN driver
  * thread, and the runtime tolerates dropped frames — masters retry. */
 #define FCAN_RX_QUEUE_DEPTH 32
-K_MSGQ_DEFINE(fcan_rx_msgq, sizeof(struct fcan_rx_item), FCAN_RX_QUEUE_DEPTH, 4);
+K_MSGQ_DEFINE(fcan_rx_msgq, sizeof(struct fcan_zephyr_can_rx_item), FCAN_RX_QUEUE_DEPTH, 4);
 
 static void *heap_alloc(size_t size, size_t align, void *ctx)
 {
@@ -95,7 +96,7 @@ static const char *state_str(fcan_node_state_t s)
 int main(void)
 {
 	const struct device *can_dev = CAN_BUS_DEV;
-	static struct zephyr_can_hal hal;
+	static struct fcan_zephyr_can_hal hal;
 
 	if (!device_is_ready(can_dev)) {
 		LOG_ERR("CAN device %s not ready", can_dev->name);
@@ -108,7 +109,7 @@ int main(void)
 		return rc;
 	}
 
-	rc = zephyr_can_hal_init(&hal, can_dev, &fcan_rx_msgq);
+	rc = fcan_zephyr_can_hal_init(&hal, can_dev, &fcan_rx_msgq);
 	if (rc != 0) {
 		return rc;
 	}
@@ -154,7 +155,7 @@ int main(void)
 			.service_reassembly = FCAN_SERVICE_REASSEMBLY,
 			/* capacity fields filled below */
 		},
-		.hal = zephyr_can_hal_get(&hal),
+		.hal = fcan_zephyr_can_hal_get(&hal),
 		.allocator = {.alloc = heap_alloc, .ctx = NULL},
 		.master_lost_us = MASTER_LOST_US,
 		/* .t_listen_us = 0 -> runtime picks the safe default. */
@@ -169,7 +170,7 @@ int main(void)
 		cfg.node_id, (unsigned long long)fcan_schema_hash,
 		(unsigned)fcan_schema_blob_len);
 
-	zephyr_can_hal_attach_node(&hal, node);
+	fcan_zephyr_can_hal_attach_node(&hal, node);
 
 	if (fcan_register_all(node) != FCAN_OK) {
 		LOG_ERR("fcan_register_all failed (fault=%d)", (int)fcan_fault(node));
@@ -190,7 +191,7 @@ int main(void)
 		/* Drain driver-thread deliveries onto this thread BEFORE polling.
 		 * Everything the runtime sees on RX comes through this queue, so
 		 * fcan_on_can_rx() never races fcan_poll(). */
-		zephyr_can_hal_drain_rx(&hal);
+		fcan_zephyr_can_hal_drain_rx(&hal);
 		fcan_poll(node);
 		app_logic_tick(0.001f);
 

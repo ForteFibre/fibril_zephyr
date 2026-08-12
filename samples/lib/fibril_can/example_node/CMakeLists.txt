@@ -38,7 +38,6 @@ fcan_invoke_codegen(
 
 target_sources(app PRIVATE
   src/main.c
-  src/zephyr_can_hal.c
   src/app_logic.c
   src/rgb_state.c)
 
