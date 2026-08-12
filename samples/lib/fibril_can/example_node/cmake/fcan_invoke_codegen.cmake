@@ -48,11 +48,12 @@ function(fcan_invoke_codegen)
 
   # --- escape hatch: pre-generated tree
   if(FCAN_PREGENERATED_DIR)
-    if(NOT EXISTS "${FCAN_PREGENERATED_DIR}/${FCAN_BASE_NAME}.c"
+    if(NOT EXISTS "${FCAN_PREGENERATED_DIR}/${FCAN_BASE_NAME}.h"
+        OR NOT EXISTS "${FCAN_PREGENERATED_DIR}/${FCAN_BASE_NAME}.c"
         OR NOT EXISTS "${FCAN_PREGENERATED_DIR}/schema_blob.c")
       message(FATAL_ERROR
         "FCAN_PREGENERATED_DIR=${FCAN_PREGENERATED_DIR} is missing "
-        "${FCAN_BASE_NAME}.c or schema_blob.c")
+        "${FCAN_BASE_NAME}.h, ${FCAN_BASE_NAME}.c, or schema_blob.c")
     endif()
     target_sources(app PRIVATE
       "${FCAN_PREGENERATED_DIR}/${FCAN_BASE_NAME}.c"
@@ -62,7 +63,7 @@ function(fcan_invoke_codegen)
     return()
   endif()
 
-  # --- resolve fcan_codegen CLI (case-insensitive: cache > env > PATH)
+  # --- resolve fcan_codegen CLI (precedence: cache > env > PATH)
   set(_fcan_codegen "")
   if(FCAN_CODEGEN)
     set(_fcan_codegen "${FCAN_CODEGEN}")

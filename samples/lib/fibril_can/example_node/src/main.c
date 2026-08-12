@@ -54,9 +54,14 @@ LOG_MODULE_REGISTER(fcan_example_node, LOG_LEVEL_INF);
 #define CAN_NODE       DT_CHOSEN(zephyr_canbus)
 #define CAN_BUS_DEV    DEVICE_DT_GET(CAN_NODE)
 
-/* SPEC §5.3: node_id is a firmware-owned decision. We take it as a Kconfig
- * so downstream boards can pin it via board.conf or a shield overlay. */
+/* SPEC §5.3: node_id is a firmware-owned decision. Default 0x10 keeps this
+ * sample self-contained; override without patching the source by passing
+ * -DCONFIG_EXTRA_CFLAGS=-DNODE_ID=0x?? on the west build line, or by adding
+ * the same via a board-specific overlay conf. Wiring it to a proper Kconfig
+ * symbol belongs to a follow-up. */
+#ifndef NODE_ID
 #define NODE_ID        0x10
+#endif
 #define MASTER_LOST_US 300000U  /* §5.11 — 300 ms watchdog */
 
 /* fcan_init calls the allocator once to carve every variable-length buffer

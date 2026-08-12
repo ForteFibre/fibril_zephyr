@@ -14,20 +14,22 @@ LOG_MODULE_REGISTER(fcan_hal, LOG_LEVEL_INF);
 static bool hal_send(uint32_t id, bool ext, const uint8_t *data, uint8_t len, void *ctx)
 {
 	struct zephyr_can_hal *h = ctx;
+
+	/* CAN FD tops out at 64 B (SPEC §7). can_bytes_to_dlc() has no defined
+	 * behavior above that, so guard here rather than trusting it to clamp. */
+	if (len > CANFD_MAX_DLEN) {
+		LOG_ERR("send: oversize len=%u (max %u)", len, (unsigned)CANFD_MAX_DLEN);
+		return false;
+	}
+
 	struct can_frame frame = {
 		.id = id,
-		/* CAN FD framing is required by SPEC §7 (frames up to 64 B).
-		 * BRS is set to allow the loopback and real FDCAN controllers to
+		/* BRS is set to allow the loopback and real FDCAN controllers to
 		 * negotiate the fast-phase bit rate — the loopback ignores it,
 		 * on real hardware it depends on the DTS bitrate-data setting. */
 		.flags = CAN_FRAME_FDF | CAN_FRAME_BRS | (ext ? CAN_FRAME_IDE : 0U),
 		.dlc = can_bytes_to_dlc(len),
 	};
-
-	if (len > sizeof(frame.data)) {
-		LOG_ERR("send: oversize len=%u (max %u)", len, (unsigned)sizeof(frame.data));
-		return false;
-	}
 	memcpy(frame.data, data, len);
 	/* can_bytes_to_dlc rounds up (e.g. 9 bytes -> DLC for 12). Zero-pad the
 	 * tail so we do not leak stack contents to the wire. */

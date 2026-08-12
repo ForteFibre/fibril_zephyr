@@ -32,6 +32,9 @@ jobs:
           private-key: ${{ secrets.FIBRIL_CI_APP_PRIVATE_KEY }}
           owner: ForteFibre
           repositories: fibril_can
+          # Least-privilege: west update only needs to clone the module. The
+          # matching GitHub App installation must expose Contents: read.
+          permission-contents: read
 
       - name: Configure git to use App token for ForteFibre repos
         shell: bash
