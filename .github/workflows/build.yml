@@ -19,16 +19,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: example-application
           persist-credentials: false
 
       - name: Generate token for private modules
         id: app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.FIBRIL_CI_APP_ID }}
+          client-id: ${{ vars.FIBRIL_CI_APP_CLIENT_ID }}
           private-key: ${{ secrets.FIBRIL_CI_APP_PRIVATE_KEY }}
           owner: ForteFibre
           repositories: fibril_can
@@ -41,7 +41,7 @@ jobs:
           git config --global url."https://x-access-token:${GH_APP_TOKEN}@github.com/ForteFibre/".insteadOf "https://github.com/ForteFibre/"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: 3.12
 
