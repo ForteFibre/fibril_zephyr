@@ -42,6 +42,7 @@
 #include "schema_gen.h"
 #include "zephyr_can_hal.h"
 #include "app_logic.h"
+#include "rgb_state.h"
 
 /* The C emitter puts these symbols in schema_blob.c but doesn't declare them
  * in schema_gen.h — the C example does the same manual extern block. */
@@ -177,12 +178,14 @@ int main(void)
 	LOG_INF("fcan_register_all OK");
 
 	app_logic_init();
+	rgb_state_init();
 
 	LOG_INF("entering main loop (tick=1 ms, state=%s)",
 		state_str(fcan_state(node)));
 
 	fcan_node_state_t last_state = fcan_state(node);
 	uint32_t last_log_ms = 0;
+	uint32_t last_led_ms = 0;
 	while (true) {
 		/* Drain driver-thread deliveries onto this thread BEFORE polling.
 		 * Everything the runtime sees on RX comes through this queue, so
@@ -199,9 +202,17 @@ int main(void)
 			last_state = s;
 		}
 
+		/* LED indicator @ ~100 Hz. GPIO toggles at every 1 ms tick would
+		 * be wasteful; the blink phase is derived from k_uptime so a
+		 * coarser refresh does not slur the animation. */
+		const uint32_t now_ms = k_uptime_get_32();
+		if ((now_ms - last_led_ms) >= 10U) {
+			rgb_state_update(s, fcan_fault(node));
+			last_led_ms = now_ms;
+		}
+
 		/* Heartbeat log so the sample provides an obvious "still alive"
 		 * signal on a bus with no master. Rate-limit to once a second. */
-		const uint32_t now_ms = k_uptime_get_32();
 		if ((now_ms - last_log_ms) >= 1000U) {
 			LOG_INF("alive: state=%s tx=%u tx_drops=%u rx=%u",
 				state_str(s), hal.tx_frames, hal.tx_drops,
