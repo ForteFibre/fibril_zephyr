@@ -5,9 +5,12 @@
  *   uplink   = USB FS (PA11/PA12) -> gs_usb subsys -> fcan_router device
  *   downlink = FDCAN1 (PD0/PD1)   (board DTS already sets pinctrl + PLL_Q clock)
  *
- * The board's HSI48 + CLK48_SEL(0) supply the USB 48 MHz clock and the board
- * DTS already routes fdcan1's kernel clock through PLL_Q at 80 MHz, so the
- * overlay only has to flip both peripherals to "okay" and pick a bitrate.
+ * The board's HSI48 + CLK48_SEL(0) supply the USB 48 MHz clock. This overlay
+ * moves the PLL source from HSE (board DTS default) to HSI16 so the sample
+ * boots on units where the 24 MHz HSE crystal is dead or unfitted -- the
+ * Zephyr STM32 clock driver spin-waits for HSE ready and would hang boot
+ * otherwise. HSI is ~1% accurate which is borderline for 5 Mbps FD data,
+ * but adequate for bring-up. Switch back to HSE for production timing.
  */
 
 / {
@@ -23,6 +26,28 @@
 		max-stdids = <256>;
 		max-node-ids = <32>;
 	};
+};
+
+/* --- Clock tree: force HSI16 -> PLL, same VCO/SYSCLK/PLL_Q targets as the
+ *     board's HSE path (VCO 320 MHz, SYSCLK 160 MHz, PLL_Q 80 MHz).
+ *     HSI16 / div-m=4 = 4 MHz VCO input; * mul-n=80 = 320 MHz VCO;
+ *     div-r=2 = 160 MHz SYSCLK; div-q=4 = 80 MHz PLL_Q. */
+&clk_hse {
+	status = "disabled";
+};
+
+&clk_hsi {
+	status = "okay";
+};
+
+&pll {
+	div-m = <4>;
+	mul-n = <80>;
+	div-p = <2>;
+	div-q = <4>;
+	div-r = <2>;
+	clocks = <&clk_hsi>;
+	status = "okay";
 };
 
 zephyr_udc0: &usb {
