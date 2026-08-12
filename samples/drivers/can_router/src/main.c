@@ -10,7 +10,7 @@
  * docs/09-router.md in the fibril_can repository.
  *
  * With no host attached, main() plays the master. A broadcast DISCOVER
- * (SPEC §5.11) fans out to every downlink without any prior learning, so the
+ * fans out to every downlink without any prior learning, so the
  * fwd_up_to_down counters advance from a cold start and prove the whole path
  * -- can_send() -> ingress msgq -> router thread -> fcan_router_on_rx ->
  * downlink can_send() -- is wired end to end.

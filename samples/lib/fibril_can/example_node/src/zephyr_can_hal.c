@@ -15,8 +15,8 @@ static bool hal_send(uint32_t id, bool ext, const uint8_t *data, uint8_t len, vo
 {
 	struct zephyr_can_hal *h = ctx;
 
-	/* CAN FD tops out at 64 B (SPEC §7). can_bytes_to_dlc() has no defined
-	 * behavior above that, so guard here rather than trusting it to clamp. */
+	/* CAN FD tops out at 64 B. can_bytes_to_dlc() has no defined behavior
+	 * above that, so guard here rather than trusting it to clamp. */
 	if (len > CANFD_MAX_DLEN) {
 		LOG_ERR("send: oversize len=%u (max %u)", len, (unsigned)CANFD_MAX_DLEN);
 		return false;
