@@ -1,0 +1,44 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * router+self+gs_usb sample on the Fibril RoboMaster Mini V1.
+ *   uplink   = USB FS (PA11/PA12) -> gs_usb subsys -> fcan_router device
+ *   downlink = FDCAN1 (PD0/PD1)   (board DTS already sets pinctrl + PLL_Q clock)
+ *
+ * The board's HSI48 + CLK48_SEL(0) supply the USB 48 MHz clock and the board
+ * DTS already routes fdcan1's kernel clock through PLL_Q at 80 MHz, so the
+ * overlay only has to flip both peripherals to "okay" and pick a bitrate.
+ */
+
+/ {
+	gs_usb0: gs_usb0 {
+		compatible = "gs_usb";
+		label = "gs_usb";
+	};
+
+	fcan_router: fcan_router {
+		compatible = "fibril,can-router";
+		status = "okay";
+		downlinks = <&fdcan1>;
+		max-stdids = <256>;
+		max-node-ids = <32>;
+	};
+};
+
+zephyr_udc0: &usb {
+	pinctrl-0 = <&usb_dm_pa11 &usb_dp_pa12>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&fdcan1 {
+	/* 1 Mbps arbitration / 5 Mbps FD data phase. PLL_Q kernel clock is 80 MHz
+	 * per the board DTS -- 80 tq @ 1 Mbps, 16 tq @ 5 Mbps. */
+	bitrate = <1000000>;
+	bitrate-data = <5000000>;
+	status = "okay";
+};
+
+&rng {
+	status = "okay";
+};
