@@ -6,6 +6,18 @@
  * `command` frame, publishes S2M `state` every tick and `diagnostics` at
  * ~10 Hz. One IMU instance publishes constant gyro/accel samples so the
  * S2M path is exercised for both block types.
+ *
+ * Divergence from example_node/src/app_logic.c
+ * --------------------------------------------
+ * Unlike example_node -- which runs fcan_poll and app_logic_tick on the same
+ * main thread -- the router+self topology puts fcan_poll(self) on the router
+ * driver thread (via fcan_router_poll) while app_logic_tick() runs on main.
+ * Topic begin/commit/read and param_read stay safe across that boundary via
+ * fcan_seqlock.h. fcan_svc_complete() does NOT: it races the router thread's
+ * fcan_service_poll on the reassembly slots. So the `home` service handler
+ * completes synchronously here (returns FCAN_SVC_OK with a filled response)
+ * instead of stashing a handle for a later motordriver_home_complete call.
+ * The deferred-response path is still demonstrated by the example_node sample.
  */
 
 #include "app_logic.h"
@@ -36,22 +48,11 @@ struct axis_state {
 	uint32_t uptime_ticks;
 };
 
-/* Deferred-response bookkeeping for the `home` service. The schema declares
- * home as a request/response pair; we stash the master's call handle and
- * complete it a few ticks later via motordriver_home_complete to demonstrate
- * the FCAN_SVC_ACCEPTED code path. */
-struct deferred_home {
-	bool pending;
-	fcan_call_handle_t handle;
-};
-
 static struct axis_state g_axis;
-static struct deferred_home g_home;
 
 void app_logic_init(void)
 {
 	g_axis = (struct axis_state){0};
-	g_home = (struct deferred_home){0};
 }
 
 void app_logic_tick(float dt_seconds)
@@ -88,7 +89,9 @@ void app_logic_tick(float dt_seconds)
 		motordriver_state_commit(MOTOR_INST);
 	}
 
-	/* 4. Low-rate diagnostics + pending home completion. */
+	/* 4. Low-rate diagnostics. No deferred-response completion here (see the
+	 *    file header): motordriver_home returns synchronously in this sample
+	 *    so nothing needs to complete a stashed handle from the app thread. */
 	g_axis.uptime_ticks++;
 	if ((g_axis.uptime_ticks % DIAG_DIVIDER) == 0U) {
 		motordriver_diagnostics_t *diag = motordriver_diagnostics_begin(MOTOR_INST);
@@ -98,12 +101,6 @@ void app_logic_tick(float dt_seconds)
 			diag->mcu_temperature = 30.0f;
 			diag->mode = g_axis.latched_mode;
 			motordriver_diagnostics_commit(MOTOR_INST);
-		}
-
-		if (g_home.pending) {
-			motordriver_home_resp_t resp = {.success = true};
-			motordriver_home_complete(g_home.handle, FCAN_SVC_OK, &resp);
-			g_home.pending = false;
 		}
 	}
 
@@ -183,17 +180,18 @@ fcan_svc_status_t motordriver_home(uint8_t inst,
 				   fcan_call_handle_t h)
 {
 	ARG_UNUSED(req);
-	ARG_UNUSED(resp);
+	ARG_UNUSED(h);
 	if (inst == MOTOR_INST) {
 		g_axis.position = 0.0f;
 		g_axis.velocity = 0.0f;
-		g_home.pending = true;
-		g_home.handle = h;
 	}
-	/* Late-response path: response is sent later from app_logic_tick via
-	 * motordriver_home_complete. Returning ACCEPTED tells the runtime to
-	 * NOT send an immediate response. */
-	return FCAN_SVC_ACCEPTED;
+	/* Synchronous completion: fill the response and return OK so the runtime
+	 * sends it from this call's context (router driver thread). The
+	 * deferred-response path (FCAN_SVC_ACCEPTED + motordriver_home_complete
+	 * later) would trip on the router-thread vs app-thread race documented at
+	 * the top of this file. */
+	resp->success = true;
+	return FCAN_SVC_OK;
 }
 
 void motordriver_on_params_changed(uint8_t inst, uint32_t changed_mask)

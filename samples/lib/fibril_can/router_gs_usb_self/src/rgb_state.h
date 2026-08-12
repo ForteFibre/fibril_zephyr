@@ -31,7 +31,7 @@ void rgb_state_init(void);
  * from k_uptime_get_32() so callers do not need to keep any state.
  *
  * Priority: any non-NONE fault turns red on regardless of state. Otherwise:
- *   UNPROVISIONED -> blue, blinking at ~2 Hz
+ *   UNPROVISIONED -> blue, blinking at 1 Hz (500 ms on, 500 ms off)
  *   PROVISIONED   -> blue, solid
  *   RUNNING       -> green, solid
  *   FAULT         -> red, solid   (also reached via the fault-code branch)

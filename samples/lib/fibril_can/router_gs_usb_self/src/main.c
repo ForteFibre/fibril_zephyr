@@ -210,10 +210,16 @@ int main(void)
 	uint32_t last_log_ms = 0;
 	uint32_t last_led_ms = 0;
 	while (true) {
-		/* No fcan_zephyr_can_hal_drain_rx() and no fcan_poll(self)
-		 * here: the router driver thread drains its ingress msgq and
-		 * calls fcan_router_poll(), which drives fcan_poll(self) at
-		 * the end. */
+		/* Threading model: fcan_poll(self) runs on the router driver
+		 * thread (fcan_router_poll drives it at the end of each pass),
+		 * so this main-thread app_logic_tick() must only use fcan APIs
+		 * that are documented cross-thread-safe -- topic begin/commit/
+		 * read and param_read are seqlock-protected per fcan_seqlock.h.
+		 * Do NOT call fcan_svc_complete from here: it races the router
+		 * thread's fcan_service_poll on the reassembly slots.
+		 * app_logic.c completes the `home` service synchronously to
+		 * keep that invariant, at the cost of skipping the ACCEPTED
+		 * demo the example_node sample carries. */
 		app_logic_tick(0.001f);
 
 		const fcan_node_state_t s = fcan_state(self);
