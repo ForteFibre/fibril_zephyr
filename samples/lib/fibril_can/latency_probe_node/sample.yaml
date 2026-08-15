@@ -1,0 +1,31 @@
+sample:
+  name: fibril_can latency probe slave
+  description: >-
+    Zephyr implementation of the fibril_can_benchmark latency-probe MCU
+    firmware contract. Runs fcan_codegen against
+    fibril_can_benchmark/schema/latency_probe.yaml at build time; the
+    application copies received ping seq/t_master_send_ns into the S2M echo
+    stream in the same tick, following firmware-requirements §3.1.
+
+tests:
+  sample.lib.fibril_can.latency_probe_node:
+    tags:
+      - fibril_can
+      - fibril_can_benchmark
+      - can
+    filter: CONFIG_FIBRIL_CAN and dt_chosen_enabled("zephyr,canbus")
+    harness: console
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "fcan_latency_probe: fcan_init OK"
+        - "fcan_latency_probe: fcan_register_all OK"
+        - "fcan_latency_probe: entering main loop"
+    integration_platforms:
+      - native_sim
+      - fibril_robomaster_miniv1
+    # Twister needs to know where fcan_codegen lives before it can build this
+    # sample. Set FCAN_CODEGEN in the environment before invoking twister:
+    #   FCAN_CODEGEN=/abs/path/fcan_codegen twister -T fibril_zephyr/samples/lib/fibril_can/latency_probe_node
+    # or pass --extra-args=-DFCAN_CODEGEN=... to twister directly.
