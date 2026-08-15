@@ -1,0 +1,37 @@
+sample:
+  name: fibril_can router + latency-probe self via CANnectivity gs_usb uplink
+  description: >-
+    fibril_can_benchmark latency-probe firmware wired into a fcan_router self
+    node. The router uplink is CANnectivity's gs_usb device class (USB), so
+    the host PC opens one SocketCAN interface and the ROS probe launch talks
+    to the self node through it. The downlink (fdcan1) stays available for
+    real slaves on a physical CAN bus. Same on-wire contract as
+    samples/lib/fibril_can/latency_probe_node, but placed at the router
+    uplink instead of a bare CAN interface — see firmware-requirements §8.
+
+tests:
+  sample.lib.fibril_can.router_gs_usb_latency_probe:
+    tags:
+      - fibril_can
+      - fibril_can_benchmark
+      - can
+      - router
+      - usb
+    filter: CONFIG_FIBRIL_CAN and dt_compat_enabled("fibril,can-router") and dt_compat_enabled("gs_usb")
+    harness: console
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "fcan_router_latency_probe: fcan_init OK"
+        - "fcan_router_latency_probe: fcan_router_attach_self OK"
+        - "fcan_router_latency_probe: fcan_register_all OK"
+        - "fcan_router_latency_probe: gs_usb_register OK"
+        - "fcan_router_latency_probe: usbd_enable OK"
+        - "fcan_router_latency_probe: entering main loop"
+    integration_platforms:
+      - fibril_robomaster_miniv1
+    # Twister needs to know where fcan_codegen lives before it can build this
+    # sample. Set FCAN_CODEGEN in the environment before invoking twister:
+    #   FCAN_CODEGEN=/abs/path/fcan_codegen twister -T fibril_zephyr/samples/lib/fibril_can/router_gs_usb_latency_probe
+    # or pass --extra-args=-DFCAN_CODEGEN=... to twister directly.
