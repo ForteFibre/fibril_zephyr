@@ -81,12 +81,13 @@ commit → emit dwell について:
   `drain_rx → probe_logic_tick (commit) → fcan_poll (emit) → sleep` の順に
   running するので、commit と emit が同 tick に載る。§3.4.1 recommendation。
 - **router**: `probe_logic_tick` は app thread、`fcan_poll(self)` は router
-  driver thread。両者は `CONFIG_CAN_FCAN_ROUTER_POLL_INTERVAL_MS` (default 1 ms)
+  driver thread。両者は `CONFIG_CAN_FCAN_ROUTER_POLL_INTERVAL_US` (default 1000 µs)
   ごとに独立に動く。したがって commit → emit の待ちは平均 0.5 ms、最悪 1 ms。
 
-  この値は `prj.conf` の
-  `CONFIG_CAN_FCAN_ROUTER_POLL_INTERVAL_MS` で調整できる。0 は無効
-  (`K_MSEC(0) == K_NO_WAIT` になり busy poll)、通常は 1 (default) を選ぶ。
+  この値は `prj.conf` の `CONFIG_CAN_FCAN_ROUTER_POLL_INTERVAL_US` で
+  調整できる (range 1..1_000_000)。実効分解能は
+  `CONFIG_SYS_CLOCK_TICKS_PER_SEC` で決まる kernel tick に丸められる
+  (このサンプルは 10 kHz tick なので 100 µs)。
 
 USB FS の bulk 転送は 1 ms frame 単位。したがって minimum RTT は
 `~1 ms (USB in) + ~1 ms (router dwell) + ~1 ms (USB out) ≒ 3 ms` オーダー。

@@ -12,7 +12,7 @@
  * Threading model
  * ---------------
  * The router driver thread owns fcan_router_on_rx() and calls
- * fcan_poll(self) at CONFIG_CAN_FCAN_ROUTER_POLL_INTERVAL_MS granularity.
+ * fcan_poll(self) at CONFIG_CAN_FCAN_ROUTER_POLL_INTERVAL_US granularity.
  * This main thread only calls probe_logic_tick() (topic begin/commit/read,
  * all seqlock-protected). Do NOT add fcan_svc_* calls here — they would
  * race the router thread's fcan_service_poll() slots.
@@ -22,7 +22,7 @@
  * The single-bus sample (samples/lib/fibril_can/latency_probe_node) can pin
  * commit → emit into a single tick via the §3.4.1 "on_tick before fcan_poll"
  * order. Here the two are on different threads, so a commit dwell of ~one
- * CONFIG_CAN_FCAN_ROUTER_POLL_INTERVAL_MS is intrinsic. Lower that Kconfig
+ * CONFIG_CAN_FCAN_ROUTER_POLL_INTERVAL_US is intrinsic. Lower that Kconfig
  * to trade CPU for dwell.
  *
  * What this sample does NOT verify
