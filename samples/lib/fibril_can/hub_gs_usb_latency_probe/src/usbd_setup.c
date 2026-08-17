@@ -1,8 +1,8 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * usbd_next boilerplate for the router+latency-probe+gs_usb sample. Copy of
- * samples/lib/fibril_can/router_gs_usb_self/src/usbd_setup.c with a
+ * usbd_next boilerplate for the hub+latency-probe+gs_usb sample. Copy of
+ * samples/lib/fibril_can/hub_gs_usb_self/src/usbd_setup.c with a
  * differentiating product string; keeping the VID/PID identical means the
  * same host-side udev rules and gs_usb pid filters catch either firmware.
  */

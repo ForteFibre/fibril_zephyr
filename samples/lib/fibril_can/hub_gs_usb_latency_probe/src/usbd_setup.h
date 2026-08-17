@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Minimal usbd_next boilerplate for the router+latency-probe+gs_usb sample.
+ * Minimal usbd_next boilerplate for the hub+latency-probe+gs_usb sample.
  * A cut-down of CANnectivity's app/src/usb.c: full-speed only, no DFU, no
  * MSOSV2 descriptor set. The registered gs_usb class instance
  * ("gs_usb_0") is the same one CANnectivity registers, so host-side udev
@@ -9,11 +9,11 @@
  *
  * The VID/PID pair matches CANnectivity's defaults (0x1209:0xca01); only
  * the product string differs so `lsusb -v` distinguishes this firmware
- * from the router_gs_usb_self sample when both are on the bench.
+ * from the hub_gs_usb_self sample when both are on the bench.
  */
 
-#ifndef ROUTER_GS_USB_LATENCY_PROBE_USBD_SETUP_H_
-#define ROUTER_GS_USB_LATENCY_PROBE_USBD_SETUP_H_
+#ifndef HUB_GS_USB_LATENCY_PROBE_USBD_SETUP_H_
+#define HUB_GS_USB_LATENCY_PROBE_USBD_SETUP_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,11 +26,11 @@ extern "C" {
 int usbd_setup_init(void);
 
 /* Enable the previously-initialised USB device. Splitting this from init lets
- * the sample attach the router self node BEFORE the host can enumerate. */
+ * the sample attach the hub self node BEFORE the host can enumerate. */
 int usbd_setup_enable(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* ROUTER_GS_USB_LATENCY_PROBE_USBD_SETUP_H_ */
+#endif /* HUB_GS_USB_LATENCY_PROBE_USBD_SETUP_H_ */

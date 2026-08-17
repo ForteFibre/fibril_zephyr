@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Zephyr sample: fibril_can router + latency-probe self node driven over
-# CANnectivity's gs_usb uplink. Same wire contract as
+# Zephyr sample: fibril_can hub + latency-probe self node driven over
+# CANnectivity's gs_usb external port. Same wire contract as
 # fibril_zephyr/samples/lib/fibril_can/latency_probe_node, but the probe self
-# node sits inside a fcan_router device — uplink is USB (gs_usb) and downlink
-# is fdcan1. Use this variant when the same MCU also has to gateway a
-# physical CAN bus to the host.
+# node sits inside a fcan_hub device — the external port is USB (gs_usb)
+# and the peer port is fdcan1. Use this variant when the same MCU also has
+# to bridge a physical CAN bus to the host.
 #
 # Prerequisites: see the fibril_can module's zephyr/cmake/fcan_invoke_codegen.cmake
 # for the fcan_codegen CLI resolution.
@@ -13,7 +13,7 @@
 cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
-project(fibril_can_router_gs_usb_latency_probe LANGUAGES C)
+project(fibril_can_hub_gs_usb_latency_probe LANGUAGES C)
 
 if(NOT ZEPHYR_FIBRIL_CAN_MODULE_DIR)
   message(FATAL_ERROR

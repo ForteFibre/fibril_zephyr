@@ -1,11 +1,11 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * router+latency-probe self+gs_usb sample on the Fibril RoboMaster Mini V1.
- *   uplink   = USB FS (PA11/PA12) -> gs_usb subsys -> fcan_router device
- *   downlink = FDCAN1 (PD0/PD1)   (board DTS already sets pinctrl + PLL_Q clock)
+ * hub+latency-probe self+gs_usb sample on the Fibril RoboMaster Mini V1.
+ *   external port (port 0) = USB FS (PA11/PA12) -> gs_usb subsys -> fcan_hub device
+ *   peer port     (port 1) = FDCAN1 (PD0/PD1)   (board DTS already sets pinctrl + PLL_Q clock)
  *
- * Mirrors samples/lib/fibril_can/router_gs_usb_self.overlay so both samples
+ * Mirrors samples/lib/fibril_can/hub_gs_usb_self.overlay so both samples
  * share the same host udev/gs_usb setup — see that overlay's comments for
  * the HSI16/PLL rationale. Only the compatible strings and app source
  * differ between the two samples.
@@ -17,17 +17,10 @@
 		label = "gs_usb";
 	};
 
-	fcan_router: fcan_router {
-		compatible = "fibril,can-router";
+	fcan_hub: fcan_hub {
+		compatible = "fibril,can-hub";
 		status = "okay";
-		downlinks = <&fdcan1>;
-		/* std_id 学習テーブルの幅。fibril_can_bridge の StdIdAllocator は
-		 * 0x100 (256) から発番するので、max-stdids は必ず 0x100 より
-		 * 大きい必要がある。DT binding のデフォルト 2048 (= 11-bit CAN
-		 * ID 全域) を使う。stdid_mask はエントリあたり 1 バイトなので
-		 * 2 KiB。H723 の RAM 予算では誤差。 */
-		max-stdids = <2048>;
-		max-node-ids = <32>;
+		peers = <&fdcan1>;
 	};
 };
 

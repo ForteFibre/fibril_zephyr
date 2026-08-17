@@ -1,22 +1,22 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Router-variant tick logic. On-wire behaviour is identical to
+ * Hub-variant tick logic. On-wire behaviour is identical to
  * samples/lib/fibril_can/latency_probe_node/src/probe_logic.c — the fcan
  * topic begin/commit/read API is seqlock-protected so it is safe to call
- * from the app thread while the router driver thread runs fcan_poll(self)
+ * from the app thread while the hub driver thread runs fcan_poll(self)
  * asynchronously.
  *
  * Firmware-requirements alignment mirrors the single-bus sample:
  *
  *   §3.1  seq / t_master_send_ns copied inside the same app tick as the ping
- *         arrival. The "arrival" event lands in router-thread context
- *         (fcan_router_on_rx forwards uplink frames into self); the app
+ *         arrival. The "arrival" event lands in hub-thread context
+ *         (fcan_hub_on_rx forwards external / peer frames into self); the app
  *         tick reads the up-to-date state via latencyprobe_ping_read.
  *   §3.2  ticks with no ping yet emit zeros so the probe can filter warmup
  *         samples by seq == 0.
  *   §3.4  periodic echo fires every tick; the runtime scheduler running
- *         inside fcan_poll(self) on the router thread handles next_due gating.
+ *         inside fcan_poll(self) on the hub thread handles next_due gating.
  *   §4    t_slave_*_us stamped in app-tick context — the requirement only
  *         asks for a monotonic microsecond source, not for a common clock
  *         with any other component of the pipeline.

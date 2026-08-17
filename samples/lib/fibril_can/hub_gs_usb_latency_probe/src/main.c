@@ -1,37 +1,37 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Zephyr entry point for the fibril_can router + latency-probe self node +
+ * Zephyr entry point for the fibril_can hub + latency-probe self node +
  * gs_usb sample. Cross-references:
  *
  *   fibril_can_benchmark/docs/firmware-requirements.md — wire contract
- *   fibril_can/docs/09-router.md                        — router lifecycle
- *   samples/lib/fibril_can/router_gs_usb_self           — non-benchmark twin
+ *   fibril_can/docs/09-hub.md                          — hub lifecycle
+ *   samples/lib/fibril_can/hub_gs_usb_self              — non-benchmark twin
  *   samples/lib/fibril_can/latency_probe_node           — single-bus twin
  *
  * Threading model
  * ---------------
- * The router driver thread owns fcan_router_on_rx() and calls
- * fcan_poll(self) at CONFIG_CAN_FCAN_ROUTER_POLL_INTERVAL_US granularity.
+ * The hub driver thread owns fcan_hub_on_rx() and calls
+ * fcan_poll(self) at CONFIG_CAN_FCAN_HUB_POLL_INTERVAL_US granularity.
  * This main thread only calls probe_logic_tick() (topic begin/commit/read,
  * all seqlock-protected). Do NOT add fcan_svc_* calls here — they would
- * race the router thread's fcan_service_poll() slots.
+ * race the hub thread's fcan_service_poll() slots.
  *
  * Latency vs the single-bus sample
  * --------------------------------
  * The single-bus sample (samples/lib/fibril_can/latency_probe_node) can pin
  * commit → emit into a single tick via the §3.4.1 "on_tick before fcan_poll"
  * order. Here the two are on different threads, so a commit dwell of ~one
- * CONFIG_CAN_FCAN_ROUTER_POLL_INTERVAL_US is intrinsic. Lower that Kconfig
+ * CONFIG_CAN_FCAN_HUB_POLL_INTERVAL_US is intrinsic. Lower that Kconfig
  * to trade CPU for dwell.
  *
  * What this sample does NOT verify
  * --------------------------------
  * - End-to-end against fibril_can_bridge or fibril_can_web; that setup is
- *   the same as the router_gs_usb_self README.
- * - Downlink physical CAN latency budgets. This sample terminates the probe
- *   at the uplink; a probe running on a slave attached to fdcan1 would add
- *   the downlink bus time.
+ *   the same as the hub_gs_usb_self README.
+ * - Peer-side physical CAN latency budgets. This sample terminates the probe
+ *   at the external port; a probe running on a node attached to fdcan1
+ *   would add the peer bus time.
  */
 
 #include <stdint.h>
@@ -48,8 +48,8 @@
 
 #include <fibril_can/fcan.h>
 #include <fibril_can/fcan_protocol.h>
-#include <fibril_can/router/fcan_router.h>
-#include <fibril_can_zephyr/can_router.h>
+#include <fibril_can/hub/fcan_hub.h>
+#include <fibril_can_zephyr/can_hub.h>
 
 #include "schema_gen.h"
 #include "probe_logic.h"
@@ -59,10 +59,10 @@ extern const uint8_t  fcan_schema_blob[];
 extern const size_t   fcan_schema_blob_len;
 extern const uint64_t fcan_schema_hash;
 
-LOG_MODULE_REGISTER(fcan_router_latency_probe, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(fcan_hub_latency_probe, LOG_LEVEL_INF);
 
-#define ROUTER_NODE DT_NODELABEL(fcan_router)
-#define ROUTER_DEV  DEVICE_DT_GET(ROUTER_NODE)
+#define HUB_NODE DT_NODELABEL(fcan_hub)
+#define HUB_DEV  DEVICE_DT_GET(HUB_NODE)
 
 /* §6 default; probe launch expects --node-id 0x20. Override via
  * -DCONFIG_EXTRA_CFLAGS=-DNODE_ID=0x?? when running two boards side by side. */
@@ -98,9 +98,9 @@ static const char *state_str(fcan_node_state_t s)
 /* Handed to the status thread after bring-up. Reads happen from a lower
  * priority thread; the values themselves are word-sized so a torn read is
  * at worst a one-cycle stale counter in the log line. */
-static fcan_node_t     *g_self;
-static fcan_router_t   *g_router;
-static const struct device *g_router_dev;
+static fcan_node_t         *g_self;
+static fcan_hub_t          *g_hub;
+static const struct device *g_hub_dev;
 
 static void status_thread_entry(void *a, void *b, void *c)
 {
@@ -110,7 +110,7 @@ static void status_thread_entry(void *a, void *b, void *c)
 
 	fcan_node_state_t last = FCAN_STATE_UNPROVISIONED;
 	while (true) {
-		if (g_self != NULL && g_router != NULL && g_router_dev != NULL) {
+		if (g_self != NULL && g_hub != NULL && g_hub_dev != NULL) {
 			const fcan_node_state_t s = fcan_state(g_self);
 			if (s != last) {
 				LOG_INF("state: %s -> %s (fault=%d)",
@@ -118,21 +118,16 @@ static void status_thread_entry(void *a, void *b, void *c)
 					(int)fcan_fault(g_self));
 				last = s;
 			}
-			fcan_router_diag_t d;
-			fcan_router_get_diag(g_router, &d);
+			fcan_hub_diag_t d;
+			fcan_hub_get_diag(g_hub, &d);
 			uint32_t ing_drops =
-				fcan_router_zephyr_ingress_drops(g_router_dev);
-			/* drop_unknown_stdid > 0 かつ learned_stdids=0 は
-			 * 「max-stdids が bridge 発番 (>=0x100) を吸収できていない」
-			 * サイン。overlay の max-stdids を確認する。 */
-			LOG_INF("alive: state=%s up->dn[0]=%u dn->up[0]=%u "
-				"drop_send=%u ingress=%u "
-				"drop_unk_stdid=%u drop_ovfl=%u learned_stdids=%u",
+				fcan_hub_zephyr_ingress_drops(g_hub_dev);
+			LOG_INF("alive: state=%s fwd[0]=%u fwd[1]=%u "
+				"to_self=%u drop_send=%u ingress=%u",
 				state_str(s),
-				d.fwd_up_to_down[0], d.fwd_down_to_up[0],
-				d.drop_send_failed, ing_drops,
-				d.drop_unknown_stdid, d.drop_table_overflow,
-				d.learned_stdids);
+				d.fwd_count[0], d.fwd_count[1],
+				d.delivered_to_self,
+				d.drop_send_failed, ing_drops);
 		}
 		k_sleep(K_SECONDS(1));
 	}
@@ -142,17 +137,17 @@ K_THREAD_DEFINE(status_tid, 1024, status_thread_entry, NULL, NULL, NULL,
 
 int main(void)
 {
-	const struct device *router = ROUTER_DEV;
+	const struct device *hub = HUB_DEV;
 	const struct device *gs_usb = DEVICE_DT_GET(DT_NODELABEL(gs_usb0));
 
-	if (!device_is_ready(router)) {
-		LOG_ERR("router device %s not ready", router->name);
+	if (!device_is_ready(hub)) {
+		LOG_ERR("hub device %s not ready", hub->name);
 		return -ENODEV;
 	}
 
-	fcan_router_t *r = fcan_router_zephyr_get(router);
-	if (r == NULL) {
-		LOG_ERR("fcan_router_zephyr_get returned NULL (init failed)");
+	fcan_hub_t *h = fcan_hub_zephyr_get(hub);
+	if (h == NULL) {
+		LOG_ERR("fcan_hub_zephyr_get returned NULL (init failed)");
 		return -ENODEV;
 	}
 
@@ -184,10 +179,11 @@ int main(void)
 			.service_buffer = FCAN_SERVICE_BUFFER,
 			.service_reassembly = FCAN_SERVICE_REASSEMBLY,
 		},
-		/* HAL comes from the router: fcan_poll(self) TX goes to the
-		 * router's uplink (gs_usb), and fcan_router_on_rx() feeds
-		 * uplink frames back into self. */
-		.hal = fcan_router_get_self_hal(r),
+		/* HAL comes from the hub: fcan_poll(self) TX broadcasts onto
+		 * every live port (external gs_usb + fdcan1 peer), and
+		 * fcan_hub_on_rx() delivers RX from either side back into
+		 * self. */
+		.hal = fcan_hub_get_self_hal(h),
 		.allocator = {.alloc = heap_alloc, .ctx = NULL},
 		.master_lost_us = MASTER_LOST_US,
 	};
@@ -202,14 +198,14 @@ int main(void)
 		(unsigned)fcan_schema_blob_len, (unsigned)TICK_HZ);
 
 	/* Attach BEFORE the host can open the gs_usb channel — see
-	 * docs/09-router.md for why the router thread must not see frames
+	 * docs/09-hub.md for why the hub thread must not see frames
 	 * before the self node is wired in. */
-	if (fcan_router_attach_self(r, self) != FCAN_OK) {
-		LOG_ERR("fcan_router_attach_self failed (fault=%d)",
+	if (fcan_hub_attach_self(h, self) != FCAN_OK) {
+		LOG_ERR("fcan_hub_attach_self failed (fault=%d)",
 			(int)fcan_fault(self));
 		return -EIO;
 	}
-	LOG_INF("fcan_router_attach_self OK");
+	LOG_INF("fcan_hub_attach_self OK");
 
 	if (fcan_register_all(self) != FCAN_OK) {
 		LOG_ERR("fcan_register_all failed (fault=%d)",
@@ -231,13 +227,13 @@ int main(void)
 		return rc;
 	}
 
-	const struct device *channels[] = {router};
+	const struct device *channels[] = {hub};
 	rc = gs_usb_register(gs_usb, channels, ARRAY_SIZE(channels), NULL, NULL);
 	if (rc != 0) {
 		LOG_ERR("gs_usb_register failed (%d)", rc);
 		return rc;
 	}
-	LOG_INF("gs_usb_register OK (1 channel: %s)", router->name);
+	LOG_INF("gs_usb_register OK (1 channel: %s)", hub->name);
 
 	rc = usbd_setup_enable();
 	if (rc != 0) {
@@ -246,8 +242,8 @@ int main(void)
 	LOG_INF("usbd_enable OK");
 
 	g_self = self;
-	g_router = r;
-	g_router_dev = router;
+	g_hub = h;
+	g_hub_dev = hub;
 
 	LOG_INF("entering main loop");
 
