@@ -26,5 +26,5 @@ manifest:
       path: modules/third_party/cannectivity
     - name: fibril_can
       url: https://github.com/ForteFibre/fibril_can.git
-      revision: feat/runtime-event-driven-hal
+      revision: feat/router-hub-split
       path: modules/lib/fibril_can
