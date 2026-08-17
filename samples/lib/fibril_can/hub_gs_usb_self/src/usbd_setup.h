@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Minimal usbd_next boilerplate for the router+self+gs_usb sample. This is a
+ * Minimal usbd_next boilerplate for the hub+self+gs_usb sample. This is a
  * cut-down of CANnectivity's app/src/usb.c: full-speed only, no DFU, no
  * MSOSV2 descriptor set, no LED / termination / timestamp glue. The registered
  * gs_usb class instance ("gs_usb_0") is the same one CANnectivity registers.
@@ -11,8 +11,8 @@
  * That keeps existing host-side udev rules and gs_usb pid filters working.
  */
 
-#ifndef ROUTER_GS_USB_SELF_USBD_SETUP_H_
-#define ROUTER_GS_USB_SELF_USBD_SETUP_H_
+#ifndef HUB_GS_USB_SELF_USBD_SETUP_H_
+#define HUB_GS_USB_SELF_USBD_SETUP_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,11 +25,11 @@ extern "C" {
 int usbd_setup_init(void);
 
 /* Enable the previously-initialised USB device. Splitting this from init lets
- * the sample attach the router self node BEFORE the host can enumerate. */
+ * the sample attach the hub self node BEFORE the host can enumerate. */
 int usbd_setup_enable(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* ROUTER_GS_USB_SELF_USBD_SETUP_H_ */
+#endif /* HUB_GS_USB_SELF_USBD_SETUP_H_ */

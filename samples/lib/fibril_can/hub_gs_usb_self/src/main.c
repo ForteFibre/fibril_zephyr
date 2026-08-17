@@ -1,19 +1,19 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Zephyr entry point for the fibril_can router + self node + gs_usb sample.
+ * Zephyr entry point for the fibril_can hub + self node + gs_usb sample.
  *
  * What the sample proves
  * ----------------------
  * 1. fcan_codegen'd wrappers link against the runtime on the Zephyr target.
- * 2. fcan_router (as a "fibril,can-router" Zephyr CAN device) hosts an
- *    embedded self node using fcan_router_get_self_hal()/
- *    fcan_router_attach_self() -- the three-step sequence documented in
- *    fibril_can/docs/09-router.md.
- * 3. The router device is registered as a gs_usb channel, so a host on USB
- *    sees a single CAN line that transparently combines the self node's
- *    traffic with any slaves attached to the fdcan1 downlink.
- * 4. fcan_router_poll() runs on the router driver thread and drives
+ * 2. fcan_hub (as a "fibril,can-hub" Zephyr CAN device) hosts an
+ *    embedded self node using fcan_hub_get_self_hal() /
+ *    fcan_hub_attach_self() -- the three-step sequence documented in
+ *    fibril_can/docs/09-hub.md.
+ * 3. The hub device is registered as a gs_usb channel, so a host on USB
+ *    sees a single logical CAN line that transparently combines the self
+ *    node's traffic with any nodes attached to the fdcan1 peer segment.
+ * 4. fcan_hub_poll() runs on the hub driver thread and drives
  *    fcan_poll(self) internally, so the app main loop only has to publish
  *    telemetry and observe diagnostics.
  *
@@ -21,8 +21,8 @@
  * ------------------------------
  * - Round-trip provisioning against fibril_can_bridge or fibril_can_web
  *   (needs a host process; see the README for the manual bring-up steps).
- * - Hardware timing on downlinks beyond what fdcan1's 1M/5M bitrate exercises
- *   in isolation.
+ * - Hardware timing on the peer bus beyond what fdcan1's 1M/5M bitrate
+ *   exercises in isolation.
  */
 
 #include <stdint.h>
@@ -38,8 +38,8 @@
 
 #include <fibril_can/fcan.h>
 #include <fibril_can/fcan_protocol.h>
-#include <fibril_can/router/fcan_router.h>
-#include <fibril_can_zephyr/can_router.h>
+#include <fibril_can/hub/fcan_hub.h>
+#include <fibril_can_zephyr/can_hub.h>
 
 #include "schema_gen.h"
 #include "app_logic.h"
@@ -52,10 +52,10 @@ extern const uint8_t  fcan_schema_blob[];
 extern const size_t   fcan_schema_blob_len;
 extern const uint64_t fcan_schema_hash;
 
-LOG_MODULE_REGISTER(router_gs_usb_self, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(hub_gs_usb_self, LOG_LEVEL_INF);
 
-#define ROUTER_NODE    DT_NODELABEL(fcan_router)
-#define ROUTER_DEV     DEVICE_DT_GET(ROUTER_NODE)
+#define HUB_NODE       DT_NODELABEL(fcan_hub)
+#define HUB_DEV        DEVICE_DT_GET(HUB_NODE)
 
 /* Default 0x10 matches the fibril_can example schema's assumed slave ID; the
  * host bridge picks this up during ANNOUNCE. Override at build time with
@@ -90,17 +90,17 @@ static const char *state_str(fcan_node_state_t s)
 
 int main(void)
 {
-	const struct device *router = ROUTER_DEV;
+	const struct device *hub = HUB_DEV;
 	const struct device *gs_usb = DEVICE_DT_GET(DT_NODELABEL(gs_usb0));
 
-	if (!device_is_ready(router)) {
-		LOG_ERR("router device %s not ready", router->name);
+	if (!device_is_ready(hub)) {
+		LOG_ERR("hub device %s not ready", hub->name);
 		return -ENODEV;
 	}
 
-	fcan_router_t *r = fcan_router_zephyr_get(router);
-	if (r == NULL) {
-		LOG_ERR("fcan_router_zephyr_get returned NULL (router init failed)");
+	fcan_hub_t *h = fcan_hub_zephyr_get(hub);
+	if (h == NULL) {
+		LOG_ERR("fcan_hub_zephyr_get returned NULL (hub init failed)");
 		return -ENODEV;
 	}
 
@@ -139,11 +139,11 @@ int main(void)
 			.service_reassembly = FCAN_SERVICE_REASSEMBLY,
 			/* capacity fields filled below */
 		},
-		/* HAL comes from the router, not from a can_hal wrapper around
-		 * a physical Zephyr CAN device: the router internally proxies
-		 * this HAL onto its uplink, and the router thread drives
-		 * fcan_poll(self) via fcan_router_poll(). */
-		.hal = fcan_router_get_self_hal(r),
+		/* HAL comes from the hub, not from a can_hal wrapper around a
+		 * physical Zephyr CAN device: the hub broadcasts self TX onto
+		 * every live port, and the hub thread drives fcan_poll(self)
+		 * via fcan_hub_poll(). */
+		.hal = fcan_hub_get_self_hal(h),
 		.allocator = {.alloc = heap_alloc, .ctx = NULL},
 		.master_lost_us = MASTER_LOST_US,
 		/* .t_listen_us = 0 -> runtime picks the safe default. */
@@ -158,15 +158,15 @@ int main(void)
 		cfg.node_id, (unsigned long long)fcan_schema_hash,
 		(unsigned)fcan_schema_blob_len);
 
-	/* Attach BEFORE the router device is started (i.e. before the host can
-	 * open the gs_usb channel). fcan_router_attach_self mutates state the
-	 * router thread reads; docs/09-router.md documents this ordering. */
-	if (fcan_router_attach_self(r, self) != FCAN_OK) {
-		LOG_ERR("fcan_router_attach_self failed (fault=%d)",
+	/* Attach BEFORE the hub device is started (i.e. before the host can
+	 * open the gs_usb channel). fcan_hub_attach_self mutates state the
+	 * hub thread reads; docs/09-hub.md documents this ordering. */
+	if (fcan_hub_attach_self(h, self) != FCAN_OK) {
+		LOG_ERR("fcan_hub_attach_self failed (fault=%d)",
 			(int)fcan_fault(self));
 		return -EIO;
 	}
-	LOG_INF("fcan_router_attach_self OK");
+	LOG_INF("fcan_hub_attach_self OK");
 
 	if (fcan_register_all(self) != FCAN_OK) {
 		LOG_ERR("fcan_register_all failed (fault=%d)",
@@ -189,13 +189,13 @@ int main(void)
 		return rc;
 	}
 
-	const struct device *channels[] = {router};
+	const struct device *channels[] = {hub};
 	rc = gs_usb_register(gs_usb, channels, ARRAY_SIZE(channels), NULL, NULL);
 	if (rc != 0) {
 		LOG_ERR("gs_usb_register failed (%d)", rc);
 		return rc;
 	}
-	LOG_INF("gs_usb_register OK (1 channel: %s)", router->name);
+	LOG_INF("gs_usb_register OK (1 channel: %s)", hub->name);
 
 	rc = usbd_setup_enable();
 	if (rc != 0) {
@@ -210,12 +210,12 @@ int main(void)
 	uint32_t last_log_ms = 0;
 	uint32_t last_led_ms = 0;
 	while (true) {
-		/* Threading model: fcan_poll(self) runs on the router driver
-		 * thread (fcan_router_poll drives it at the end of each pass),
+		/* Threading model: fcan_poll(self) runs on the hub driver
+		 * thread (fcan_hub_poll drives it at the end of each pass),
 		 * so this main-thread app_logic_tick() must only use fcan APIs
 		 * that are documented cross-thread-safe -- topic begin/commit/
 		 * read and param_read are seqlock-protected per fcan_seqlock.h.
-		 * Do NOT call fcan_svc_complete from here: it races the router
+		 * Do NOT call fcan_svc_complete from here: it races the hub
 		 * thread's fcan_service_poll on the reassembly slots.
 		 * app_logic.c completes the `home` service synchronously to
 		 * keep that invariant, at the cost of skipping the ACCEPTED
@@ -239,18 +239,19 @@ int main(void)
 			last_led_ms = now_ms;
 		}
 
-		/* Router-oriented heartbeat log. fcan_router_get_diag() covers
-		 * both forwarding directions and every drop reason; we surface
-		 * the summary counters the operator needs to spot an
-		 * ingress-drop condition or a runaway downlink. */
+		/* Hub-oriented heartbeat log. fcan_hub_get_diag() reports
+		 * per-port fwd_count and the aggregate send-failure counter
+		 * (idle slots are excluded). port 0 is the external face
+		 * (gs_usb), port 1 is the fdcan1 peer segment. */
 		if ((now_ms - last_log_ms) >= 1000U) {
-			fcan_router_diag_t d;
-			fcan_router_get_diag(r, &d);
-			uint32_t ing_drops = fcan_router_zephyr_ingress_drops(router);
-			LOG_INF("alive: state=%s up->dn[0]=%u dn->up[0]=%u "
-				"drop_send=%u ingress_drops=%u",
+			fcan_hub_diag_t d;
+			fcan_hub_get_diag(h, &d);
+			uint32_t ing_drops = fcan_hub_zephyr_ingress_drops(hub);
+			LOG_INF("alive: state=%s fwd[0]=%u fwd[1]=%u "
+				"to_self=%u drop_send=%u ingress_drops=%u",
 				state_str(s),
-				d.fwd_up_to_down[0], d.fwd_down_to_up[0],
+				d.fwd_count[0], d.fwd_count[1],
+				d.delivered_to_self,
 				d.drop_send_failed, ing_drops);
 			last_log_ms = now_ms;
 		}

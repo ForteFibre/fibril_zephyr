@@ -10,10 +10,10 @@
  * Divergence from example_node/src/app_logic.c
  * --------------------------------------------
  * Unlike example_node -- which runs fcan_poll and app_logic_tick on the same
- * main thread -- the router+self topology puts fcan_poll(self) on the router
- * driver thread (via fcan_router_poll) while app_logic_tick() runs on main.
+ * main thread -- the hub+self topology puts fcan_poll(self) on the hub
+ * driver thread (via fcan_hub_poll) while app_logic_tick() runs on main.
  * Topic begin/commit/read and param_read stay safe across that boundary via
- * fcan_seqlock.h. fcan_svc_complete() does NOT: it races the router thread's
+ * fcan_seqlock.h. fcan_svc_complete() does NOT: it races the hub thread's
  * fcan_service_poll on the reassembly slots. So the `home` service handler
  * completes synchronously here (returns FCAN_SVC_OK with a filled response)
  * instead of stashing a handle for a later motordriver_home_complete call.
@@ -186,9 +186,9 @@ fcan_svc_status_t motordriver_home(uint8_t inst,
 		g_axis.velocity = 0.0f;
 	}
 	/* Synchronous completion: fill the response and return OK so the runtime
-	 * sends it from this call's context (router driver thread). The
+	 * sends it from this call's context (hub driver thread). The
 	 * deferred-response path (FCAN_SVC_ACCEPTED + motordriver_home_complete
-	 * later) would trip on the router-thread vs app-thread race documented at
+	 * later) would trip on the hub-thread vs app-thread race documented at
 	 * the top of this file. */
 	resp->success = true;
 	return FCAN_SVC_OK;

@@ -1,9 +1,9 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * router+self+gs_usb sample on the Fibril RoboMaster Mini V1.
- *   uplink   = USB FS (PA11/PA12) -> gs_usb subsys -> fcan_router device
- *   downlink = FDCAN1 (PD0/PD1)   (board DTS already sets pinctrl + PLL_Q clock)
+ * hub+self+gs_usb sample on the Fibril RoboMaster Mini V1.
+ *   external port (port 0) = USB FS (PA11/PA12) -> gs_usb subsys -> fcan_hub device
+ *   peer port     (port 1) = FDCAN1 (PD0/PD1)   (board DTS already sets pinctrl + PLL_Q clock)
  *
  * The board's HSI48 + CLK48_SEL(0) supply the USB 48 MHz clock. This overlay
  * moves the PLL source from HSE (board DTS default) to HSI16 so the sample
@@ -19,12 +19,10 @@
 		label = "gs_usb";
 	};
 
-	fcan_router: fcan_router {
-		compatible = "fibril,can-router";
+	fcan_hub: fcan_hub {
+		compatible = "fibril,can-hub";
 		status = "okay";
-		downlinks = <&fdcan1>;
-		max-stdids = <256>;
-		max-node-ids = <32>;
+		peers = <&fdcan1>;
 	};
 };
 

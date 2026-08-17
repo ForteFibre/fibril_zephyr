@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Minimal usbd_next boilerplate for the router+self+gs_usb sample.
+ * Minimal usbd_next boilerplate for the hub+self+gs_usb sample.
  *
  * Compared to CANnectivity's app/src/usb.c this drops:
  *   - HS configuration      (Mini V1 is USB FS only)

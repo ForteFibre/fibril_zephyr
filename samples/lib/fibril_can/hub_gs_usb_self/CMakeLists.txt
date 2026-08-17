@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Zephyr sample: fibril_can router + self node driven over CANnectivity's gs_usb
-# uplink. Codegen produces the schema wrappers at build time from
+# Zephyr sample: fibril_can hub + self node driven over CANnectivity's gs_usb
+# external port. Codegen produces the schema wrappers at build time from
 # fibril_can_example/schema/example_node.yaml (same schema as example_node so
 # the C service handlers and app_logic can be shared verbatim).
 #
@@ -12,7 +12,7 @@
 cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
-project(fibril_can_router_gs_usb_self LANGUAGES C)
+project(fibril_can_hub_gs_usb_self LANGUAGES C)
 
 if(NOT ZEPHYR_FIBRIL_CAN_MODULE_DIR)
   message(FATAL_ERROR
