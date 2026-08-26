@@ -1,0 +1,6 @@
+board:
+  name: fibril_canmotor_tourobo2023
+  full_name: Fibril CanMotor Tourobo 2023
+  vendor: fibril
+  socs:
+    - name: stm32f407xx
