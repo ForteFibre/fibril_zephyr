@@ -1,0 +1,29 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * latency_probe_node bring-up on the Fibril RoboMaster Mini V1. The board DTS
+ * already routes fdcan1 pinctrl to PD0/PD1 and sources its kernel clock from
+ * PLL_Q (80 MHz); this overlay enables the controller, picks a bitrate,
+ * publishes it as zephyr,canbus, and turns on the on-chip RNG so
+ * fcan_config_t::boot_id has a real entropy source.
+ *
+ * Bitrate values here are the ones the implementer README reports in the
+ * "physical layer" section (firmware-requirements §9). Change both properties
+ * together when swapping to a different benchmark configuration.
+ */
+
+/ {
+	chosen {
+		zephyr,canbus = &fdcan1;
+	};
+};
+
+&fdcan1 {
+	status = "okay";
+	bitrate = <1000000>;
+	bitrate-data = <5000000>;
+};
+
+&rng {
+	status = "okay";
+};

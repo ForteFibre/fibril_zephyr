@@ -1,0 +1,240 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Board configuration for the Fibril CanMotor Tourobo 2023. Pin assignments and
+ * clock config are taken from CanMotorMbed/src/targets/canmotor_tourobo2023 so
+ * that hardware built for that firmware works unmodified.
+ */
+
+/dts-v1/;
+#include <st/f4/stm32f407Xg.dtsi>
+#include <st/f4/stm32f407v(e-g)tx-pinctrl.dtsi>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	model = "Fibril CanMotor Tourobo 2023";
+	compatible = "fibril,canmotor-tourobo2023";
+
+	chosen {
+		zephyr,console = &usart3;
+		zephyr,shell-uart = &usart3;
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,dtcm = &ccm0;
+	};
+
+	leds: leds {
+		compatible = "gpio-leds";
+
+		led_r: led_r {
+			gpios = <&gpiob 11 GPIO_ACTIVE_HIGH>;
+			label = "LED R";
+		};
+
+		led_g: led_g {
+			gpios = <&gpioe 15 GPIO_ACTIVE_HIGH>;
+			label = "LED G";
+		};
+
+		led_b: led_b {
+			gpios = <&gpiob 10 GPIO_ACTIVE_HIGH>;
+			label = "LED B";
+		};
+
+		user_led: user_led {
+			gpios = <&gpioe 9 GPIO_ACTIVE_HIGH>;
+			label = "LED 0";
+		};
+	};
+
+	gpio_keys {
+		compatible = "gpio-keys";
+
+		user_button: sw0 {
+			label = "SW0";
+			gpios = <&gpioe 8 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			zephyr,code = <INPUT_KEY_0>;
+		};
+	};
+
+	/* Four-position BCD rotary DIP switch (ROT1|ROT2|ROT4|ROT8, active low).
+	 * Read as a nibble to derive per-unit CAN IDs / hostnames, matching the
+	 * mbed target's Hardware() constructor. Not a gpio-keys input source.
+	 */
+	rotary_id: rotary_id {
+		compatible = "gpio-keys";
+		status = "okay";
+
+		rot1: rot1 {
+			label = "ROT1";
+			gpios = <&gpioe 14 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			zephyr,code = <INPUT_KEY_1>;
+		};
+
+		rot2: rot2 {
+			label = "ROT2";
+			gpios = <&gpioe 11 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			zephyr,code = <INPUT_KEY_2>;
+		};
+
+		rot4: rot4 {
+			label = "ROT4";
+			gpios = <&gpioe 13 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			zephyr,code = <INPUT_KEY_3>;
+		};
+
+		rot8: rot8 {
+			label = "ROT8";
+			gpios = <&gpioe 12 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			zephyr,code = <INPUT_KEY_4>;
+		};
+	};
+
+	aliases {
+		led0 = &led_g;
+		sw0 = &user_button;
+		watchdog0 = &iwdg;
+	};
+};
+
+/* HSE 25 MHz crystal -> PLL -> 168 MHz SYSCLK. PLL_Q at 48 MHz feeds USB OTG
+ * FS. Matches the clock tree in CanMotorMbed/src/targets/canmotor_tourobo2023/
+ * system_clock.c.
+ */
+&clk_hse {
+	clock-frequency = <DT_FREQ_M(25)>;
+	status = "okay";
+};
+
+&pll {
+	div-m = <25>;
+	mul-n = <336>;
+	div-p = <2>;
+	div-q = <7>;
+	clocks = <&clk_hse>;
+	status = "okay";
+};
+
+&rcc {
+	clocks = <&pll>;
+	clock-frequency = <DT_FREQ_M(168)>;
+	ahb-prescaler = <1>;
+	apb1-prescaler = <4>;
+	apb2-prescaler = <2>;
+};
+
+/* Debug UART broken out on PD8/PD9 as DEBUG_TX / DEBUG_RX. */
+&usart3 {
+	pinctrl-0 = <&usart3_tx_pd8 &usart3_rx_pd9>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};
+
+/* TIM3 drives the M0 (PA6/PA7) and M1 (PB0/PB1) H-bridge inputs. */
+&timers3 {
+	status = "okay";
+
+	pwm3: pwm {
+		status = "okay";
+		pinctrl-0 = <&tim3_ch1_pa6 &tim3_ch2_pa7
+			     &tim3_ch3_pb0 &tim3_ch4_pb1>;
+		pinctrl-names = "default";
+	};
+};
+
+/* TIM5 drives the M2 (PA0/PA1) and M3 (PA2/PA3) H-bridge inputs. */
+&timers5 {
+	status = "okay";
+
+	pwm5: pwm {
+		status = "okay";
+		pinctrl-0 = <&tim5_ch1_pa0 &tim5_ch2_pa1
+			     &tim5_ch3_pa2 &tim5_ch4_pa3>;
+		pinctrl-names = "default";
+	};
+};
+
+/* SPI2 talks to the on-board MCP2517FD CAN FD controller.
+ * SCK=PB13, MISO=PB14, MOSI=PB15; CS=PB9; IRQ=PC14.
+ * Board mounts a 20 MHz crystal on the MCP2517FD, so SYSCLK = 20 MHz with
+ * pll-enable left off (PLL is ×10 and would push SYSCLK past the 40 MHz spec).
+ * At SYSCLK 20 MHz the data phase needs ≥8 tq/bit → ≤2.5 Mbps; overlays that
+ * want 5 Mbps data must swap the crystal and enable pll-enable / re-derive
+ * osc-freq accordingly.
+ */
+&spi2 {
+	pinctrl-0 = <&spi2_sck_pb13 &spi2_miso_pb14 &spi2_mosi_pb15>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpiob 9 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	fdcan: mcp2517fd@0 {
+		compatible = "microchip,mcp251xfd";
+		reg = <0x0>;
+		spi-max-frequency = <DT_FREQ_M(10)>;
+		int-gpios = <&gpioc 14 GPIO_ACTIVE_LOW>;
+		osc-freq = <DT_FREQ_M(20)>;
+		bitrate = <1000000>;
+
+		can-transceiver {
+			max-bitrate = <5000000>;
+		};
+	};
+};
+
+/* SPI3 talks to the on-board MCP3208 12-bit external ADC.
+ * SCK=PC10, MISO=PC11, MOSI=PC12; CS=PD0. fCLK max is 1 MHz at 3.3 V.
+ */
+&spi3 {
+	pinctrl-0 = <&spi3_sck_pc10 &spi3_miso_pc11 &spi3_mosi_pc12>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpiod 0 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	mcp3208: mcp3208@0 {
+		compatible = "microchip,mcp3208";
+		reg = <0x0>;
+		spi-max-frequency = <1000000>;
+		#io-channel-cells = <1>;
+	};
+};
+
+zephyr_udc0: &usbotg_fs {
+	pinctrl-0 = <&usb_otg_fs_dm_pa11 &usb_otg_fs_dp_pa12>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&iwdg {
+	status = "okay";
+};
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 DT_SIZE_K(64)>;
+			read-only;
+		};
+
+		slot0_partition: partition@10000 {
+			label = "image-0";
+			reg = <0x00010000 DT_SIZE_K(448)>;
+		};
+
+		slot1_partition: partition@80000 {
+			label = "image-1";
+			reg = <0x00080000 DT_SIZE_K(448)>;
+		};
+
+		storage_partition: partition@f0000 {
+			label = "storage";
+			reg = <0x000f0000 DT_SIZE_K(64)>;
+		};
+	};
+};

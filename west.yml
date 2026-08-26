@@ -24,3 +24,7 @@ manifest:
       url: https://github.com/CANnectivity/cannectivity.git
       revision: v1.4.0
       path: modules/third_party/cannectivity
+    - name: fibril_can
+      url: https://github.com/ForteFibre/fibril_can.git
+      revision: main
+      path: modules/lib/fibril_can

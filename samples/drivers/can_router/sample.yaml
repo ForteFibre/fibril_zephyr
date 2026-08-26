@@ -1,0 +1,17 @@
+sample:
+  name: fibril_can router as CAN device
+  description: >-
+    Drive the "fibril,can-router" Zephyr CAN controller from can_send(), print
+    fcan_router_get_diag() counters, and observe uplink deliveries through an
+    RX filter. Board overlays supply the downlinks; the shipped native_sim
+    variant uses two zephyr,can-loopback controllers.
+
+tests:
+  sample.drivers.can_router:
+    tags:
+      - drivers
+      - can
+    filter: dt_compat_enabled("fibril,can-router")
+    harness: console
+    integration_platforms:
+      - native_sim
