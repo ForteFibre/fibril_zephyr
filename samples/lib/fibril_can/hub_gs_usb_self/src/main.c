@@ -84,6 +84,7 @@ static const char *state_str(fcan_node_state_t s)
 	case FCAN_STATE_PROVISIONED:   return "PROVISIONED";
 	case FCAN_STATE_RUNNING:       return "RUNNING";
 	case FCAN_STATE_FAULT:         return "FAULT";
+	case FCAN_STATE_SUSPENDED:     return "SUSPENDED";
 	default:                       return "?";
 	}
 }
@@ -220,7 +221,7 @@ int main(void)
 		 * app_logic.c completes the `home` service synchronously to
 		 * keep that invariant, at the cost of skipping the ACCEPTED
 		 * demo the example_node sample carries. */
-		app_logic_tick(0.001f);
+		app_logic_tick(0.01f);
 
 		const fcan_node_state_t s = fcan_state(self);
 		if (s != last_state) {
@@ -256,7 +257,7 @@ int main(void)
 			last_log_ms = now_ms;
 		}
 
-		k_msleep(1);
+		k_msleep(10);
 	}
 	/* unreachable */
 }
