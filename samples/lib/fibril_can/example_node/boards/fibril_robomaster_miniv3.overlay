@@ -1,0 +1,66 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * fibril_can example_node bring-up on the Fibril RoboMaster Mini V3. The board
+ * DTS already routes fdcan1 pinctrl to PD0/PD1 (external CAN transceiver) and
+ * sources its kernel clock from PLL_Q (80 MHz); this overlay just enables the
+ * controller, picks a bitrate, publishes it as zephyr,canbus, and turns on the
+ * on-chip RNG so fcan_config_t::boot_id has a real entropy source.
+ *
+ * Like miniv4, this revision wires a software-visible standby pin (STN=PB11)
+ * to the external CAN transceiver. The Mbed target drives it low to exit
+ * standby before any traffic, so we hog PB11 output-low here to keep the
+ * transceiver in normal mode before the driver starts talking.
+ */
+
+/ {
+	chosen {
+		zephyr,canbus = &fdcan1;
+	};
+};
+
+&fdcan1 {
+	status = "okay";
+
+	/* 1 Mbps arbitration / 5 Mbps FD data phase. With PLL_Q @ 80 MHz that is
+	 * 80 tq @ 1 Mbps and 16 tq @ 5 Mbps -- comfortable margin for the driver's
+	 * default sample-point picks. If a deployment needs a different bitrate,
+	 * change these two properties only.
+	 */
+	bitrate = <1000000>;
+	bitrate-data = <5000000>;
+};
+
+/* sys_rand32_get() in the sample's main.c seeds fcan_config_t::boot_id. The
+ * board DTS keeps CLK48_SEL on HSI48 already, so enabling the RNG node is all
+ * the extra clocking it needs.
+ */
+&rng {
+	status = "okay";
+};
+
+&gpiob {
+	can_stb_hog {
+		gpio-hog;
+		gpios = <11 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "CAN_STB";
+	};
+};
+&clk_hse {
+	status = "disabled";
+};
+
+&clk_hsi {
+	status = "okay";
+};
+
+&pll {
+	div-m = <4>;
+	mul-n = <80>;
+	div-p = <2>;
+	div-q = <4>;
+	div-r = <2>;
+	clocks = <&clk_hsi>;
+	status = "okay";
+};

@@ -26,6 +26,8 @@ tests:
     integration_platforms:
       - native_sim
       - fibril_robomaster_miniv1
+      - fibril_robomaster_miniv3
+      - fibril_robomaster_miniv4
     # Twister needs to know where fcan_codegen lives before it can build this
     # sample. Set FCAN_CODEGEN in the environment before invoking twister:
     #   FCAN_CODEGEN=/abs/path/fcan_codegen twister -T fibril_zephyr/samples/lib/fibril_can/example_node
