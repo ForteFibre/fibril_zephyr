@@ -103,6 +103,7 @@ static const char *state_str(fcan_node_state_t s)
 	case FCAN_STATE_PROVISIONED:   return "PROVISIONED";
 	case FCAN_STATE_RUNNING:       return "RUNNING";
 	case FCAN_STATE_FAULT:         return "FAULT";
+	case FCAN_STATE_SUSPENDED:     return "SUSPENDED";
 	default:                       return "?";
 	}
 }
@@ -184,13 +185,13 @@ int main(void)
 		cfg.node_id, (unsigned long long)fcan_schema_hash,
 		(unsigned)fcan_schema_blob_len);
 
-	fcan_zephyr_can_hal_attach_node(&hal, node);
-
 	if (fcan_register_all(node) != FCAN_OK) {
 		LOG_ERR("fcan_register_all failed (fault=%d)", (int)fcan_fault(node));
 		return -EIO;
 	}
 	LOG_INF("fcan_register_all OK");
+
+	fcan_zephyr_can_hal_attach_node(&hal, node);
 
 	app_logic_init();
 	rgb_state_init();
