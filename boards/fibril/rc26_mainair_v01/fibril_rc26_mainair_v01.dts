@@ -232,19 +232,11 @@
 	clock-frequency = <I2C_BITRATE_STANDARD>;
 };
 
-/* Quadrature encoder inputs. TIM3_CH1/CH2 on PB4/PB5 for J11 (Encoder3) and
- * TIM4_CH1/CH2 on PB6/PB7 for J12 (Encoder4). Pinctrl is set here; overlays
- * enable the timer and attach an st,stm32-qdec child.
+/* Quadrature encoder inputs. J11 (Encoder3) is wired to TIM3_CH1/CH2 on
+ * PB4/PB5 and J12 (Encoder4) to TIM4_CH1/CH2 on PB6/PB7. Overlays enable the
+ * timer and attach an st,stm32-qdec child that carries the pinctrl; the
+ * timer node itself does not take pinctrl-0.
  */
-&timers3 {
-	pinctrl-0 = <&tim3_ch1_pb4 &tim3_ch2_pb5>;
-	pinctrl-names = "default";
-};
-
-&timers4 {
-	pinctrl-0 = <&tim4_ch1_pb6 &tim4_ch2_pb7>;
-	pinctrl-names = "default";
-};
 
 /* Addressable RGB LED D10 (WS281x-family) hangs off PB9. PB9 can be driven by
  * TIM17_CH1 or SPI2_NSS — leave the pin free here and let overlays pick a
