@@ -1,0 +1,290 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Board configuration for the Fibril RC26 MainAir V01. Pin assignments are
+ * taken from RC26_MainAir_v01.kicad_sch (ForteFibre_PCB/MainBoard). The MCU is
+ * STM32G474RE in LQFP-64 with a 24 MHz HSE, and the board carries two CAN FD
+ * transceivers, five UART breakouts, a USB-C device port, two quadrature
+ * encoder sockets, an I2C gyro socket, and six +12 V pneumatic-valve outputs
+ * driven through a TBD62783A source driver.
+ */
+
+/dts-v1/;
+#include <st/g4/stm32g474Xe.dtsi>
+#include <st/g4/stm32g474r(b-c-e)tx-pinctrl.dtsi>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	model = "Fibril RC26 MainAir V01";
+	compatible = "fibril,rc26-mainair-v01";
+
+	chosen {
+		/* USART3 is wired to the SWD/debug header J1 (pins 4/5) and to
+		 * the J13 PH breakout. Both share the same series network, so
+		 * only one may be attached at a time.
+		 */
+		zephyr,console = &usart3;
+		zephyr,shell-uart = &usart3;
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+	};
+
+	leds: leds {
+		compatible = "gpio-leds";
+
+		/* RGB status LED D5 (common-cathode, driven high to light). */
+		led_r: led_r {
+			gpios = <&gpioc 13 GPIO_ACTIVE_HIGH>;
+			label = "LED R";
+		};
+
+		led_g: led_g {
+			gpios = <&gpioc 15 GPIO_ACTIVE_HIGH>;
+			label = "LED G";
+		};
+
+		led_b: led_b {
+			gpios = <&gpioc 14 GPIO_ACTIVE_HIGH>;
+			label = "LED B";
+		};
+
+		/* Standalone user LED D4 next to the RGB indicator. */
+		led_user: led_user {
+			gpios = <&gpioc 1 GPIO_ACTIVE_HIGH>;
+			label = "LED0";
+		};
+	};
+
+	/* Six +12 V high-side switched outputs feeding the pneumatic-valve
+	 * connectors J18–J23. Each MCU pin drives an input of the TBD62783A
+	 * source driver (U13); the labels match the board silkscreen.
+	 */
+	air_outputs: air_outputs {
+		compatible = "gpio-leds";
+
+		air0: air0 {
+			gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;
+			label = "Air0";
+		};
+
+		air1: air1 {
+			gpios = <&gpioa 6 GPIO_ACTIVE_HIGH>;
+			label = "Air1";
+		};
+
+		air2: air2 {
+			gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;
+			label = "Air2";
+		};
+
+		air3: air3 {
+			gpios = <&gpioa 5 GPIO_ACTIVE_HIGH>;
+			label = "Air3";
+		};
+
+		air4: air4 {
+			gpios = <&gpioa 7 GPIO_ACTIVE_HIGH>;
+			label = "Air4";
+		};
+
+		air5: air5 {
+			gpios = <&gpioa 4 GPIO_ACTIVE_HIGH>;
+			label = "Air5";
+		};
+	};
+
+	/* User pushbutton SW2 (BootSW), momentary-to-GND with an external
+	 * pull-up. Not wired to STM32 BOOT0 — plain GPIO input.
+	 */
+	buttons: buttons {
+		compatible = "gpio-keys";
+		status = "okay";
+
+		user_button: user_button {
+			label = "BootSW";
+			gpios = <&gpiob 8 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			zephyr,code = <INPUT_KEY_0>;
+		};
+	};
+
+	aliases {
+		led0 = &led_user;
+		watchdog0 = &iwdg;
+		/* Board silkscreen labels the CAN buses "CAN0"/"CAN1", but the
+		 * underlying FDCAN instances are swapped: external CAN0 uses
+		 * FDCAN3 (PA8/PA15) and external CAN1 uses FDCAN2 (PB12/PB13).
+		 */
+		can0 = &fdcan3;
+		can1 = &fdcan2;
+		sw0 = &user_button;
+	};
+};
+
+/* HSE 24 MHz crystal (Y1) -> PLL -> 160 MHz SYSCLK. HSI48 is left on so USB and
+ * other 48 MHz peripherals can source from it through CLK48_SEL when needed.
+ */
+&clk_hse {
+	clock-frequency = <DT_FREQ_M(24)>;
+	status = "okay";
+};
+
+&clk_hsi48 {
+	status = "okay";
+};
+
+/* PLL_Q is used as the FDCAN kernel clock (see &fdcan2/&fdcan3 below). We need
+ * it at or below FDCAN's 80 MHz ceiling and high enough that the 5 Mbps FD
+ * data phase has integer time-quanta per bit. VCO = 24 MHz / div-m * mul-n =
+ * 320 MHz, so div-q = 4 lands PLL_Q at 80 MHz — 16 tq @ 5 Mbps, 80 tq @
+ * 1 Mbps. HSE (24 MHz) would leave 4.8 tq/bit at 5 Mbps, not representable.
+ */
+&pll {
+	div-m = <6>;
+	mul-n = <80>;
+	div-p = <2>;
+	div-q = <4>;
+	div-r = <2>;
+	clocks = <&clk_hse>;
+	status = "okay";
+};
+
+&rcc {
+	clocks = <&pll>;
+	clock-frequency = <DT_FREQ_M(160)>;
+	ahb-prescaler = <1>;
+	apb1-prescaler = <1>;
+	apb2-prescaler = <1>;
+};
+
+/* USART1 -> J14 PH UART breakout (TX=PC4, RX=PC5). */
+&usart1 {
+	pinctrl-0 = <&usart1_tx_pc4 &usart1_rx_pc5>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+};
+
+/* USART2 -> J16 PH UART breakout (TX=PA2, RX=PA3). */
+&usart2 {
+	pinctrl-0 = <&usart2_tx_pa2 &usart2_rx_pa3>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+};
+
+/* USART3 is the console: SWD/debug header J1 (pins 4/5) and J13 PH share the
+ * same TX/RX network, so only one may be attached at a time.
+ */
+&usart3 {
+	pinctrl-0 = <&usart3_tx_pb10 &usart3_rx_pb11>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};
+
+/* UART4 -> J17 PH UART breakout (TX=PC10, RX=PC11). */
+&uart4 {
+	pinctrl-0 = <&uart4_tx_pc10 &uart4_rx_pc11>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+};
+
+/* UART5 is fanned out to J15 PH UART and J25 gyro socket (pins 3/4). Same
+ * collision rule as USART3 — only one of the two may be attached at a time.
+ */
+&uart5 {
+	pinctrl-0 = <&uart5_tx_pc12 &uart5_rx_pd2>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+};
+
+/* All FDCAN kernel-clocks are PLL_Q at 80 MHz — the FDCAN ceiling. That
+ * kernel rate is shared across every FDCAN instance on this SoC and is high
+ * enough to divide cleanly at both 1 Mbps arbitration (80 tq/bit) and 5 Mbps
+ * FD data (16 tq/bit). Overlays only need to flip status to "okay" and set
+ * the bitrate.
+ *
+ * FDCAN1 has no transceiver on this board — leave it disabled.
+ */
+
+/* External CAN1 (board label) -> FDCAN2 transceiver IC1 on PB12/PB13.
+ * IC1 STB is on PA10 (drive low to run, high for standby).
+ */
+&fdcan2 {
+	clocks = <&rcc STM32_CLOCK(APB1, 25)>,
+		 <&rcc STM32_SRC_PLL_Q FDCAN_SEL(1)>;
+	pinctrl-0 = <&fdcan2_rx_pb12 &fdcan2_tx_pb13>;
+	pinctrl-names = "default";
+};
+
+/* External CAN0 (board label) -> FDCAN3 transceiver IC2 on PA8/PA15.
+ * IC2 STB is on PA9 (drive low to run, high for standby).
+ */
+&fdcan3 {
+	clocks = <&rcc STM32_CLOCK(APB1, 25)>,
+		 <&rcc STM32_SRC_PLL_Q FDCAN_SEL(1)>;
+	pinctrl-0 = <&fdcan3_rx_pa8 &fdcan3_tx_pa15>;
+	pinctrl-names = "default";
+};
+
+/* I2C4 -> J26 gyro socket (SCL=PC6, SDA=PC7). 4.7 kΩ pull-ups on board. */
+&i2c4 {
+	pinctrl-0 = <&i2c4_scl_pc6 &i2c4_sda_pc7>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+};
+
+/* Quadrature encoder inputs. TIM3_CH1/CH2 on PB4/PB5 for J11 (Encoder3) and
+ * TIM4_CH1/CH2 on PB6/PB7 for J12 (Encoder4). Pinctrl is set here; overlays
+ * enable the timer and attach an st,stm32-qdec child.
+ */
+&timers3 {
+	pinctrl-0 = <&tim3_ch1_pb4 &tim3_ch2_pb5>;
+	pinctrl-names = "default";
+};
+
+&timers4 {
+	pinctrl-0 = <&tim4_ch1_pb6 &tim4_ch2_pb7>;
+	pinctrl-names = "default";
+};
+
+/* Addressable RGB LED D10 (WS281x-family) hangs off PB9. PB9 can be driven by
+ * TIM17_CH1 or SPI2_NSS — leave the pin free here and let overlays pick a
+ * driver.
+ */
+
+zephyr_udc0: &usb {
+	pinctrl-0 = <&usb_dm_pa11 &usb_dp_pa12>;
+	pinctrl-names = "default";
+};
+
+&iwdg {
+	status = "okay";
+};
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 DT_SIZE_K(48)>;
+			read-only;
+		};
+
+		slot0_partition: partition@c000 {
+			label = "image-0";
+			reg = <0x0000c000 DT_SIZE_K(228)>;
+		};
+
+		slot1_partition: partition@45000 {
+			label = "image-1";
+			reg = <0x00045000 DT_SIZE_K(228)>;
+		};
+
+		storage_partition: partition@7e000 {
+			label = "storage";
+			reg = <0x0007e000 DT_SIZE_K(8)>;
+		};
+	};
+};
