@@ -1,0 +1,6 @@
+board:
+  name: fibril_rc26_mainair_v01
+  full_name: Fibril RC26 MainAir V01
+  vendor: fibril
+  socs:
+    - name: stm32g474xx

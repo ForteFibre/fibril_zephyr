@@ -1,0 +1,17 @@
+identifier: fibril_rc26_mainair_v01
+name: Fibril RC26 MainAir V01
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+  - gnuarmemb
+ram: 128
+flash: 512
+supported:
+  - gpio
+  - uart
+  - dma
+  - can
+  - i2c
+  - usb_device
+vendor: fibril
