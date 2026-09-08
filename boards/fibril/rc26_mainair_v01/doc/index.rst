@@ -149,8 +149,10 @@ devicetree に書かれていないペリフェラル
 基板上には配線があるが、devicetree ではノードを持たないものがある。
 
 直交エンコーダ入力は、J11（Encoder3）が PB4/PB5 の TIM3_CH1/CH2、J12（Encoder4）が PB6/PB7 の TIM4_CH1/CH2 につながっている。
-使うときは overlay でタイマーを有効にし、pinctrl を持つ ``st,stm32-qdec`` の子ノードを付ける。
+使うときは overlay でタイマーを有効にし、pinctrl を持つ ``fibril,stm32-qdec`` の子ノードを付ける。
 タイマーノード自身は ``pinctrl-0`` を取らない。
+子ノードの名前に ``qdec`` は使えない（SoC の dtsi が各タイマーの下に同名の無効ノードを持っている）。
+詳細は :doc:`/drivers/qdec_stm32` にある。
 
 アドレサブル RGB LED（D10、WS281x 系）は PB9 につながっている。
 PB9 は TIM17_CH1 と SPI2_NSS のどちらでも駆動できるため、devicetree ではピンを空けたままにして overlay に選ばせる。
