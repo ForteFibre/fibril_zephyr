@@ -120,15 +120,28 @@ refactor(samples): hub_gs_usb_latency_probe main.c を整形
 ## コードスタイル
 
 `.clang-format` を置いていないため、整形は強制されていない。
-既存のコードは次の形に揃っているので、それに合わせる。
+スコープごとに違う形が使われているので、触るファイルの周囲に合わせる。
+
+**`drivers/` と `include/` の C コード**（下記の上流由来のファイルを除く）
 
 - インデントは半角スペース 2 つ
-- `struct` と `enum` の定義は、名前の次の行に `{` を置く。関数と制御構文は同じ行に置く
+- `struct` の定義と関数定義は、次の行に `{` を置く
+- `enum` の定義と制御構文は、同じ行に `{` を置く
 - ポインタは `const struct device * dev` のように `*` の両側を空ける
-- devicetree のファイル（`.dts`、`.overlay`、binding の YAML）はタブでインデントする
 
-Zephyr 上流のスタイルとは異なる。
-上流から取り込んだファイルを触るときは、そのファイルの既存のスタイルに従い、無関係な整形を混ぜない。
+**`samples/` の C コード**
+
+Zephyr 上流のスタイルに従う。
+インデントはタブ、ポインタは `struct can_frame *frame` と詰める。
+
+**devicetree と binding**
+
+- `boards/` の `.dts` はタブ
+- `app/` の overlay は半角スペース 4 つ
+- `dts/bindings/` の YAML は半角スペース 2 つ（YAML はタブを許さない）
+
+上流から取り込んだ `drivers/blink/`、`drivers/sensor/example_sensor/`、`include/app/` はタブのままである。
+これらを触るときもそのファイルの形に従い、無関係な整形を混ぜない。
 
 ## 上流由来の残骸
 
