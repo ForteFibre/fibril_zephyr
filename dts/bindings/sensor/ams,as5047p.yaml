@@ -1,0 +1,8 @@
+# Copyright (c) 2026 Forte Fibre
+# SPDX-License-Identifier: Apache-2.0
+
+description: ams AS5047P SPI angular position sensor
+
+compatible: "ams,as5047p"
+
+include: ["spi-device.yaml", "sensor-device.yaml"]

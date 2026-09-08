@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Forte Fibre
+# SPDX-License-Identifier: Apache-2.0
+
+config AS5047P
+	bool "AS5047P angular position sensor"
+	default y
+	depends on DT_HAS_AMS_AS5047P_ENABLED
+	select SPI
+	help
+	  Enable driver for the ams AS5047P SPI angular position sensor.
