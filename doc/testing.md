@@ -31,6 +31,7 @@ west twister -T app --integration
 
 | パス | 対象 | プラットフォーム |
 | --- | --- | --- |
+| `tests/drivers/encoder/accum` | 積算・速度・オフセットの共通コア | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/encoder/amt21` | AMT21x ドライバ | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/motor/robomaster` | RoboMaster ドライバ | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/motor/robomaster_start_retry` | 起動できない CAN バスからの復帰 | `native_sim`、`native_sim/native/64` |
@@ -38,6 +39,11 @@ west twister -T app --integration
 
 いずれも実機を必要としない。
 ハードウェアの振る舞いはテスト側のスタブで模擬しており、`native_sim` 上で完結する。
+
+`tests/drivers/encoder/accum` だけはデバイスを介さず、`drivers/encoder/encoder_accum.c` を直接ビルドして関数を呼ぶ。
+STM32 のタイマには `uart_emul` に相当するエミュレータがなく、`drivers/encoder/qdec_stm32.c` は `native_sim` ではコンパイルできない。
+直交エンコーダドライバのうちテストできるのは、この共通コアに切り出した部分だけである。
+`CONFIG_ENCODER=n` にしてあるのは、有効にすると `drivers/encoder` のライブラリが同じオブジェクトを二重にリンクするためである。
 
 ## Kconfig の組み合わせ
 
