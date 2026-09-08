@@ -12,6 +12,15 @@ extern "C" {
 /**
  * @file
  * @brief Generic motor driver interface.
+ *
+ * This class covers motor controllers that accept a command in one output
+ * domain and report the most recent measurements as a snapshot. Reading a
+ * snapshot never blocks on the underlying transport, which makes it usable
+ * from a control loop.
+ *
+ * @defgroup motor_interface Motor driver class
+ * @ingroup drivers
+ * @{
  */
 
 /**
@@ -178,6 +187,8 @@ static inline int z_impl_motor_get_feedback(const struct device * dev, void * fe
 
   return api->get_feedback(dev, feedback);
 }
+
+/** @} */
 
 #ifdef __cplusplus
 }

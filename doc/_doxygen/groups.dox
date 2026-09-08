@@ -11,6 +11,9 @@
  * @ingroup encoder_interface
  * @brief Diagnostics specific to the Same Sky AMT21x driver
  *
+ * @defgroup motor_interface Motor driver class
+ * @brief Generic motor interface
+ *
  * @}
  */
 
