@@ -82,6 +82,7 @@ west build -b <ボード名> app -- -DEXTRA_CONF_FILE=debug.conf
 | パス | 内容 |
 | --- | --- |
 | [samples/drivers/amt21](samples/drivers/amt21) | AMT21x アブソリュートエンコーダの読み出し |
+| [samples/drivers/qdec](samples/drivers/qdec) | STM32 タイマでデコードした直交エンコーダの読み出し |
 | [samples/drivers/can_router](samples/drivers/can_router) | fibril_can のルータを Zephyr の CAN デバイスとして使う |
 | [samples/lib/fibril_can/example_node](samples/lib/fibril_can/example_node) | codegen 出力を使った fibril_can スレーブノード |
 | [samples/lib/fibril_can/hub_gs_usb_self](samples/lib/fibril_can/hub_gs_usb_self) | CAN hub と self ノードを CANnectivity の `gs_usb` 経由で PC に見せる |

@@ -1,0 +1,15 @@
+config ENCODER_QDEC_STM32
+	bool "STM32 timer quadrature encoder driver"
+	default y
+	depends on DT_HAS_FIBRIL_STM32_QDEC_ENABLED
+	select PINCTRL
+	help
+	  Enable support for a quadrature encoder decoded by an STM32 general
+	  purpose timer. The timer counts edges in hardware; the driver samples
+	  the counter periodically so that the accumulated position stays
+	  continuous across the counter's wrap.
+
+	  This is not the upstream st,stm32-qdec driver. That one sets the
+	  timer's auto-reload to a multiple of the counts per revolution and
+	  does not publish the value, which leaves a consumer unable to tell
+	  where the counter wraps.

@@ -9,3 +9,9 @@ tests:
       - encoder
     filter: dt_compat_enabled("cui,amt21")
     harness: console
+    # A console harness without a configuration is rejected when twister loads
+    # the testsuite, so the sample would not even be discovered.
+    harness_config:
+      type: one_line
+      regex:
+        - "amt21_read: .*ret=-?\\d+ pos=-?\\d+ .*single=\\d+ turns=-?\\d+"

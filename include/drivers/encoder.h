@@ -198,6 +198,9 @@ __syscall int encoder_get_feedback(const struct device * dev, void * feedback);
  * @param dev Encoder device instance.
  * @param resolution Destination for the resolution in bits.
  * @retval 0 Success.
+ * @retval -ENOTSUP The device has no single-turn absolute position and
+ *         therefore no resolution to report. An incremental encoder without an
+ *         index pulse returns this rather than a resolution.
  * @retval negative_errno Failed to query the resolution.
  */
 __syscall int encoder_get_resolution(const struct device * dev, uint8_t * resolution);

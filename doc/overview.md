@@ -67,7 +67,11 @@ private repository なので、`west update` を通すには先に GitHub の認
 | クラス | 実装 | ドキュメント |
 | --- | --- | --- |
 | エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/amt21.c` | [AMT21x](drivers/amt21.md) |
+| エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/qdec_stm32.c` | [直交エンコーダ](drivers/qdec_stm32.md) |
 | モータ（`include/drivers/motor.h`） | `drivers/motor/robomaster.c` | [RoboMaster](drivers/robomaster.md) |
+
+ラップ解決・速度・オフセットはエンコーダドライバに共通なので、`drivers/encoder/encoder_accum.c` に切り出してある。
+公開 API ではなく `drivers/encoder/` の内部ヘッダである。
 
 ドライバクラスの API は `include/` に置き、実装は `drivers/` に置く。
 ドライバ固有の診断のように、クラスの API に載せられないものは `include/drivers/<class>/<driver>.h` に分ける。

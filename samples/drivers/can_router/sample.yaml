@@ -13,5 +13,16 @@ tests:
       - can
     filter: dt_compat_enabled("fibril,can-router")
     harness: console
+    # A console harness without a configuration is rejected when twister loads
+    # the testsuite, so the sample would not even be discovered.
+    #
+    # The uplink RX line is deliberately not matched: on the native_sim
+    # loopback the downlinks never answer, so dn->up stays at zero.
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "diag: unknown_stdid=\\d+ unknown_node=\\d+ drop_send=\\d+ ingress_drops=\\d+"
+        - "downlink 0: up->dn=\\d+ dn->up=\\d+"
     integration_platforms:
       - native_sim
