@@ -9,6 +9,7 @@
  * pointed at something that is not an AMT21 encoder.
  */
 
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -133,7 +134,7 @@ static int cmd_read(const struct shell * sh, size_t argc, char ** argv)
   }
 
   shell_print(sh, "%s: %s (%d)", dev->name, state, ret);
-  shell_print(sh, "  position     %lld", fb.position);
+  shell_print(sh, "  position     %" PRId64, fb.position);
   if ((fb.valid_mask & ENCODER_FEEDBACK_VELOCITY) != 0U) {
     shell_print(sh, "  velocity     %d counts/s over %u us", fb.velocity, fb.sample_interval_us);
   }
@@ -158,7 +159,7 @@ static int cmd_read(const struct shell * sh, size_t argc, char ** argv)
   shell_print(sh, "  online       %d", (int)fb.online);
   shell_print(sh, "  stale        %d", (int)fb.stale);
   shell_print(sh, "  errors       %u", fb.error_count);
-  shell_print(sh, "  updated at   %lld ms", fb.timestamp_ms);
+  shell_print(sh, "  updated at   %" PRId64 " ms", fb.timestamp_ms);
 
   return 0;
 }
@@ -208,7 +209,7 @@ static int cmd_stats(const struct shell * sh, size_t argc, char ** argv)
 
   if (stats.last_error_timestamp_ms > 0) {
     shell_print(
-      sh, "  last error   %s at %lld ms", amt21_cause_names[stats.last_error],
+      sh, "  last error   %s at %" PRId64 " ms", amt21_cause_names[stats.last_error],
       stats.last_error_timestamp_ms);
   }
 
@@ -276,7 +277,8 @@ static int cmd_errlog(const struct shell * sh, size_t argc, char ** argv)
     bytes[pos] = '\0';
 
     shell_print(
-      sh, "  %lld ms addr=0x%02x cmd=0x%02x %-9s rx=[%s]", rec->timestamp_ms, rec->node_addr,
+      sh, "  %" PRId64 " ms addr=0x%02x cmd=0x%02x %-9s rx=[%s]", rec->timestamp_ms,
+      rec->node_addr,
       rec->command, amt21_cause_names[rec->cause], bytes);
   }
 

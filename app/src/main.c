@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <inttypes.h>
 #include <stdlib.h>
 
 #include <app/drivers/blink.h>
@@ -37,12 +38,14 @@ static void report_encoder(const struct device * dev)
    */
   if ((fb.valid_mask & ENCODER_FEEDBACK_VELOCITY) != 0U) {
     LOG_INF(
-      "%s: ret=%d pos=%lld vel=%d single=%u turns=%d epoch=%u online=%d stale=%d errors=%u",
+      "%s: ret=%d pos=%" PRId64 " vel=%d single=%u turns=%d epoch=%u online=%d stale=%d "
+      "errors=%u",
       dev->name, ret, fb.position, fb.velocity, fb.single_turn, fb.turns, fb.position_epoch,
       (int)fb.online, (int)fb.stale, fb.error_count);
   } else {
     LOG_INF(
-      "%s: ret=%d pos=%lld vel=n/a single=%u turns=%d epoch=%u online=%d stale=%d errors=%u",
+      "%s: ret=%d pos=%" PRId64 " vel=n/a single=%u turns=%d epoch=%u online=%d stale=%d "
+      "errors=%u",
       dev->name, ret, fb.position, fb.single_turn, fb.turns, fb.position_epoch, (int)fb.online,
       (int)fb.stale, fb.error_count);
   }

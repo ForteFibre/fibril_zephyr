@@ -8,6 +8,7 @@
  * so every test here exercises that property implicitly.
  */
 
+#include <inttypes.h>
 #include <stdarg.h>
 #include <string.h>
 
@@ -477,7 +478,7 @@ ZTEST(encoder_amt21, test_position_accumulates_single_turn_deltas)
 	zassert_ok(wait_fresh(ENC14, &after));
 
 	zassert_equal(after.position - before.position, 300,
-		      "position moved by %lld", after.position - before.position);
+		      "position moved by %" PRId64, after.position - before.position);
 	zassert_equal(after.position_epoch, before.position_epoch,
 		      "the accumulator was rebuilt during normal operation");
 }
@@ -497,14 +498,14 @@ ZTEST(encoder_amt21, test_position_unwraps_forwards_and_backwards)
 	emul[0].position14 = 4U;
 	zassert_ok(wait_fresh(ENC14, &after));
 	zassert_equal(after.position - before.position, 8,
-		      "forward wrap moved by %lld", after.position - before.position);
+		      "forward wrap moved by %" PRId64, after.position - before.position);
 
 	before = after;
 
 	emul[0].position14 = 16380U;
 	zassert_ok(wait_fresh(ENC14, &after));
 	zassert_equal(after.position - before.position, -8,
-		      "backward wrap moved by %lld", after.position - before.position);
+		      "backward wrap moved by %" PRId64, after.position - before.position);
 }
 
 ZTEST(encoder_amt21, test_velocity_follows_the_direction_of_travel)
@@ -544,13 +545,13 @@ ZTEST(encoder_amt21, test_set_position_shifts_only_the_accumulator)
 
 	zassert_ok(encoder_set_position(ENC14, 1000));
 	zassert_ok(encoder_get_feedback(ENC14, &fb));
-	zassert_equal(fb.position, 1000, "position %lld after being set", fb.position);
+	zassert_equal(fb.position, 1000, "position %" PRId64 " after being set", fb.position);
 	zassert_equal(fb.single_turn, 6000U, "set_position moved the device reading");
 
 	/* The offset is a shift, not a fixed value, so later motion still shows up. */
 	emul[0].position14 = 6250U;
 	zassert_ok(wait_fresh(ENC14, &fb));
-	zassert_equal(fb.position, 1250, "position %lld after moving", fb.position);
+	zassert_equal(fb.position, 1250, "position %" PRId64 " after moving", fb.position);
 }
 
 ZTEST(encoder_amt21, test_set_position_does_not_disturb_velocity)
@@ -622,7 +623,7 @@ ZTEST(encoder_amt21, test_multiturn_rebuild_folds_in_a_negative_turns_counter)
 	zassert_ok(wait_fresh(ENC_MT, &fb), "did not come back online");
 	zassert_equal(fb.turns, -1, "turns %d", fb.turns);
 	zassert_equal(fb.single_turn, 500U, "single turn %u", fb.single_turn);
-	zassert_equal(fb.position, -(1LL << 14) + 500, "position %lld", fb.position);
+	zassert_equal(fb.position, -(1LL << 14) + 500, "position %" PRId64, fb.position);
 }
 
 ZTEST(encoder_amt21, test_going_offline_rebuilds_the_accumulator)
@@ -661,7 +662,7 @@ ZTEST(encoder_amt21, test_going_offline_rebuilds_the_accumulator)
 	/* Rebuilt from the absolute reading, and the offset set beforehand is gone
 	 * rather than being applied to a total it no longer relates to.
 	 */
-	zassert_equal(fb.position, 7777, "position %lld after recovery", fb.position);
+	zassert_equal(fb.position, 7777, "position %" PRId64 " after recovery", fb.position);
 }
 
 ZTEST(encoder_amt21, test_rejected_frames_do_not_rebuild_the_accumulator)
@@ -687,7 +688,7 @@ ZTEST(encoder_amt21, test_rejected_frames_do_not_rebuild_the_accumulator)
 	zassert_equal(fb.position_epoch, before.position_epoch,
 		      "a rejected frame rebuilt the accumulator");
 	zassert_equal(fb.position - before.position, 250,
-		      "position moved by %lld across a rejected frame",
+		      "position moved by %" PRId64 " across a rejected frame",
 		      fb.position - before.position);
 }
 
