@@ -20,34 +20,7 @@ fibril_can 側の設計と不変条件はそのリポジトリの `CLAUDE.md` �
 
 ## ディレクトリ構成
 
-| ディレクトリ | 内容 |
-| --- | --- |
-| `app/` | ボード持ち込みの動作確認用アプリケーション |
-| `boards/fibril/` | 自作ボードの定義。ボードごとの文書は各 `doc/index.rst` |
-| `drivers/` | out-of-tree ドライバの実装 |
-| `dts/bindings/` | 上記ドライバの devicetree binding |
-| `include/` | 公開ヘッダ。ドライバクラスの API はここが正本 |
-| `lib/` | out-of-tree ライブラリ |
-| `samples/` | ドライバ単体および fibril_can と組み合わせたサンプル |
-| `tests/` | Twister から走る ztest |
-| `scripts/` | west の拡張コマンドと runner |
-| `doc/` | ガイド、ADR、Doxygen の設定 |
-
-ドライバクラスの API は `include/drivers/<class>.h`、実装は `drivers/<class>/` に置く。
-デバイス固有の API はクラスのヘッダに載せず、`include/drivers/<class>/<driver>.h` に分ける。
-
-### Zephyr module としての入口
-
-`zephyr/module.yml` がビルドシステムから見た入口を宣言する。
-ここを変えるとリポジトリ全体の見え方が変わるので、迂闊に触らない。
-
-- `build.kconfig` → `Kconfig`（`drivers/Kconfig` と `lib/Kconfig` を rsource する）
-- `build.cmake` → ルートの `CMakeLists.txt`（`include/` をインクルードパスに加え、`drivers/` と `lib/` を追加する）
-- `settings.board_root` / `settings.dts_root` → リポジトリのルート
-- `runners` → `scripts/example_runner.py`
-
-`CMakeLists.txt` の `zephyr_syscall_include_directories(include)` は消さない。
-公開ヘッダが `__syscall` を使うため、これがないとシステムコールが生成されずリンクが通らない。
+各ディレクトリの責務は [doc/overview.md](doc/overview.md) の「リポジトリの構成」にある。
 
 ## ビルドとテスト
 
@@ -80,7 +53,7 @@ cd doc && pip install -r requirements.txt && doxygen && make html
 | ボードの追加 | `boards/fibril/<board>/doc/index.rst`、`doc/boards/<board>.rst` のインクルードスタブ、`doc/index.rst` の toctree、README のボード表 |
 | ボードの devicetree の変更 | 該当ボードの `doc/index.rst`（ピン表と既定の状態） |
 | `west.yml` の revision | README と `doc/overview.md` のバージョン記述 |
-| ディレクトリの責務、ビルド構成 | `doc/overview.md` と CLAUDE.md のディレクトリ構成表（両方あるので片方だけ直さない） |
+| ディレクトリの責務、ビルド構成 | `doc/overview.md` |
 | サンプルの追加 | サンプルの `README.md`、README のサンプル表 |
 | 非自明な設計判断 | `doc/adr/` に新規 ADR と `doc/adr/index.md` の一覧 |
 
