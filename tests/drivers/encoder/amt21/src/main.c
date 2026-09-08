@@ -8,6 +8,7 @@
  * so every test here exercises that property implicitly.
  */
 
+#include <inttypes.h>
 #include <stdarg.h>
 #include <string.h>
 
@@ -358,15 +359,21 @@ ZTEST(encoder_amt21, test_position_14bit)
 	emul[0].position14 = 0x21ABU;
 
 	zassert_ok(wait_fresh(ENC14, &fb));
-	zassert_equal(fb.position, 8619U, "position %u", fb.position);
+	zassert_equal(fb.single_turn, 8619U, "single turn %u", fb.single_turn);
 	zassert_true((fb.valid_mask & ENCODER_FEEDBACK_POSITION) != 0);
-	zassert_true((fb.valid_mask & ENCODER_FEEDBACK_ANGLE) != 0);
+	zassert_true((fb.valid_mask & ENCODER_FEEDBACK_SINGLE_TURN) != 0);
 	zassert_true((fb.valid_mask & ENCODER_FEEDBACK_TURNS) == 0);
 	zassert_true(fb.online);
 	zassert_false(fb.stale);
 
-	/* 8619 of 16384 counts is 189.4 degrees. */
-	zassert_within(fb.angle_mdeg, 189404, 100, "angle %d", fb.angle_mdeg);
+	/* 8619 of 16384 counts is 189.4 degrees. The class API reports raw counts,
+	 * so a consumer converts using the resolution.
+	 */
+	uint8_t resolution;
+
+	zassert_ok(encoder_get_resolution(ENC14, &resolution));
+	zassert_within((int32_t)(((uint64_t)fb.single_turn * 360000U) >> resolution), 189404, 100,
+		       "angle from %u counts", fb.single_turn);
 }
 
 ZTEST(encoder_amt21, test_position_12bit)
@@ -378,7 +385,7 @@ ZTEST(encoder_amt21, test_position_12bit)
 	emul[1].position14 = 0x21ABU;
 
 	zassert_ok(wait_fresh(ENC12, &fb));
-	zassert_equal(fb.position, 8619U >> 2, "position %u", fb.position);
+	zassert_equal(fb.single_turn, 8619U >> 2, "position %u", fb.single_turn);
 
 	zassert_ok(encoder_get_resolution(ENC12, &resolution));
 	zassert_equal(resolution, 12);
@@ -394,7 +401,7 @@ ZTEST(encoder_amt21, test_multiturn_positive_and_negative)
 	zassert_ok(wait_fresh(ENC_MT, &fb));
 	zassert_true((fb.valid_mask & ENCODER_FEEDBACK_TURNS) != 0);
 	zassert_equal(fb.turns, 1, "turns %d", fb.turns);
-	zassert_equal(fb.position, 1234U);
+	zassert_equal(fb.single_turn, 1234U);
 
 	/* Minus three as a 14-bit two's complement number. */
 	emul[2].turns14 = (uint16_t)((-3) & 0x3FFF);
@@ -414,6 +421,278 @@ ZTEST(encoder_amt21, test_resolution_reported)
 }
 
 /* -------------------------------------------------------------------------- */
+/* Accumulated position, velocity and offset                                  */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * The driver polls continuously from boot, so the accumulator holds a running
+ * total whose absolute value depends on everything that came before. These
+ * tests therefore take a baseline reading and assert how the position moves,
+ * rather than what it happens to be.
+ */
+
+/**
+ * @brief Move the emulated encoder by @p step and capture the resulting velocity.
+ *
+ * Velocity covers one sampling interval, so the delta appears in a single
+ * snapshot and the next one reads zero again. The snapshot wanted is therefore
+ * the first one whose position has moved, which means polling faster than the
+ * encoder is polled rather than sleeping between checks.
+ *
+ * @return true when that snapshot was caught, with its velocity in @p velocity.
+ */
+static bool move_and_capture_velocity(int32_t step, int32_t *velocity)
+{
+	struct encoder_feedback before;
+	struct encoder_feedback fb;
+
+	if (encoder_get_feedback(ENC14, &before) != 0) {
+		return false;
+	}
+
+	emul[0].position14 = (uint16_t)((before.single_turn + (uint32_t)step) & 0x3FFFU);
+
+	/* Sleeping rather than busy waiting, because the poll thread needs the CPU
+	 * to take the reading being waited for.
+	 */
+	for (int i = 0; i < 10000; ++i) {
+		if ((encoder_get_feedback(ENC14, &fb) == 0) && (fb.position != before.position)) {
+			*velocity = fb.velocity;
+			return (fb.valid_mask & ENCODER_FEEDBACK_VELOCITY) != 0U;
+		}
+		k_sleep(K_USEC(100));
+	}
+
+	return false;
+}
+
+ZTEST(encoder_amt21, test_position_accumulates_single_turn_deltas)
+{
+	struct encoder_feedback before;
+	struct encoder_feedback after;
+
+	emul[0].position14 = 5000U;
+	zassert_ok(wait_fresh(ENC14, &before));
+
+	emul[0].position14 = 5300U;
+	zassert_ok(wait_fresh(ENC14, &after));
+
+	zassert_equal(after.position - before.position, 300,
+		      "position moved by %" PRId64, after.position - before.position);
+	zassert_equal(after.position_epoch, before.position_epoch,
+		      "the accumulator was rebuilt during normal operation");
+}
+
+ZTEST(encoder_amt21, test_position_unwraps_forwards_and_backwards)
+{
+	struct encoder_feedback before;
+	struct encoder_feedback after;
+
+	/* Just below a full revolution, so the next reading crosses zero. Taking
+	 * the shorter way round has to give +8 rather than the -16376 a plain
+	 * subtraction would produce.
+	 */
+	emul[0].position14 = 16380U;
+	zassert_ok(wait_fresh(ENC14, &before));
+
+	emul[0].position14 = 4U;
+	zassert_ok(wait_fresh(ENC14, &after));
+	zassert_equal(after.position - before.position, 8,
+		      "forward wrap moved by %" PRId64, after.position - before.position);
+
+	before = after;
+
+	emul[0].position14 = 16380U;
+	zassert_ok(wait_fresh(ENC14, &after));
+	zassert_equal(after.position - before.position, -8,
+		      "backward wrap moved by %" PRId64, after.position - before.position);
+}
+
+ZTEST(encoder_amt21, test_velocity_follows_the_direction_of_travel)
+{
+	struct encoder_feedback fb;
+
+	emul[0].position14 = 8000U;
+	zassert_ok(wait_fresh(ENC14, &fb));
+
+	/* A standing encoder reads zero rather than leaving the previous value in
+	 * place, which is what a stalled motor has to look like.
+	 */
+	zassert_ok(wait_fresh(ENC14, &fb));
+	zassert_true((fb.valid_mask & ENCODER_FEEDBACK_VELOCITY) != 0);
+	zassert_equal(fb.velocity, 0, "velocity %d while standing still", fb.velocity);
+	zassert_true(fb.sample_interval_us > 0U, "no sampling interval reported");
+
+	/* Velocity is a single-interval estimate, so a one-off jump shows up in
+	 * exactly one snapshot and the next one reads zero again. Keeping the
+	 * encoder turning is both the realistic case and the observable one.
+	 */
+	int32_t velocity = 0;
+
+	zassert_true(move_and_capture_velocity(200, &velocity), "missed the forward transition");
+	zassert_true(velocity > 0, "velocity %d moving forwards", velocity);
+
+	zassert_true(move_and_capture_velocity(-200, &velocity), "missed the backward transition");
+	zassert_true(velocity < 0, "velocity %d moving backwards", velocity);
+}
+
+ZTEST(encoder_amt21, test_set_position_shifts_only_the_accumulator)
+{
+	struct encoder_feedback fb;
+
+	emul[0].position14 = 6000U;
+	zassert_ok(wait_fresh(ENC14, &fb));
+
+	zassert_ok(encoder_set_position(ENC14, 1000));
+	zassert_ok(encoder_get_feedback(ENC14, &fb));
+	zassert_equal(fb.position, 1000, "position %" PRId64 " after being set", fb.position);
+	zassert_equal(fb.single_turn, 6000U, "set_position moved the device reading");
+
+	/* The offset is a shift, not a fixed value, so later motion still shows up. */
+	emul[0].position14 = 6250U;
+	zassert_ok(wait_fresh(ENC14, &fb));
+	zassert_equal(fb.position, 1250, "position %" PRId64 " after moving", fb.position);
+}
+
+ZTEST(encoder_amt21, test_set_position_does_not_disturb_velocity)
+{
+	struct encoder_feedback fb;
+	int32_t velocity = 0;
+
+	/* The offset shifts the reported position, so a velocity worked out by
+	 * subtracting two reported positions would show a spike unless the offset
+	 * is present in both of them.
+	 */
+	emul[0].position14 = 4000U;
+	zassert_ok(wait_fresh(ENC14, &fb));
+	zassert_ok(encoder_set_position(ENC14, -1000000));
+
+	zassert_ok(wait_fresh(ENC14, &fb));
+	zassert_equal(fb.velocity, 0, "velocity %d after the offset was applied", fb.velocity);
+
+	zassert_true(move_and_capture_velocity(150, &velocity), "missed the transition");
+	zassert_true(velocity > 0, "velocity %d moving forwards after an offset", velocity);
+}
+
+ZTEST(encoder_amt21, test_set_position_rejects_a_position_with_no_headroom)
+{
+	struct encoder_feedback fb;
+
+	emul[0].position14 = 4500U;
+	zassert_ok(wait_fresh(ENC14, &fb));
+
+	int64_t before = fb.position;
+
+	/* Accepting these would make the offset itself, or a later sum of the raw
+	 * count and the offset, overflow int64_t.
+	 */
+	zassert_equal(encoder_set_position(ENC14, INT64_MIN), -EINVAL);
+	zassert_equal(encoder_set_position(ENC14, INT64_MAX), -EINVAL);
+
+	zassert_ok(encoder_get_feedback(ENC14, &fb));
+	zassert_equal(fb.position, before, "a rejected request moved the position");
+}
+
+ZTEST(encoder_amt21, test_multiturn_rebuild_folds_in_a_negative_turns_counter)
+{
+	struct encoder_feedback fb;
+	int ret = 0;
+
+	/* Only a rebuild reads the turns counter into the accumulator, so the
+	 * encoder is taken offline to force one.
+	 */
+	emul[2].mode = EMUL_MODE_SILENT;
+
+	for (int i = 0; i < 200; ++i) {
+		ret = encoder_get_feedback(ENC_MT, &fb);
+		if (ret == -EIO) {
+			break;
+		}
+		k_sleep(K_MSEC(2));
+	}
+
+	zassert_equal(ret, -EIO, "expected -EIO once offline, got %d", ret);
+
+	/* Minus one turn, which the rebuild has to scale without relying on the
+	 * shift of a negative value that C leaves undefined.
+	 */
+	emul[2].mode = EMUL_MODE_NORMAL;
+	emul[2].position14 = 500U;
+	emul[2].turns14 = (uint16_t)((-1) & 0x3FFF);
+
+	zassert_ok(wait_fresh(ENC_MT, &fb), "did not come back online");
+	zassert_equal(fb.turns, -1, "turns %d", fb.turns);
+	zassert_equal(fb.single_turn, 500U, "single turn %u", fb.single_turn);
+	zassert_equal(fb.position, -(1LL << 14) + 500, "position %" PRId64, fb.position);
+}
+
+ZTEST(encoder_amt21, test_going_offline_rebuilds_the_accumulator)
+{
+	struct encoder_feedback before;
+	struct encoder_feedback fb;
+	int ret = 0;
+
+	emul[0].position14 = 900U;
+	zassert_ok(wait_fresh(ENC14, &before));
+	zassert_ok(encoder_set_position(ENC14, 500));
+
+	/* Silence the encoder for long enough to be declared offline. While
+	 * offline the encoder may turn past the half revolution the unwrap can
+	 * resolve, so continuing the old total would be a fabrication.
+	 */
+	emul[0].mode = EMUL_MODE_SILENT;
+
+	for (int i = 0; i < 200; ++i) {
+		ret = encoder_get_feedback(ENC14, &fb);
+		if (ret == -EIO) {
+			break;
+		}
+		k_sleep(K_MSEC(2));
+	}
+
+	zassert_equal(ret, -EIO, "expected -EIO once offline, got %d", ret);
+
+	emul[0].mode = EMUL_MODE_NORMAL;
+	emul[0].position14 = 7777U;
+
+	zassert_ok(wait_fresh(ENC14, &fb), "did not come back online");
+	zassert_true(fb.position_epoch != before.position_epoch,
+		     "recovery did not report a new epoch");
+
+	/* Rebuilt from the absolute reading, and the offset set beforehand is gone
+	 * rather than being applied to a total it no longer relates to.
+	 */
+	zassert_equal(fb.position, 7777, "position %" PRId64 " after recovery", fb.position);
+}
+
+ZTEST(encoder_amt21, test_rejected_frames_do_not_rebuild_the_accumulator)
+{
+	struct encoder_feedback before;
+	struct encoder_feedback fb;
+
+	emul[0].position14 = 3200U;
+	zassert_ok(wait_fresh(ENC14, &before));
+
+	/* Fewer bad frames than offline-threshold. The reading goes stale, but the
+	 * encoder stays online and the accumulator has to keep running so that a
+	 * single dropped response does not reset a control loop.
+	 */
+	emul[0].mode = EMUL_MODE_BAD_CHECKSUM;
+	emul[0].mode_count = OFFLINE_THRESHOLD - 1;
+	wait_scans(2);
+
+	emul[0].mode = EMUL_MODE_NORMAL;
+	emul[0].position14 = 3450U;
+
+	zassert_ok(wait_fresh(ENC14, &fb));
+	zassert_equal(fb.position_epoch, before.position_epoch,
+		      "a rejected frame rebuilt the accumulator");
+	zassert_equal(fb.position - before.position, 250,
+		      "position moved by %" PRId64 " across a rejected frame",
+		      fb.position - before.position);
+}
+
+/* -------------------------------------------------------------------------- */
 /* Dropped and corrupted responses                                            */
 /* -------------------------------------------------------------------------- */
 
@@ -424,7 +703,7 @@ ZTEST(encoder_amt21, test_checksum_error_keeps_last_reading)
 
 	emul[0].position14 = 4096U;
 	zassert_ok(wait_fresh(ENC14, &good));
-	zassert_equal(good.position, 4096U);
+	zassert_equal(good.single_turn, 4096U);
 
 	/* Corrupt every response, and change the position so that accepting a bad
 	 * frame would be visible.
@@ -439,13 +718,13 @@ ZTEST(encoder_amt21, test_checksum_error_keeps_last_reading)
 	int ret = encoder_get_feedback(ENC14, &fb);
 
 	zassert_true((ret == -EAGAIN) || (ret == -EIO), "unexpected %d", ret);
-	zassert_equal(fb.position, 4096U, "a rejected frame changed the position");
+	zassert_equal(fb.single_turn, 4096U, "a rejected frame changed the position");
 	zassert_true(fb.error_count > good.error_count, "error count did not move");
 
 	emul[0].mode = EMUL_MODE_NORMAL;
 	wait_scans(3);
 	zassert_ok(encoder_get_feedback(ENC14, &fb));
-	zassert_equal(fb.position, 200U, "did not recover after the corruption stopped");
+	zassert_equal(fb.single_turn, 200U, "did not recover after the corruption stopped");
 }
 
 ZTEST(encoder_amt21, test_stale_precedes_offline)
@@ -470,7 +749,7 @@ ZTEST(encoder_amt21, test_stale_precedes_offline)
 
 		if (ret == -EAGAIN) {
 			zassert_true(fb.online, "reported stale and offline at once");
-			zassert_equal(fb.position, 777U,
+			zassert_equal(fb.single_turn, 777U,
 				      "the last good reading was discarded while stale");
 			saw_stale_online = true;
 		} else if (ret == -EIO) {
@@ -517,7 +796,7 @@ ZTEST(encoder_amt21, test_silence_takes_encoder_offline_then_recovers)
 	emul[0].position14 = 4321U;
 
 	zassert_ok(wait_fresh(ENC14, &fb), "did not come back online");
-	zassert_equal(fb.position, 4321U);
+	zassert_equal(fb.single_turn, 4321U);
 	zassert_true(fb.online);
 	zassert_false(fb.stale);
 }
@@ -539,7 +818,7 @@ ZTEST(encoder_amt21, test_truncated_response_recovers)
 	emul[0].position14 = 666U;
 
 	zassert_ok(wait_fresh(ENC14, &fb), "did not resynchronise");
-	zassert_equal(fb.position, 666U, "position %u after resynchronising", fb.position);
+	zassert_equal(fb.single_turn, 666U, "position %u after resynchronising", fb.single_turn);
 }
 
 ZTEST(encoder_amt21, test_extra_byte_recovers)
@@ -555,7 +834,7 @@ ZTEST(encoder_amt21, test_extra_byte_recovers)
 	emul[0].position14 = 222U;
 
 	zassert_ok(wait_fresh(ENC14, &fb), "did not recover from a desync");
-	zassert_equal(fb.position, 222U);
+	zassert_equal(fb.single_turn, 222U);
 }
 
 ZTEST(encoder_amt21, test_stray_byte_before_response_recovers)
@@ -577,7 +856,7 @@ ZTEST(encoder_amt21, test_stray_byte_before_response_recovers)
 
 	emul[0].position14 = 2000U;
 	zassert_ok(wait_fresh(ENC14, &fb), "did not recover from a stray byte");
-	zassert_equal(fb.position, 2000U);
+	zassert_equal(fb.single_turn, 2000U);
 }
 
 ZTEST(encoder_amt21, test_echoed_command_is_discarded)
@@ -591,12 +870,12 @@ ZTEST(encoder_amt21, test_echoed_command_is_discarded)
 	emul[3].position14 = 3000U;
 
 	zassert_ok(wait_fresh(ENC_ECHO, &fb), "did not cope with an echoed command byte");
-	zassert_equal(fb.position, 3000U, "position %u with echo enabled", fb.position);
+	zassert_equal(fb.single_turn, 3000U, "position %u with echo enabled", fb.single_turn);
 	zassert_true(fb.online);
 
 	emul[3].position14 = 4000U;
 	zassert_ok(wait_fresh(ENC_ECHO, &fb));
-	zassert_equal(fb.position, 4000U);
+	zassert_equal(fb.single_turn, 4000U);
 }
 
 ZTEST(encoder_amt21, test_one_bad_encoder_does_not_starve_the_others)
@@ -622,7 +901,7 @@ ZTEST(encoder_amt21, test_one_bad_encoder_does_not_starve_the_others)
 	zassert_true(emul[2].position_commands > 0U, "multi-turn encoder stopped being polled");
 
 	zassert_ok(encoder_get_feedback(ENC12, &fb));
-	zassert_equal(fb.position, 2U >> 2);
+	zassert_equal(fb.single_turn, 2U >> 2);
 }
 
 /* -------------------------------------------------------------------------- */

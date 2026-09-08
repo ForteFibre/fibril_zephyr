@@ -20,6 +20,17 @@ extern "C" {
  * snapshot never blocks on the underlying transport, which makes it usable from
  * a control loop.
  *
+ * The primary value is @ref encoder_feedback.position, a signed accumulated
+ * count that the driver keeps continuous across the wrap of whatever the device
+ * actually reports. Drivers own the accumulator because the events that break
+ * its continuity, such as a device reset or a turns counter cleared by a power
+ * cycle, are only visible inside the driver. Those events are reported through
+ * @ref encoder_feedback.position_epoch.
+ *
+ * Values are in raw counts. Converting them to physical units needs a gear
+ * ratio and a wheel radius, which belong to the application rather than to the
+ * device, so this API does not carry a scale factor.
+ *
  * Diagnostics that depend on the concrete device are intentionally absent from
  * this API. A driver that tracks per-transport error causes exposes them
  * through its own header, for example drivers/encoder/amt21.h.
@@ -36,12 +47,14 @@ extern "C" {
  * valid.
  */
 enum encoder_feedback_type {
-  /** Single-turn position in raw counts is valid. */
+  /** Accumulated position is valid. */
   ENCODER_FEEDBACK_POSITION = 1,
+  /** Velocity is valid. */
+  ENCODER_FEEDBACK_VELOCITY = 1 << 1,
+  /** Single-turn absolute position is valid. */
+  ENCODER_FEEDBACK_SINGLE_TURN = 1 << 2,
   /** Turns counter is valid. */
-  ENCODER_FEEDBACK_TURNS = 1 << 1,
-  /** Derived angle in millidegrees is valid. */
-  ENCODER_FEEDBACK_ANGLE = 1 << 2,
+  ENCODER_FEEDBACK_TURNS = 1 << 3,
 };
 
 /**
@@ -56,16 +69,67 @@ struct encoder_feedback
    */
   uint32_t valid_mask;
   /**
-   * @brief Single-turn position in raw counts.
+   * @brief Accumulated position in raw counts.
+   *
+   * The driver keeps this continuous across the wrap of the underlying counter
+   * and applies whatever offset was requested through
+   * @ref encoder_set_position. It is the value a control loop should use.
+   *
+   * On an absolute encoder the accumulator starts at the first absolute reading
+   * the driver obtained, so the position at power-on is preserved. On an
+   * incremental encoder there is no absolute reference and it starts at zero.
+   */
+  int64_t position;
+  /**
+   * @brief Velocity in counts per second.
+   *
+   * This is a single-interval estimate: the driver divides the change in
+   * @ref encoder_feedback.position by @ref encoder_feedback.sample_interval_us.
+   * Its quantisation noise therefore grows as the interval shrinks and
+   * dominates at low speed, so a control loop should filter it rather than use
+   * it directly. How much to filter depends on the application, which is why
+   * the driver does not do it.
+   */
+  int32_t velocity;
+  /**
+   * @brief Measured interval the latest position and velocity were derived over.
+   *
+   * This is the elapsed time between the two most recent successful readings,
+   * not the interval the driver was configured with. A driver that skips a
+   * sampling period reports the longer interval it actually observed.
+   */
+  uint32_t sample_interval_us;
+  /**
+   * @brief Number of times the accumulator lost continuity.
+   *
+   * The driver advances this whenever it rebuilds the accumulator instead of
+   * continuing it, which happens on the first successful reading, on recovery
+   * from being offline, and after a reset or a stored zero point. Any offset
+   * previously set through @ref encoder_set_position is dropped at the same
+   * time.
+   *
+   * @ref encoder_feedback.position jumps across such an event, so a consumer
+   * that integrates or differentiates it must discard that state when this
+   * value changes rather than carry it over. Compare successive readings; the
+   * value wraps around.
+   */
+  uint32_t position_epoch;
+  /**
+   * @brief Single-turn absolute position in raw counts.
    *
    * The value is in the range 0 to (1 << resolution) - 1, where the resolution
-   * is the one reported by @ref encoder_get_resolution.
+   * is the one reported by @ref encoder_get_resolution. This is what the device
+   * reported, without any offset applied. Incremental encoders have no
+   * single-turn absolute position and leave this field invalid.
    */
-  uint32_t position;
-  /** Signed turns counter, for encoders that track multiple turns. */
+  uint32_t single_turn;
+  /**
+   * @brief Signed turns counter, for encoders that track multiple turns.
+   *
+   * Like @ref encoder_feedback.single_turn this is the value the device
+   * reported, without any offset applied.
+   */
   int32_t turns;
-  /** Position converted to millidegrees within a single turn. */
-  int32_t angle_mdeg;
   /** True when the encoder is currently considered online. */
   bool online;
   /** True when the reading is present but no longer fresh. */
@@ -93,6 +157,9 @@ typedef int (*encoder_get_resolution_t)(const struct device * dev, uint8_t * res
 /** @brief Driver API for storing the current position as the zero point. */
 typedef int (*encoder_set_zero_t)(const struct device * dev);
 
+/** @brief Driver API for redefining the current accumulated position. */
+typedef int (*encoder_set_position_t)(const struct device * dev, int64_t position);
+
 /** @brief Driver API for resetting the encoder. */
 typedef int (*encoder_reset_t)(const struct device * dev);
 
@@ -104,6 +171,7 @@ struct encoder_driver_api
   encoder_get_feedback_t get_feedback;
   encoder_get_resolution_t get_resolution;
   encoder_set_zero_t set_zero;
+  encoder_set_position_t set_position;
   encoder_reset_t reset;
 };
 
@@ -149,6 +217,31 @@ __syscall int encoder_get_resolution(const struct device * dev, uint8_t * resolu
 __syscall int encoder_set_zero(const struct device * dev);
 
 /**
+ * @brief Redefine the current accumulated position.
+ *
+ * This shifts @ref encoder_feedback.position so that the present reading
+ * becomes @p position. Nothing is written to the device, and
+ * @ref encoder_feedback.single_turn and @ref encoder_feedback.turns keep
+ * reporting what the device said.
+ *
+ * The offset is dropped whenever the driver rebuilds its accumulator, which it
+ * reports by advancing @ref encoder_feedback.position_epoch. A caller that
+ * needs the offset to survive such an event has to set it again.
+ *
+ * @param dev Encoder device instance.
+ * @param position Value the current position should read as. Drivers may reject
+ *        a magnitude that would leave the accumulator no room to keep counting.
+ * @retval 0 Success.
+ * @retval -EINVAL @p position is outside the range the driver accepts.
+ * @retval -ENODATA There is no accumulator to offset from, either because no
+ *         reading has been obtained yet or because the encoder is offline and
+ *         its accumulator is waiting to be rebuilt.
+ * @retval -ENOSYS The driver does not implement this operation.
+ * @retval negative_errno Failed to set the position.
+ */
+__syscall int encoder_set_position(const struct device * dev, int64_t position);
+
+/**
  * @brief Reset an encoder.
  *
  * Readings may be unavailable for a driver-defined period afterwards while the
@@ -192,6 +285,17 @@ static inline int z_impl_encoder_set_zero(const struct device * dev)
   }
 
   return api->set_zero(dev);
+}
+
+static inline int z_impl_encoder_set_position(const struct device * dev, int64_t position)
+{
+  const struct encoder_driver_api * api = (const struct encoder_driver_api *)dev->api;
+
+  if (api->set_position == NULL) {
+    return -ENOSYS;
+  }
+
+  return api->set_position(dev, position);
 }
 
 static inline int z_impl_encoder_reset(const struct device * dev)

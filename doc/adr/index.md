@@ -34,10 +34,12 @@
 | 番号 | 表題 | ステータス |
 | --- | --- | --- |
 | [0001](0001-doc-structure.md) | ドキュメントを doc/ に一本化し、ボード文書は Zephyr 慣習に従う | Accepted |
+| [0002](0002-encoder-feedback-layering.md) | encoder feedback を積算位置と速度で表し、積算の責務をドライバに置く | Proposed |
 
 ```{toctree}
 :maxdepth: 1
 :hidden:
 
 0001-doc-structure
+0002-encoder-feedback-layering
 ```

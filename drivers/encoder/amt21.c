@@ -49,6 +49,17 @@ LOG_MODULE_REGISTER(encoder_amt21, CONFIG_ENCODER_LOG_LEVEL);
 #define AMT21_DATA_MASK BIT_MASK(AMT21_DATA_BITS)
 #define AMT21_TURNS_SIGN_BIT BIT(AMT21_DATA_BITS - 1)
 
+/**
+ * @brief Largest magnitude accepted by encoder_set_position().
+ *
+ * Both the offset itself and every later sum of the raw count and the offset
+ * have to stay inside int64_t, and signed overflow is undefined. Capping the
+ * requested position well short of the type leaves the accumulator room to keep
+ * counting: at the roughly 1.2 M counts/s a RoboMaster rotor reaches, the
+ * remaining headroom is measured in millennia.
+ */
+#define AMT21_POSITION_LIMIT (INT64_C(1) << 62)
+
 /** Response length in bytes, excluding any echoed command byte. */
 #define AMT21_RESP_LEN 2
 /** Longest chunk the receiver is configured with, an echo plus a response. */
@@ -179,6 +190,19 @@ struct amt21_encoder_data
   bool has_reading;
   uint32_t consecutive_errors;
   int64_t blackout_until_ms;
+
+  /* Accumulator state. raw_count is what the readings add up to and bias is the
+   * offset requested through encoder_set_position(); the reported position is
+   * their sum. has_accum being false means the next successful reading rebuilds
+   * both instead of continuing them.
+   */
+  bool has_accum;
+  int64_t raw_count;
+  int64_t bias;
+  uint32_t last_single_turn;
+  /* Instant of the previous successful reading, for the velocity interval. */
+  uint32_t last_commit_cycle;
+  bool has_commit_cycle;
 
 #if AMT21_STATS_ENABLED
   struct amt21_stats stats;
@@ -323,9 +347,45 @@ static int32_t amt21_turns_from_msg(uint16_t msg)
   return (int32_t)(raw ^ AMT21_TURNS_SIGN_BIT) - (int32_t)AMT21_TURNS_SIGN_BIT;
 }
 
-static int32_t amt21_angle_mdeg(uint32_t position, uint8_t resolution)
+/**
+ * @brief Signed change between two single-turn readings.
+ *
+ * The shorter of the two ways round is taken as the real motion, which is
+ * correct as long as the encoder turns by less than half a revolution between
+ * two readings. At 14 bits and the default 1000 us poll interval that limit is
+ * about 30000 rpm, well above the motors this driver is used with.
+ *
+ * Only the single-turn reading feeds the accumulator. The turns counter is a
+ * separate transaction taken after a gap, so a revolution boundary crossed
+ * inside that gap would make the combined value jump by exactly one
+ * revolution, and nothing downstream could tell that apart from real motion.
+ */
+static int32_t amt21_single_turn_delta(uint32_t current, uint32_t previous, uint8_t resolution)
 {
-  return (int32_t)(((uint64_t)position * 360000U) >> resolution);
+  const int32_t span = (int32_t)BIT(resolution);
+  int32_t delta = (int32_t)current - (int32_t)previous;
+
+  if (delta > (span / 2)) {
+    delta -= span;
+  } else if (delta < -(span / 2)) {
+    delta += span;
+  }
+
+  return delta;
+}
+
+/** @brief Absolute count an accumulator is rebuilt from. */
+static int64_t amt21_absolute_count(
+  uint32_t single_turn, int32_t turns, bool have_turns, uint8_t resolution)
+{
+  if (!have_turns) {
+    return (int64_t)single_turn;
+  }
+
+  /* Multiplying rather than shifting: turns is negative below the zero point,
+   * and left shifting a negative signed value is undefined (C11 6.5.7p4).
+   */
+  return ((int64_t)turns * (int64_t)BIT64(resolution)) + (int64_t)single_turn;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -751,26 +811,66 @@ static int amt21_transact_retry(
 /* -------------------------------------------------------------------------- */
 
 static void amt21_commit_success(
-  const struct device * bus_dev, const struct device * enc_dev, uint32_t position, int32_t angle,
+  const struct device * bus_dev, const struct device * enc_dev, uint32_t single_turn,
   bool have_turns, int32_t turns)
 {
   const struct amt21_encoder_config * config = enc_dev->config;
   struct amt21_encoder_data * data = enc_dev->data;
+  uint32_t now_cycle = k_cycle_get_32();
   k_spinlock_key_t key;
 
   ARG_UNUSED(bus_dev);
 
   key = k_spin_lock(&data->lock);
 
-  data->feedback.valid_mask = ENCODER_FEEDBACK_POSITION | ENCODER_FEEDBACK_ANGLE;
-  data->feedback.position = position;
-  data->feedback.angle_mdeg = angle;
+  data->feedback.valid_mask = ENCODER_FEEDBACK_POSITION | ENCODER_FEEDBACK_SINGLE_TURN;
+
+  if (data->has_accum) {
+    data->raw_count +=
+      amt21_single_turn_delta(single_turn, data->last_single_turn, config->resolution);
+  } else {
+    /* Nothing to continue from, so start over at the absolute reading and tell
+     * consumers that the previous position and any offset no longer apply.
+     */
+    data->raw_count = amt21_absolute_count(single_turn, turns, have_turns, config->resolution);
+    data->bias = 0;
+    data->feedback.position_epoch++;
+    data->has_accum = true;
+    data->has_commit_cycle = false;
+  }
+
+  data->last_single_turn = single_turn;
+
+  int64_t previous_position = data->feedback.position;
+
+  data->feedback.position = data->raw_count + data->bias;
+
+  /* The interval is measured rather than taken from poll-interval-us, because a
+   * scan that overruns is skipped and a transaction may have been retried.
+   */
+  if (data->has_commit_cycle) {
+    uint32_t interval_us = amt21_cycles_to_us(now_cycle - data->last_commit_cycle);
+
+    if (interval_us > 0U) {
+      int64_t delta = data->feedback.position - previous_position;
+
+      data->feedback.sample_interval_us = interval_us;
+      data->feedback.velocity =
+        (int32_t)((delta * (int64_t)USEC_PER_SEC) / (int64_t)interval_us);
+      data->feedback.valid_mask |= ENCODER_FEEDBACK_VELOCITY;
+    }
+  }
+
+  data->last_commit_cycle = now_cycle;
+  data->has_commit_cycle = true;
+
   if (have_turns) {
     data->feedback.valid_mask |= ENCODER_FEEDBACK_TURNS;
     data->feedback.turns = turns;
   } else if (!config->multiturn) {
     data->feedback.turns = 0;
   }
+  data->feedback.single_turn = single_turn;
   data->feedback.online = true;
   data->feedback.stale = false;
   data->feedback.timestamp_ms = k_uptime_get();
@@ -799,6 +899,11 @@ static void amt21_commit_failure(const struct device * bus_dev, const struct dev
    */
   if (data->consecutive_errors >= config->offline_threshold) {
     data->feedback.online = false;
+    /* Long enough offline that the encoder may have turned past the half
+     * revolution the unwrap can resolve, so the accumulator is rebuilt on
+     * recovery rather than continued.
+     */
+    data->has_accum = false;
   }
 
   k_spin_unlock(&data->lock, key);
@@ -808,47 +913,107 @@ static void amt21_commit_failure(const struct device * bus_dev, const struct dev
 /* Poll thread                                                                */
 /* -------------------------------------------------------------------------- */
 
+/** @brief Whether the next successful reading has to rebuild the accumulator. */
+static bool amt21_rebuild_pending(const struct device * enc_dev)
+{
+  struct amt21_encoder_data * data = enc_dev->data;
+  k_spinlock_key_t key = k_spin_lock(&data->lock);
+  bool pending = !data->has_accum;
+
+  k_spin_unlock(&data->lock, key);
+
+  return pending;
+}
+
+/** @brief Read the single-turn position of an encoder. */
+static int amt21_read_single_turn(
+  const struct device * bus_dev, const struct device * enc_dev, uint32_t * single_turn)
+{
+  const struct amt21_encoder_config * config = enc_dev->config;
+  uint16_t msg = 0U;
+  int ret = amt21_transact_retry(
+    bus_dev, enc_dev, (uint8_t)(config->node_addr | AMT21_CMD_POSITION), &msg);
+
+  if (ret == 0) {
+    *single_turn = amt21_position_from_msg(msg, config->resolution);
+  }
+
+  return ret;
+}
+
 static void amt21_poll_encoder(const struct device * bus_dev, const struct device * enc_dev)
 {
   const struct amt21_encoder_config * config = enc_dev->config;
   struct amt21_encoder_data * data = enc_dev->data;
   struct amt21_bus_data * bus = bus_dev->data;
   uint16_t msg = 0U;
-  uint32_t position = 0U;
-  int32_t angle = 0;
+  uint32_t single_turn = 0U;
   int32_t turns = 0;
   bool have_turns = false;
+  bool straddled_boundary = false;
 
   if (data->blackout_until_ms > k_uptime_get()) {
     return;
   }
 
+  /* The turns counter is only needed to rebuild the accumulator, and only a
+   * rebuild has to reconcile it with the single-turn reading, so the extra
+   * transactions below are confined to that case.
+   */
+  const bool rebuilding = config->multiturn && amt21_rebuild_pending(enc_dev);
+
   k_mutex_lock(&bus->lock, K_FOREVER);
 
-  int ret = amt21_transact_retry(
-    bus_dev, enc_dev, (uint8_t)(config->node_addr | AMT21_CMD_POSITION), &msg);
+  int ret = amt21_read_single_turn(bus_dev, enc_dev, &single_turn);
 
-  if (ret == 0) {
-    position = amt21_position_from_msg(msg, config->resolution);
-    angle = amt21_angle_mdeg(position, config->resolution);
+  if ((ret == 0) && config->multiturn) {
+    ret = amt21_transact_retry(
+      bus_dev, enc_dev, (uint8_t)(config->node_addr | AMT21_CMD_TURNS), &msg);
+    if (ret == 0) {
+      turns = amt21_turns_from_msg(msg);
+      have_turns = true;
+    }
+  }
 
-    if (config->multiturn) {
-      ret = amt21_transact_retry(
-        bus_dev, enc_dev, (uint8_t)(config->node_addr | AMT21_CMD_TURNS), &msg);
-      if (ret == 0) {
-        turns = amt21_turns_from_msg(msg);
-        have_turns = true;
-      }
+  if ((ret == 0) && rebuilding) {
+    /* Position and turns are separate transactions with a gap between them. A
+     * revolution boundary crossed inside that gap pairs a single-turn reading
+     * with a turns counter from the other side of it, and the resulting
+     * absolute count is out by exactly one revolution for as long as the
+     * accumulator lives. Reading the position again afterwards shows whether
+     * the window straddled a boundary.
+     */
+    uint32_t after = 0U;
+
+    ret = amt21_read_single_turn(bus_dev, enc_dev, &after);
+    if (ret == 0) {
+      int32_t delta = amt21_single_turn_delta(after, single_turn, config->resolution);
+      int64_t unwrapped = (int64_t)single_turn + (int64_t)delta;
+
+      straddled_boundary = (unwrapped < 0) || (unwrapped >= (int64_t)BIT64(config->resolution));
+      single_turn = after;
     }
   }
 
   k_mutex_unlock(&bus->lock);
 
-  if (ret == 0) {
-    amt21_commit_success(bus_dev, enc_dev, position, angle, have_turns, turns);
-  } else {
+  if (ret != 0) {
     amt21_commit_failure(bus_dev, enc_dev);
+    return;
   }
+
+  if (straddled_boundary) {
+    /* Nothing here failed, so this is not counted as an error; the reading is
+     * simply not trustworthy enough to rebuild from and the next scan tries
+     * again. Repeating indefinitely would need a full revolution inside the
+     * three transactions, which no motor this driver drives can manage.
+     */
+    LOG_DBG("%s: rebuild deferred, a revolution boundary fell inside the read",
+            enc_dev->name);
+    return;
+  }
+
+  amt21_commit_success(bus_dev, enc_dev, single_turn, have_turns, turns);
 }
 
 static void amt21_poll_thread(void * p1, void * p2, void * p3)
@@ -973,6 +1138,10 @@ static int amt21_extended_command(const struct device * dev, uint8_t ext)
   data->feedback.stale = true;
   data->has_reading = false;
   data->consecutive_errors = 0U;
+  /* The device restarts, and a stored zero point moves what it reports, so
+   * neither the accumulator nor the offset carries over.
+   */
+  data->has_accum = false;
 
   k_spin_unlock(&data->lock, key);
 
@@ -991,6 +1160,30 @@ static int amt21_set_zero(const struct device * dev)
   return amt21_extended_command(dev, AMT21_EXT_SET_ZERO);
 }
 
+static int amt21_set_position(const struct device * dev, int64_t position)
+{
+  struct amt21_encoder_data * data = dev->data;
+  k_spinlock_key_t key;
+  int ret = 0;
+
+  if ((position > AMT21_POSITION_LIMIT) || (position < -AMT21_POSITION_LIMIT)) {
+    return -EINVAL;
+  }
+
+  key = k_spin_lock(&data->lock);
+
+  if (!data->has_accum) {
+    ret = -ENODATA;
+  } else {
+    data->bias = position - data->raw_count;
+    data->feedback.position = position;
+  }
+
+  k_spin_unlock(&data->lock, key);
+
+  return ret;
+}
+
 static int amt21_reset(const struct device * dev)
 {
   return amt21_extended_command(dev, AMT21_EXT_RESET);
@@ -1000,6 +1193,7 @@ static const struct encoder_driver_api amt21_encoder_api = {
   .get_feedback = amt21_get_feedback,
   .get_resolution = amt21_get_resolution,
   .set_zero = amt21_set_zero,
+  .set_position = amt21_set_position,
   .reset = amt21_reset,
 };
 
