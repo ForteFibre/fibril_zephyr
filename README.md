@@ -24,14 +24,9 @@ CAN の欄は、そのボードの devicetree がピンとクロックを設定�
 STM32G4 のボードは FDCAN を無効のままにしてあり、有効化とビットレートの指定は使う側の overlay に委ねている。
 CanMotor の MCP2517FD は既定で有効である。
 
-RoboMaster Mini V3 は基板上にモータ CAN 2 系統と RS485、USB の配線があるが、devicetree ではコメントアウトされたまま残っている。
-各ボードの文書に、配線されていて devicetree に出ていないペリフェラルを列挙してある。
-
 CanMotor と RoboMaster Mini の 4 枚は、ピン割り当てを先行ファームウェア CanMotorMbed の同名ターゲットから移してある。
 既存のハードウェアを配線変更なしで動かせる。
 RC26 MainAir V01 は KiCad の回路図から起こしてある。
-
-`fibril_robomaster_v2` は `board.yml` と `board.cmake` だけの書きかけで、devicetree と defconfig がないためビルドできない。
 
 Zephyr 標準のボードでも、必要な overlay を与えれば動く（`app/boards/nucleo_g474re.overlay` が例）。
 
@@ -48,6 +43,18 @@ west update
 
 `west update` は private リポジトリである `fibril_can` を clone する。
 先に GitHub の認証を通しておく（`gh auth login` の後に `gh auth setup-git` を実行するか、SSH 鍵を登録して `insteadOf` を張る）。
+
+## コーディングエージェントを開く場所
+
+**workspace のルート**（このリポジトリの 1 つ上）で開く。
+
+ドライバやサンプルを読むには、Zephyr 本体（`zephyr/`）と `modules/lib/fibril_can` のソースを参照する必要がある。
+どちらもこのリポジトリの外にあるため、`fibril_zephyr/` の中で開くと読めない。
+
+`west` 自身は `.west/` を上に辿るので、`fibril_zephyr/` の中からでもコマンドは通る。
+制約になるのは、エージェントが読めるファイルの範囲である。
+
+このリポジトリの中を触るときの約束事は [CLAUDE.md](CLAUDE.md) にある。
 
 ## ビルドと書き込み
 

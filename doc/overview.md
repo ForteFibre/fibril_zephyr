@@ -8,10 +8,11 @@ Zephyr 本体はこのリポジトリの外に clone され、`west.yml` がそ�
 
 ## workspace の構成
 
-`west init -m https://github.com/ForteFibre/fibril_zephyr` を実行すると、次の配置ができる。
+`west init -m https://github.com/ForteFibre/fibril_zephyr <workspace>` を実行すると、次の配置ができる。
+`<workspace>` の名前は init の引数で決まる。
 
 ```text
-fibril_zephyr_ws/
+<workspace>/
 ├── .west/config                  manifest = fibril_zephyr/west.yml、zephyr base = zephyr
 ├── zephyr/                       Zephyr 本体（v4.4.1 に固定）
 ├── modules/

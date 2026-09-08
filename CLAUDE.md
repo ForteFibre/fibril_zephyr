@@ -35,7 +35,7 @@ cd doc && pip install -r requirements.txt && doxygen && make html
 ## workspace 上の位置
 
 このリポジトリは workspace のルートではない。
-`fibril_zephyr_ws/fibril_zephyr/` が本体で、`zephyr/` と `modules/` は 1 つ上にある。
+west の workspace ディレクトリ（名前は `west init` の引数で決まる）の直下に `fibril_zephyr/` として置かれ、`zephyr/` と `modules/` は 1 つ上の階層にある兄弟である。
 
 サンプルが参照する fibril_can は **このリポジトリの中にはない**。
 `modules/lib/fibril_can` にあり、`west.yml` が revision を固定している。
