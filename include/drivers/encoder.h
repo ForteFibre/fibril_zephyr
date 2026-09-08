@@ -231,8 +231,9 @@ __syscall int encoder_set_zero(const struct device * dev);
  * @param dev Encoder device instance.
  * @param position Value the current position should read as.
  * @retval 0 Success.
- * @retval -ENODATA No reading has been obtained yet, so there is nothing to
- *         offset from.
+ * @retval -ENODATA There is no accumulator to offset from, either because no
+ *         reading has been obtained yet or because the encoder is offline and
+ *         its accumulator is waiting to be rebuilt.
  * @retval -ENOSYS The driver does not implement this operation.
  * @retval negative_errno Failed to set the position.
  */
