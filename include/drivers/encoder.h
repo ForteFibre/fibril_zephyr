@@ -229,8 +229,10 @@ __syscall int encoder_set_zero(const struct device * dev);
  * needs the offset to survive such an event has to set it again.
  *
  * @param dev Encoder device instance.
- * @param position Value the current position should read as.
+ * @param position Value the current position should read as. Drivers may reject
+ *        a magnitude that would leave the accumulator no room to keep counting.
  * @retval 0 Success.
+ * @retval -EINVAL @p position is outside the range the driver accepts.
  * @retval -ENODATA There is no accumulator to offset from, either because no
  *         reading has been obtained yet or because the encoder is offline and
  *         its accumulator is waiting to be rebuilt.

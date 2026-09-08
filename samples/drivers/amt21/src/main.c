@@ -35,9 +35,19 @@ static void report(const struct device * dev)
 	/* A stale reading still carries the last good value, so it is worth
 	 * printing along with the reason it is not fresh.
 	 */
-	LOG_INF("%s: ret=%d pos=%lld vel=%d single=%u turns=%d epoch=%u online=%d stale=%d errors=%u",
-		dev->name, ret, fb.position, fb.velocity, fb.single_turn, fb.turns,
-		fb.position_epoch, (int)fb.online, (int)fb.stale, fb.error_count);
+	/* Velocity has no value until a second reading gives it an interval to be
+	 * measured over, so printing it unconditionally would show a stale number
+	 * after every rebuild of the accumulator.
+	 */
+	if ((fb.valid_mask & ENCODER_FEEDBACK_VELOCITY) != 0U) {
+		LOG_INF("%s: ret=%d pos=%lld vel=%d single=%u turns=%d epoch=%u online=%d stale=%d errors=%u",
+			dev->name, ret, fb.position, fb.velocity, fb.single_turn, fb.turns,
+			fb.position_epoch, (int)fb.online, (int)fb.stale, fb.error_count);
+	} else {
+		LOG_INF("%s: ret=%d pos=%lld vel=n/a single=%u turns=%d epoch=%u online=%d stale=%d errors=%u",
+			dev->name, ret, fb.position, fb.single_turn, fb.turns,
+			fb.position_epoch, (int)fb.online, (int)fb.stale, fb.error_count);
+	}
 
 #if defined(CONFIG_ENCODER_AMT21_STATS)
 	struct amt21_stats stats;

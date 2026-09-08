@@ -553,6 +553,78 @@ ZTEST(encoder_amt21, test_set_position_shifts_only_the_accumulator)
 	zassert_equal(fb.position, 1250, "position %lld after moving", fb.position);
 }
 
+ZTEST(encoder_amt21, test_set_position_does_not_disturb_velocity)
+{
+	struct encoder_feedback fb;
+	int32_t velocity = 0;
+
+	/* The offset shifts the reported position, so a velocity worked out by
+	 * subtracting two reported positions would show a spike unless the offset
+	 * is present in both of them.
+	 */
+	emul[0].position14 = 4000U;
+	zassert_ok(wait_fresh(ENC14, &fb));
+	zassert_ok(encoder_set_position(ENC14, -1000000));
+
+	zassert_ok(wait_fresh(ENC14, &fb));
+	zassert_equal(fb.velocity, 0, "velocity %d after the offset was applied", fb.velocity);
+
+	zassert_true(move_and_capture_velocity(150, &velocity), "missed the transition");
+	zassert_true(velocity > 0, "velocity %d moving forwards after an offset", velocity);
+}
+
+ZTEST(encoder_amt21, test_set_position_rejects_a_position_with_no_headroom)
+{
+	struct encoder_feedback fb;
+
+	emul[0].position14 = 4500U;
+	zassert_ok(wait_fresh(ENC14, &fb));
+
+	int64_t before = fb.position;
+
+	/* Accepting these would make the offset itself, or a later sum of the raw
+	 * count and the offset, overflow int64_t.
+	 */
+	zassert_equal(encoder_set_position(ENC14, INT64_MIN), -EINVAL);
+	zassert_equal(encoder_set_position(ENC14, INT64_MAX), -EINVAL);
+
+	zassert_ok(encoder_get_feedback(ENC14, &fb));
+	zassert_equal(fb.position, before, "a rejected request moved the position");
+}
+
+ZTEST(encoder_amt21, test_multiturn_rebuild_folds_in_a_negative_turns_counter)
+{
+	struct encoder_feedback fb;
+	int ret = 0;
+
+	/* Only a rebuild reads the turns counter into the accumulator, so the
+	 * encoder is taken offline to force one.
+	 */
+	emul[2].mode = EMUL_MODE_SILENT;
+
+	for (int i = 0; i < 200; ++i) {
+		ret = encoder_get_feedback(ENC_MT, &fb);
+		if (ret == -EIO) {
+			break;
+		}
+		k_sleep(K_MSEC(2));
+	}
+
+	zassert_equal(ret, -EIO, "expected -EIO once offline, got %d", ret);
+
+	/* Minus one turn, which the rebuild has to scale without relying on the
+	 * shift of a negative value that C leaves undefined.
+	 */
+	emul[2].mode = EMUL_MODE_NORMAL;
+	emul[2].position14 = 500U;
+	emul[2].turns14 = (uint16_t)((-1) & 0x3FFF);
+
+	zassert_ok(wait_fresh(ENC_MT, &fb), "did not come back online");
+	zassert_equal(fb.turns, -1, "turns %d", fb.turns);
+	zassert_equal(fb.single_turn, 500U, "single turn %u", fb.single_turn);
+	zassert_equal(fb.position, -(1LL << 14) + 500, "position %lld", fb.position);
+}
+
 ZTEST(encoder_amt21, test_going_offline_rebuilds_the_accumulator)
 {
 	struct encoder_feedback before;
