@@ -30,6 +30,8 @@
 #include <zephyr/sys/ring_buffer.h>
 #include <zephyr/sys/util.h>
 
+#include "encoder_accum.h"
+
 LOG_MODULE_REGISTER(encoder_amt21, CONFIG_ENCODER_LOG_LEVEL);
 
 /** Command appended to the node address to read the single-turn position. */
@@ -48,17 +50,6 @@ LOG_MODULE_REGISTER(encoder_amt21, CONFIG_ENCODER_LOG_LEVEL);
 #define AMT21_DATA_BITS 14
 #define AMT21_DATA_MASK BIT_MASK(AMT21_DATA_BITS)
 #define AMT21_TURNS_SIGN_BIT BIT(AMT21_DATA_BITS - 1)
-
-/**
- * @brief Largest magnitude accepted by encoder_set_position().
- *
- * Both the offset itself and every later sum of the raw count and the offset
- * have to stay inside int64_t, and signed overflow is undefined. Capping the
- * requested position well short of the type leaves the accumulator room to keep
- * counting: at the roughly 1.2 M counts/s a RoboMaster rotor reaches, the
- * remaining headroom is measured in millennia.
- */
-#define AMT21_POSITION_LIMIT (INT64_C(1) << 62)
 
 /** Response length in bytes, excluding any echoed command byte. */
 #define AMT21_RESP_LEN 2
@@ -191,18 +182,12 @@ struct amt21_encoder_data
   uint32_t consecutive_errors;
   int64_t blackout_until_ms;
 
-  /* Accumulator state. raw_count is what the readings add up to and bias is the
-   * offset requested through encoder_set_position(); the reported position is
-   * their sum. has_accum being false means the next successful reading rebuilds
-   * both instead of continuing them.
+  /* Only the single-turn reading feeds this. The turns counter is a separate
+   * transaction taken after a gap, so a revolution boundary crossed inside that
+   * gap would make the combined value jump by exactly one revolution, and
+   * nothing downstream could tell that apart from real motion.
    */
-  bool has_accum;
-  int64_t raw_count;
-  int64_t bias;
-  uint32_t last_single_turn;
-  /* Instant of the previous successful reading, for the velocity interval. */
-  uint32_t last_commit_cycle;
-  bool has_commit_cycle;
+  struct encoder_accum accum;
 
 #if AMT21_STATS_ENABLED
   struct amt21_stats stats;
@@ -345,33 +330,6 @@ static int32_t amt21_turns_from_msg(uint16_t msg)
 
   /* Sign extend the 14-bit two's complement turns counter. */
   return (int32_t)(raw ^ AMT21_TURNS_SIGN_BIT) - (int32_t)AMT21_TURNS_SIGN_BIT;
-}
-
-/**
- * @brief Signed change between two single-turn readings.
- *
- * The shorter of the two ways round is taken as the real motion, which is
- * correct as long as the encoder turns by less than half a revolution between
- * two readings. At 14 bits and the default 1000 us poll interval that limit is
- * about 30000 rpm, well above the motors this driver is used with.
- *
- * Only the single-turn reading feeds the accumulator. The turns counter is a
- * separate transaction taken after a gap, so a revolution boundary crossed
- * inside that gap would make the combined value jump by exactly one
- * revolution, and nothing downstream could tell that apart from real motion.
- */
-static int32_t amt21_single_turn_delta(uint32_t current, uint32_t previous, uint8_t resolution)
-{
-  const int32_t span = (int32_t)BIT(resolution);
-  int32_t delta = (int32_t)current - (int32_t)previous;
-
-  if (delta > (span / 2)) {
-    delta -= span;
-  } else if (delta < -(span / 2)) {
-    delta += span;
-  }
-
-  return delta;
 }
 
 /** @brief Absolute count an accumulator is rebuilt from. */
@@ -825,44 +783,31 @@ static void amt21_commit_success(
 
   data->feedback.valid_mask = ENCODER_FEEDBACK_POSITION | ENCODER_FEEDBACK_SINGLE_TURN;
 
-  if (data->has_accum) {
-    data->raw_count +=
-      amt21_single_turn_delta(single_turn, data->last_single_turn, config->resolution);
-  } else {
+  if (!encoder_accum_is_valid(&data->accum)) {
     /* Nothing to continue from, so start over at the absolute reading and tell
      * consumers that the previous position and any offset no longer apply.
      */
-    data->raw_count = amt21_absolute_count(single_turn, turns, have_turns, config->resolution);
-    data->bias = 0;
+    encoder_accum_reset(
+      &data->accum, amt21_absolute_count(single_turn, turns, have_turns, config->resolution),
+      single_turn);
     data->feedback.position_epoch++;
-    data->has_accum = true;
-    data->has_commit_cycle = false;
   }
 
-  data->last_single_turn = single_turn;
-
-  int64_t previous_position = data->feedback.position;
-
-  data->feedback.position = data->raw_count + data->bias;
-
-  /* The interval is measured rather than taken from poll-interval-us, because a
-   * scan that overruns is skipped and a transaction may have been retried.
+  /* The interval the accumulator measures is the real one rather than
+   * poll-interval-us, because a scan that overruns is skipped and a transaction
+   * may have been retried.
    */
-  if (data->has_commit_cycle) {
-    uint32_t interval_us = amt21_cycles_to_us(now_cycle - data->last_commit_cycle);
+  struct encoder_accum_sample sample;
 
-    if (interval_us > 0U) {
-      int64_t delta = data->feedback.position - previous_position;
+  encoder_accum_update(&data->accum, single_turn, now_cycle, &sample);
 
-      data->feedback.sample_interval_us = interval_us;
-      data->feedback.velocity =
-        (int32_t)((delta * (int64_t)USEC_PER_SEC) / (int64_t)interval_us);
-      data->feedback.valid_mask |= ENCODER_FEEDBACK_VELOCITY;
-    }
+  data->feedback.position = sample.position;
+
+  if (sample.has_velocity) {
+    data->feedback.sample_interval_us = sample.sample_interval_us;
+    data->feedback.velocity = sample.velocity;
+    data->feedback.valid_mask |= ENCODER_FEEDBACK_VELOCITY;
   }
-
-  data->last_commit_cycle = now_cycle;
-  data->has_commit_cycle = true;
 
   if (have_turns) {
     data->feedback.valid_mask |= ENCODER_FEEDBACK_TURNS;
@@ -903,7 +848,7 @@ static void amt21_commit_failure(const struct device * bus_dev, const struct dev
      * revolution the unwrap can resolve, so the accumulator is rebuilt on
      * recovery rather than continued.
      */
-    data->has_accum = false;
+    encoder_accum_invalidate(&data->accum);
   }
 
   k_spin_unlock(&data->lock, key);
@@ -918,7 +863,7 @@ static bool amt21_rebuild_pending(const struct device * enc_dev)
 {
   struct amt21_encoder_data * data = enc_dev->data;
   k_spinlock_key_t key = k_spin_lock(&data->lock);
-  bool pending = !data->has_accum;
+  bool pending = !encoder_accum_is_valid(&data->accum);
 
   k_spin_unlock(&data->lock, key);
 
@@ -987,8 +932,8 @@ static void amt21_poll_encoder(const struct device * bus_dev, const struct devic
 
     ret = amt21_read_single_turn(bus_dev, enc_dev, &after);
     if (ret == 0) {
-      int32_t delta = amt21_single_turn_delta(after, single_turn, config->resolution);
-      int64_t unwrapped = (int64_t)single_turn + (int64_t)delta;
+      int64_t delta = encoder_accum_wrap_delta(config->resolution, after, single_turn);
+      int64_t unwrapped = (int64_t)single_turn + delta;
 
       straddled_boundary = (unwrapped < 0) || (unwrapped >= (int64_t)BIT64(config->resolution));
       single_turn = after;
@@ -1141,7 +1086,7 @@ static int amt21_extended_command(const struct device * dev, uint8_t ext)
   /* The device restarts, and a stored zero point moves what it reports, so
    * neither the accumulator nor the offset carries over.
    */
-  data->has_accum = false;
+  encoder_accum_invalidate(&data->accum);
 
   k_spin_unlock(&data->lock, key);
 
@@ -1166,16 +1111,11 @@ static int amt21_set_position(const struct device * dev, int64_t position)
   k_spinlock_key_t key;
   int ret = 0;
 
-  if ((position > AMT21_POSITION_LIMIT) || (position < -AMT21_POSITION_LIMIT)) {
-    return -EINVAL;
-  }
-
   key = k_spin_lock(&data->lock);
 
-  if (!data->has_accum) {
-    ret = -ENODATA;
-  } else {
-    data->bias = position - data->raw_count;
+  ret = encoder_accum_set_position(&data->accum, position);
+
+  if (ret == 0) {
     data->feedback.position = position;
   }
 
@@ -1399,6 +1339,9 @@ static int amt21_bus_init(const struct device * dev)
 static int amt21_encoder_init(const struct device * dev)
 {
   const struct amt21_encoder_config * config = dev->config;
+  struct amt21_encoder_data * data = dev->data;
+
+  encoder_accum_init(&data->accum, config->resolution, false);
 
   if (!device_is_ready(config->bus)) {
     LOG_ERR("%s: bus not ready", dev->name);
