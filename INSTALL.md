@@ -69,7 +69,7 @@ Homebrew が未導入なら先に入れます。
 Zephyr の依存パッケージを導入します。
 
 ```bash
-brew install cmake ninja gperf python3 python-tk ccache qemu dtc libmagic wget openocd
+brew install cmake ninja gperf python@3.12 python-tk@3.12 ccache qemu dtc libmagic wget openocd
 ```
 
 Apple Silicon (arm64) と Intel (x86_64) の双方で動作します。Xcode Command Line Tools が未導入の場合は `xcode-select --install` を先に実行してください。
@@ -96,10 +96,19 @@ git config --global core.longpaths true
 
 Zephyr は Python 仮想環境の利用を推奨しています。以降のコマンドは常に有効化された venv 内で実行してください。
 
-### Ubuntu / macOS
+### Ubuntu
 
 ```bash
 python3 -m venv ~/fibril_zephyr_ws/.venv
+source ~/fibril_zephyr_ws/.venv/bin/activate
+pip install --upgrade pip
+pip install west
+```
+
+### macOS
+
+```bash
+python3.12 -m venv ~/fibril_zephyr_ws/.venv
 source ~/fibril_zephyr_ws/.venv/bin/activate
 pip install --upgrade pip
 pip install west
@@ -187,7 +196,7 @@ west sdk install
 west sdk list
 ```
 
-SDK のバージョンは `zephyr/SDK_VERSION`（本 workspace の Zephyr では **1.0.1**）に対応するものが選択されます。
+SDK のバージョンは `zephyr/SDK_VERSION` に対応するものが選択されます。必要なバージョンは `cat zephyr/SDK_VERSION` で確認できます。
 
 ---
 
