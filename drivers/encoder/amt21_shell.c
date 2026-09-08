@@ -133,12 +133,28 @@ static int cmd_read(const struct shell * sh, size_t argc, char ** argv)
   }
 
   shell_print(sh, "%s: %s (%d)", dev->name, state, ret);
-  shell_print(sh, "  position     %u", fb.position);
+  shell_print(sh, "  position     %lld", fb.position);
+  if ((fb.valid_mask & ENCODER_FEEDBACK_VELOCITY) != 0U) {
+    shell_print(sh, "  velocity     %d counts/s over %u us", fb.velocity, fb.sample_interval_us);
+  }
+  shell_print(sh, "  epoch        %u", fb.position_epoch);
+  if ((fb.valid_mask & ENCODER_FEEDBACK_SINGLE_TURN) != 0U) {
+    uint8_t resolution;
+
+    shell_print(sh, "  single turn  %u", fb.single_turn);
+
+    /* The class API reports raw counts, so the angle is worked out here rather
+     * than carried in the feedback.
+     */
+    if (encoder_get_resolution(dev, &resolution) == 0) {
+      int32_t mdeg = (int32_t)(((uint64_t)fb.single_turn * 360000U) >> resolution);
+
+      shell_print(sh, "  angle        %d.%03d deg", mdeg / 1000, abs(mdeg % 1000));
+    }
+  }
   if ((fb.valid_mask & ENCODER_FEEDBACK_TURNS) != 0U) {
     shell_print(sh, "  turns        %d", fb.turns);
   }
-  shell_print(
-    sh, "  angle        %d.%03d deg", fb.angle_mdeg / 1000, abs(fb.angle_mdeg % 1000));
   shell_print(sh, "  online       %d", (int)fb.online);
   shell_print(sh, "  stale        %d", (int)fb.stale);
   shell_print(sh, "  errors       %u", fb.error_count);

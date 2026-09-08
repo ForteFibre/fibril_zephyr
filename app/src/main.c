@@ -32,9 +32,9 @@ static void report_encoder(const struct device * dev)
    * the reason it is not fresh rather than discarding it.
    */
   LOG_INF(
-    "%s: ret=%d pos=%u turns=%d angle=%d.%03d deg online=%d stale=%d errors=%u", dev->name, ret,
-    fb.position, fb.turns, fb.angle_mdeg / 1000, abs(fb.angle_mdeg % 1000), (int)fb.online,
-    (int)fb.stale, fb.error_count);
+    "%s: ret=%d pos=%lld vel=%d single=%u turns=%d epoch=%u online=%d stale=%d errors=%u",
+    dev->name, ret, fb.position, fb.velocity, fb.single_turn, fb.turns, fb.position_epoch,
+    (int)fb.online, (int)fb.stale, fb.error_count);
 
 #if defined(CONFIG_ENCODER_AMT21_STATS)
   struct amt21_stats stats;
