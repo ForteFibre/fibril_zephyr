@@ -1,233 +1,118 @@
-# Zephyr Example Application
+# fibril_zephyr
 
-<a href="https://github.com/zephyrproject-rtos/example-application/actions/workflows/build.yml?query=branch%3Amain">
-  <img src="https://github.com/zephyrproject-rtos/example-application/actions/workflows/build.yml/badge.svg?event=push">
-</a>
-<a href="https://github.com/zephyrproject-rtos/example-application/actions/workflows/docs.yml?query=branch%3Amain">
-  <img src="https://github.com/zephyrproject-rtos/example-application/actions/workflows/docs.yml/badge.svg?event=push">
-</a>
-<a href="https://zephyrproject-rtos.github.io/example-application">
-  <img alt="Documentation" src="https://img.shields.io/badge/documentation-3D578C?logo=sphinx&logoColor=white">
-</a>
-<a href="https://zephyrproject-rtos.github.io/example-application/doxygen">
-  <img alt="API Documentation" src="https://img.shields.io/badge/API-documentation-3D578C?logo=c&logoColor=white">
-</a>
+ForteFibre のロボット用基板で動く Zephyr ファームウェアを、1 つの workspace にまとめたリポジトリ。
+自作ボードの定義、out-of-tree のモータドライバとエンコーダドライバ、CAN FD 通信フレームワーク [fibril_can](https://github.com/ForteFibre/fibril_can) を使ったサンプルが入っている。
 
-This repository contains a Zephyr example application. The main purpose of this
-repository is to serve as a reference on how to structure Zephyr-based
-applications. Some of the features demonstrated in this example are:
+Zephyr の [T2 topology][west_t2] に沿った **workspace application** で、このリポジトリ自身が west manifest（[west.yml](west.yml)）を提供し、Zephyr 本体と依存モジュールを取り込む。
+Zephyr のバージョンは `west.yml` で v4.4.1 に固定してある。
 
-- Basic [Zephyr application][app_dev] skeleton
-- [Zephyr workspace applications][workspace_app]
-- [Zephyr modules][modules]
-- [West T2 topology][west_t2]
-- [Custom boards][board_porting]
-- Custom [devicetree bindings][bindings]
-- Out-of-tree [drivers][drivers]
-- Out-of-tree libraries
-- Example CI configuration (using GitHub Actions)
-- Custom [west extension][west_ext]
-- Custom [Zephyr runner][runner_ext]
-- Doxygen and Sphinx documentation boilerplate
+構成の全体像は [doc/overview.md](doc/overview.md) にある。
 
-This repository is versioned together with the [Zephyr main tree][zephyr]. This
-means that every time that Zephyr is tagged, this repository is tagged as well
-with the same version number, and the [manifest](west.yml) entry for `zephyr`
-will point to the corresponding Zephyr tag. For example, the `example-application`
-v2.6.0 will point to Zephyr v2.6.0. Note that the `main` branch always
-points to the development branch of Zephyr, also `main`.
+## 対応ボード
 
-[app_dev]: https://docs.zephyrproject.org/latest/develop/application/index.html
-[workspace_app]: https://docs.zephyrproject.org/latest/develop/application/index.html#zephyr-workspace-app
-[modules]: https://docs.zephyrproject.org/latest/develop/modules.html
-[west_t2]: https://docs.zephyrproject.org/latest/develop/west/workspaces.html#west-t2
-[board_porting]: https://docs.zephyrproject.org/latest/guides/porting/board_porting.html
-[bindings]: https://docs.zephyrproject.org/latest/guides/dts/bindings.html
-[drivers]: https://docs.zephyrproject.org/latest/reference/drivers/index.html
-[zephyr]: https://github.com/zephyrproject-rtos/zephyr
-[west_ext]: https://docs.zephyrproject.org/latest/develop/west/extensions.html
-[runner_ext]: https://docs.zephyrproject.org/latest/develop/modules.html#external-runners
+いずれも STM32 系である。
 
-## Drivers
+| ボード | `west build -b` に渡す名前 | MCU | CAN | 文書 |
+| --- | --- | --- | --- | --- |
+| CanMotor Tourobo 2023 | `fibril_canmotor_tourobo2023` | STM32F407VG | MCP2517FD（SPI 外付け）1 本 | [doc](boards/fibril/canmotor_tourobo2023/doc/index.rst) |
+| RoboMaster Mini V1 | `fibril_robomaster_miniv1` | STM32G474VE | FDCAN1 | [doc](boards/fibril/robomaster_miniv1/doc/index.rst) |
+| RoboMaster Mini V3 | `fibril_robomaster_miniv3` | STM32G474ME（LQFP80） | FDCAN1 | [doc](boards/fibril/robomaster_miniv3/doc/index.rst) |
+| RoboMaster Mini V4 | `fibril_robomaster_miniv4` | STM32G474VE | FDCAN1 / 2 / 3 | [doc](boards/fibril/robomaster_miniv4/doc/index.rst) |
+| RC26 MainAir V01 | `fibril_rc26_mainair_v01` | STM32G474RE（LQFP64） | FDCAN2 / 3 | [doc](boards/fibril/rc26_mainair_v01/doc/index.rst) |
 
-### AMT21x absolute encoder (`cui,amt21`)
+CAN の欄は、そのボードの devicetree がピンとクロックを設定しているコントローラである。
+STM32G4 のボードは FDCAN を無効のままにしてあり、有効化とビットレートの指定は使う側の overlay に委ねている。
+CanMotor の MCP2517FD は既定で有効である。
 
-Same Sky (formerly CUI Devices) AMT21 series absolute encoders on a half-duplex
-RS485 bus. Both the 12-bit and 14-bit resolutions are supported, as are the
-single-turn and multi-turn variants and both the 2 Mbps and the adjustable data
-rate options. The generic interface lives in `include/drivers/encoder.h` and the
-driver-specific diagnostics in `include/drivers/encoder/amt21.h`.
+RoboMaster Mini V3 は基板上にモータ CAN 2 系統と RS485、USB の配線があるが、devicetree ではコメントアウトされたまま残っている。
+各ボードの文書に、配線されていて devicetree に出ていないペリフェラルを列挙してある。
 
-One bus node owns the UART and polls every encoder child node in turn, so each
-encoder appears as its own device. Readings are taken from a cached snapshot and
-never block on the bus, which makes them usable from a control loop.
+CanMotor と RoboMaster Mini の 4 枚は、ピン割り当てを先行ファームウェア CanMotorMbed の同名ターゲットから移してある。
+既存のハードウェアを配線変更なしで動かせる。
+RC26 MainAir V01 は KiCad の回路図から起こしてある。
 
-#### Wiring requirements
+`fibril_robomaster_v2` は `board.yml` と `board.cmake` だけの書きかけで、devicetree と defconfig がないためビルドできない。
 
-The UART must be able to drive the transceiver in hardware, for example through
-the `de-enable` property of an STM32 UART. Toggling driver enable from software
-adds latency around the turnaround window and is not viable at 2 Mbps.
+Zephyr 標準のボードでも、必要な overlay を与えれば動く（`app/boards/nucleo_g474re.overlay` が例）。
 
-Keep `de-deassert-time` small. It is measured in sixteenths of a bit time, and a
-large value holds the transceiver enabled past the end of the outgoing stop bit,
-straight into the window where the encoder starts replying. That collision
-corrupts both frames.
+## セットアップ
 
-On boards whose transceiver has its receiver permanently enabled, the
-transmitted command byte comes back on the receive line. Declare `tx-echo` on the
-bus node so the driver discards it; without the property the driver works it out
-from the first transaction.
-
-#### Why responses get dropped, and what the driver does about it
-
-At 2 Mbps the encoder starts replying about 3 us after the command byte. That is
-far too soon to arm a receiver in software, so the driver enables reception once
-at init and never disables it during normal operation. Arming the receiver per
-transaction is the single most likely way to lose the first byte of every
-response. For the same reason the driver always answers `UART_RX_BUF_REQUEST`:
-failing to hand over the next buffer stops reception permanently.
-
-The encoder also needs a gap between consecutive commands, which
-`inter-command-delay-us` provides. Sending commands back to back without it is
-the other common cause of dropped responses.
-
-Beyond that, a failed transaction is retried up to `max-retries` times, and an
-encoder is only declared offline after `offline-threshold` consecutive failures.
-Until then the last good reading is kept and reported as stale, so a single
-dropped response does not disturb a control loop. Reception is resynchronised
-after a truncated or overlong response, and restarted if the UART reports it
-stopped. A scan that overruns `poll-interval-us` causes the next scan to be
-skipped rather than queued, and a failing encoder never holds up the others.
-
-#### Diagnostics
-
-Three levels, so a production build carries none of the cost:
-
-| Level | Configuration | Cost per encoder |
-| --- | --- | --- |
-| Aggregate count in `struct encoder_feedback.error_count` | always available | 4 bytes |
-| Per-cause counters through `amt21_get_stats()` and `amt21_bus_get_stats()` | `CONFIG_ENCODER_AMT21_STATS` | ~60 bytes, plus 24 per bus |
-| Recent failures with the raw bytes received, through `amt21_get_error_log()` | `CONFIG_ENCODER_AMT21_ERROR_LOG_SIZE` | 16 bytes per entry |
-
-The counters are 32-bit and wrap around, so compare successive readings rather
-than treating them as totals. Statistics are exposed as driver-specific
-functions rather than through the encoder class, because the ways a transaction
-can fail are a property of the RS485 protocol and not of encoders in general.
-Counters are split between per-encoder and per-bus scopes: a UART overrun
-disturbs every transaction on the bus, so attributing it to one encoder would be
-misleading.
-
-`CONFIG_ENCODER_AMT21_SHELL` adds an `amt21` command for use on hardware:
-
-```
-amt21 list
-amt21 read <dev>
-amt21 stats <dev>
-amt21 errlog <dev>
-amt21 bus-stats <bus>
-amt21 zero <dev>
-amt21 reset <dev>
-```
-
-`amt21 errlog` is usually the fastest way to work out why responses are being
-dropped, because it keeps the bytes that actually arrived. `debug.conf` enables
-the statistics and the error log.
-
-#### Notes
-
-- Polling faster than the internal update rate of the encoder gains nothing:
-  that rate is 100 us for 14-bit devices and 25 us for 12-bit devices.
-- Node addresses must be multiples of four. The low two bits carry the command,
-  which is why up to 64 encoders can share one bus.
-- Only single-turn devices can store a zero point; `encoder_set_zero()` returns
-  `-ENOTSUP` on a multi-turn device. Both that command and `encoder_reset()`
-  make the encoder restart, so it stops answering for about 200 ms.
-- The turns counter is not retained across a power cycle.
-
-## Getting Started
-
-Before getting started, make sure you have a proper Zephyr development
-environment. Follow the official
-[Zephyr Getting Started Guide](https://docs.zephyrproject.org/latest/getting_started/index.html).
-
-### Initialization
-
-The first step is to initialize the workspace folder (``my-workspace``) where
-the ``example-application`` and all Zephyr modules will be cloned. Run the following
-command:
+Zephyr の開発環境が未構築なら、先に公式の [Getting Started Guide][zephyr_gsg] に従う。
+環境が既にあるなら、workspace の初期化は次のとおり。
 
 ```shell
-# initialize my-workspace for the example-application (main branch)
-west init -m https://github.com/zephyrproject-rtos/example-application --mr main my-workspace
-# update Zephyr modules
-cd my-workspace
+west init -m https://github.com/ForteFibre/fibril_zephyr --mr main fibril_zephyr_ws
+cd fibril_zephyr_ws
 west update
 ```
 
-### Building and running
+`west update` は private リポジトリである `fibril_can` を clone する。
+先に GitHub の認証を通しておく（`gh auth login` の後に `gh auth setup-git` を実行するか、SSH 鍵を登録して `insteadOf` を張る）。
 
-To build the application, run the following command:
-
-```shell
-cd example-application
-west build -b $BOARD app
-```
-
-where `$BOARD` is the target board.
-
-Note that Zephyr sample boards may be used if an appropriate overlay is
-provided (see `app/boards`).
-
-A sample debug configuration is also provided. To apply it, run the following
-command:
+## ビルドと書き込み
 
 ```shell
-west build -b $BOARD app -- -DEXTRA_CONF_FILE=debug.conf
-```
-
-Once you have built the application, run the following command to flash it:
-
-```shell
+cd fibril_zephyr
+west build -b <ボード名> app
 west flash
 ```
 
-### Testing
+診断用の Kconfig をまとめた `app/debug.conf` を追加で適用できる。
 
-To execute Twister integration tests, run the following command:
+```shell
+west build -b <ボード名> app -- -DEXTRA_CONF_FILE=debug.conf
+```
+
+## ドライバ
+
+| クラス | 実装 | 文書 |
+| --- | --- | --- |
+| エンコーダ | AMT21x アブソリュートエンコーダ（RS485） | [doc/drivers/amt21.md](doc/drivers/amt21.md) |
+| モータ | DJI RoboMaster C610 / C620（CAN） | [doc/drivers/robomaster.md](doc/drivers/robomaster.md) |
+
+## サンプル
+
+| パス | 内容 |
+| --- | --- |
+| [samples/drivers/amt21](samples/drivers/amt21) | AMT21x アブソリュートエンコーダの読み出し |
+| [samples/drivers/can_router](samples/drivers/can_router) | fibril_can のルータを Zephyr の CAN デバイスとして使う |
+| [samples/lib/fibril_can/example_node](samples/lib/fibril_can/example_node) | codegen 出力を使った fibril_can スレーブノード |
+| [samples/lib/fibril_can/hub_gs_usb_self](samples/lib/fibril_can/hub_gs_usb_self) | CAN hub と self ノードを CANnectivity の `gs_usb` 経由で PC に見せる |
+| [samples/lib/fibril_can/latency_probe_node](samples/lib/fibril_can/latency_probe_node) | E2E レイテンシ計測用のスレーブ |
+| [samples/lib/fibril_can/hub_gs_usb_latency_probe](samples/lib/fibril_can/hub_gs_usb_latency_probe) | レイテンシ計測スレーブを hub + `gs_usb` 構成で動かす |
+
+## テスト
 
 ```shell
 west twister -T tests --integration
 ```
 
-### Documentation
+テストの構成と Kconfig の組み合わせは [doc/testing.md](doc/testing.md) にある。
 
-A minimal documentation setup is provided for Doxygen and Sphinx. To build the
-documentation first change to the ``doc`` folder:
+## ドキュメント
+
+| 知りたいこと | 参照先 |
+| --- | --- |
+| 全体像と workspace のどこに何があるか | [doc/overview.md](doc/overview.md) |
+| ボードごとのピン配置とクロック | 上のボード表の「文書」列 |
+| ドライバの使い方と配線の要件 | [doc/drivers/](doc/drivers) |
+| テストの構成 | [doc/testing.md](doc/testing.md) |
+| 設計判断の理由 | [doc/adr/](doc/adr) |
+
+HTML 版と API リファレンス（Doxygen）は `doc/` でビルドする。
 
 ```shell
 cd doc
-```
-
-Before continuing, check if you have Doxygen installed. It is recommended to
-use the same Doxygen version used in [CI](.github/workflows/docs.yml). To
-install Sphinx, make sure you have a Python installation in place and run:
-
-```shell
 pip install -r requirements.txt
-```
-
-API documentation (Doxygen) can be built using the following command:
-
-```shell
 doxygen
-```
-
-The output will be stored in the ``_build_doxygen`` folder. Similarly, the
-Sphinx documentation (HTML) can be built using the following command:
-
-```shell
 make html
 ```
 
-The output will be stored in the ``_build_sphinx`` folder. You may check for
-other output formats other than HTML by running ``make help``.
+出力は `doc/_build_doxygen` と `doc/_build_sphinx` に入る。
+
+## ライセンス
+
+Apache-2.0（[LICENSE](LICENSE)）
+
+[west_t2]: https://docs.zephyrproject.org/latest/develop/west/workspaces.html#west-t2
+[zephyr_gsg]: https://docs.zephyrproject.org/latest/develop/getting_started/index.html
