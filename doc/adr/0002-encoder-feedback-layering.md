@@ -1,5 +1,5 @@
 ---
-status: Proposed
+status: Accepted
 date: 2026-09-08
 ---
 
@@ -7,7 +7,7 @@ date: 2026-09-08
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
