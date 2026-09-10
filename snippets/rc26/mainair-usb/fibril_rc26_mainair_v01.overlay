@@ -2,9 +2,13 @@
  * Copyright (c) 2026
  * SPDX-License-Identifier: Apache-2.0
  *
- * RC26 pneumatics node acting as the robot's USB gateway on a MainAir V01.
+ * MainAir V01 as a USB gateway onto RC26's bus.
  *   external port (port 0) = USB FS -> gs_usb -> fcan_hub device
  *   peer port     (port 1) = FDCAN3, board silkscreen CAN0
+ *
+ * Only the transport. A deployment snippet adds the fibril,fcan-* nodes and
+ * must reference board labels only, never the labels defined here, so that
+ * the two overlays can be applied in either order.
  */
 
 / {
@@ -22,25 +26,13 @@
         status = "okay";
         peers = <&fdcan3>;
     };
-
-    /* Same six outputs as rc26-air. The function does not change with the
-     * transport.
-     */
-    fcan_solenoid: fcan-solenoid {
-        compatible = "fibril,fcan-solenoid";
-        gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>,   /* Air0 - J18 */
-                <&gpioa 6 GPIO_ACTIVE_HIGH>,   /* Air1 - J19 */
-                <&gpioa 0 GPIO_ACTIVE_HIGH>,   /* Air2 - J20 */
-                <&gpioa 5 GPIO_ACTIVE_HIGH>,   /* Air3 - J21 */
-                <&gpioa 7 GPIO_ACTIVE_HIGH>,   /* Air4 - J22 */
-                <&gpioa 4 GPIO_ACTIVE_HIGH>;   /* Air5 - J23 */
-        status = "okay";
-    };
 };
 
-/* 1 Mbps arbitration and 5 Mbps data are what the 80 MHz PLL_Q kernel clock
- * divides cleanly (80 and 16 tq/bit); see the clock comment in the board's
- * .dts. The board leaves HSI48 running, which is what feeds USB.
+/* The board leaves every FDCAN disabled and hands the bitrate to the user, so
+ * that a node picks the bus it is wired to. 1 Mbps arbitration and 5 Mbps data
+ * are what the 80 MHz PLL_Q kernel clock divides cleanly (80 and 16 tq/bit);
+ * see the clock comment in the board's .dts. The board leaves HSI48 running,
+ * which is what feeds USB.
  */
 &fdcan3 {
     status = "okay";
