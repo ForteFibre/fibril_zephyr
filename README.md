@@ -71,6 +71,7 @@ west flash
 | --- | --- | --- |
 | `rc26-air` | RC26 MainAir V01 | 6 系統の電磁弁を ROS Service で駆動する |
 | `rc26-air-chain` | RC26 MainAir V01 | 同じ電磁弁に加え、CAN0 と CAN1 を 1 本の論理バスに繋ぐ |
+| `rc26-air-usb` | RC26 MainAir V01 | 同じ電磁弁に加え、CAN0 を gs_usb で PC に見せる |
 
 ボード持ち込みの動作確認には `app/` を使う。fibril_can を使わない。
 

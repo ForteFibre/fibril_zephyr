@@ -148,10 +148,11 @@ CAN コントローラに直結する形と、複数のセグメントを橋渡�
 
 **選ぶのは devicetree で、アプリケーションも機能も書き換えない。**
 
-| overlay に書くもの | 選ばれるバックエンド |
+| overlay に書くもの | 選ばれるもの |
 | --- | --- |
 | `chosen { zephyr,canbus = &fdcanN; }` | `lib/fcan_transport/direct.c` |
 | `compatible = "fibril,can-hub"` のノード | `lib/fcan_transport/hub.c` |
+| `compatible = "gs_usb"` のノード | `lib/fcan_transport/gs_usb.c` を重ねる |
 
 `fibril,can-hub` のノードを置くと `CONFIG_CAN_FCAN_HUB` が自動で立ち、それが
 `CONFIG_FCAN_TRANSPORT_HUB` を選ぶ。conf に書き足すことはない。
@@ -172,6 +173,42 @@ hub 構成でアプリケーションが並行して poll してはいけない�
 hub 構成では `can_start()` を呼ばない。
 外部 port を開けるのはゲートウェイの仕事で、peer はドライバの init で既に上がっている。
 ホストを繋がない基板でも peer セグメントにハートビートが流れる。
+
+### 外部 port を USB に向ける
+
+hub の外部 port は配線を持たない。ここに CANnectivity の gs_usb を被せると、
+PC は SocketCAN からこのノードのバス全体を 1 本の canX として見る。
+自分自身のトラフィックも同じインタフェースに乗る。
+
+これも devicetree で決まる。`gs_usb` のノードを置くと `CONFIG_USBD_GS_USB` が
+既定で立ち、それが `CONFIG_FCAN_TRANSPORT_GS_USB` を選ぶ。
+conf 側で明示するのは `CONFIG_USB_DEVICE_STACK_NEXT=y` だけである。
+
+```dts
+gs_usb0: gs_usb0 {
+    compatible = "gs_usb";
+    label = "gs_usb";
+};
+
+fcan_hub: fcan_hub {
+    compatible = "fibril,can-hub";
+    status = "okay";
+    peers = <&fdcan3>;
+};
+```
+
+USB を有効にする順序に制約がある。
+ホストが列挙できるようになるのは attach の後でなければならない。
+`fcan_transport_attach()` が attach に続けて gs_usb を立ち上げるのはこのためで、
+アプリケーションから順序を間違える余地を消してある。
+
+gs_usb のノードが無ければ、この呼び出しは何もしない `static inline` になる。
+呼び出し側に条件分岐は要らない。
+
+VID/PID と文字列は CANnectivity の既定値に揃えてある。
+ホスト側の udev ルールや gs_usb の pid フィルタがそのまま効く。
+DFU と MSOSV2 記述子は持たないので、WinUSB の自動バインドや USB 経由の
+ファーム更新が要る基板は CANnectivity 本体のアプリケーションを使う。
 
 ### tick の契約
 

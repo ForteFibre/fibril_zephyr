@@ -81,6 +81,10 @@ west build -b fibril_rc26_mainair_v01 apps/node -S rc26-air
 アプリケーションが知るのは `init` / `hal` / `attach` / `run` の 4 つに限る。
 `fibril,can-hub` のノードがあれば hub、無ければ `zephyr,canbus` の直結が選ばれる。
 
+外部 port を USB に向けるかどうかも同じ軸に乗る。`gs_usb` のノードがあれば
+CANnectivity の class を重ねる。ホストが列挙できるのは attach の後でなければ
+ならないので、この順序はバックエンドの中に閉じ込める。
+
 ### 7. node_id は実行時に読む
 
 同じイメージを複数の基板に焼けることが前提なので、node_id をイメージに焼き込まない。

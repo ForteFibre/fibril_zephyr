@@ -15,6 +15,8 @@
 
 #include <fcan_transport/transport.h>
 
+#include "gs_usb.h"
+
 LOG_MODULE_REGISTER(fcan_transport, CONFIG_FCAN_TRANSPORT_LOG_LEVEL);
 
 /* One hub per image: the driver owns every peer bus exclusively, so a second
@@ -69,7 +71,11 @@ int fcan_transport_attach(fcan_node_t * node)
     return -EIO;
   }
 
-  return 0;
+  /* Only now may a host enumerate. A no-op unless the devicetree describes a
+   * gs_usb node, which is what makes the external port face USB instead of
+   * staying unused.
+   */
+  return fcan_transport_gs_usb_start(HUB_DEV);
 }
 
 void fcan_transport_run(fcan_node_t * node, void (*tick)(void))

@@ -44,3 +44,17 @@ tests:
       - fibril_rc26_mainair_v01
     integration_platforms:
       - fibril_rc26_mainair_v01
+
+  app.node.rc26_air_usb:
+    tags:
+      - fibril_can
+      - can
+      - hub
+      - usb
+    # The hub's external port faces a USB host instead of staying unused.
+    extra_args:
+      - SNIPPET=rc26-air-usb
+    platform_allow:
+      - fibril_rc26_mainair_v01
+    integration_platforms:
+      - fibril_rc26_mainair_v01
