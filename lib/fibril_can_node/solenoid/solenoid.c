@@ -16,24 +16,18 @@
 
 #include "schema_gen.h"
 
-/* Empty unless the node schema instantiates Solenoid. The schema decides what
- * this image carries; the generated symbols this file implements do not exist
- * otherwise, and defining them would fail to link.
- */
-#if defined(FCAN_SOLENOID_MAX_COUNT)
-
 LOG_MODULE_REGISTER(fcan_solenoid, CONFIG_FIBRIL_CAN_NODE_LOG_LEVEL);
 
 static const struct gpio_dt_spec valves[] = {
   DT_INST_FOREACH_PROP_ELEM_SEP(0, gpios, GPIO_DT_SPEC_GET_BY_IDX, (, ))
 };
 
-/* The wiring and the schema are written in different files and nothing else
- * ties them together, so an extra valve would otherwise be silently
- * unreachable from the bus.
+/* max_count is a Kconfig ceiling rather than the devicetree's length, because
+ * CMake cannot read a phandle-array. An extra valve would otherwise be
+ * silently unreachable from the bus.
  */
 BUILD_ASSERT(ARRAY_SIZE(valves) <= FCAN_SOLENOID_MAX_COUNT,
-             "more gpios wired than the schema's Solenoid max_count");
+             "more gpios wired than CONFIG_FIBRIL_CAN_NODE_SOLENOID_MAX");
 
 /* Mirrors what was last driven. Read back from the GPIO would report the pin,
  * not the request, and on a high-side driver those differ while the supply is
@@ -133,5 +127,3 @@ FIBRIL_FCAN_FUNC_DEFINE(
   .count = (uint8_t)ARRAY_SIZE(valves),
   .init = solenoid_init,
   .start = solenoid_start);
-
-#endif /* FCAN_SOLENOID_MAX_COUNT */
