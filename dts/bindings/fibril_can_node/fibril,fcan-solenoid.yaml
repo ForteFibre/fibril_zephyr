@@ -1,0 +1,38 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Solenoid valve outputs exposed on the CAN bus as the schema's Solenoid block
+  type.
+
+  One node describes every valve the board drives. Each entry of `gpios` becomes
+  one schema instance, in the order written, so instance 0 on the bus is the
+  first phandle here. The order is the contract with the ROS side and with the
+  wiring diagram; reordering the list renames every valve.
+
+    fcan_solenoid: fcan-solenoid {
+        compatible = "fibril,fcan-solenoid";
+        gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>,
+                <&gpioa 6 GPIO_ACTIVE_HIGH>;
+        status = "okay";
+    };
+
+  The number of entries has to fit the `max_count` the schema declares for
+  Solenoid. A BUILD_ASSERT in the implementation checks it, because the two
+  numbers live in different files and nothing else ties them together.
+
+  This node carries no reg and there is no reason to have two of them: the
+  implementation drives instance 0 only.
+
+compatible: "fibril,fcan-solenoid"
+
+include: base.yaml
+
+properties:
+  gpios:
+    type: phandle-array
+    required: true
+    description: |
+      One entry per valve, in bus-instance order. Active level belongs here
+      rather than in the driver: a board may switch the load high-side or
+      low-side, and only the schematic says which.

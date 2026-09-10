@@ -1,0 +1,34 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# Solenoid valve, as seen from the bus. Paired with solenoid.c, which
+# implements the handlers this generates.
+#
+# Until the codegen can merge several schema files, a node schema copies this
+# block into its own `types:`. Once it can, the node schema drops the copy and
+# this file is passed alongside it.
+
+types:
+  Solenoid:
+    services:
+      # A valve is commanded, not streamed: the master asks for a state and
+      # wants to know it was taken. std_srvs/srv/SetBool is the stock shape
+      # for that, so the ROS side needs no custom interface package.
+      set:
+        request: { on: bool }
+        response: { success: bool }
+        ros:
+          type: std_srvs/srv/SetBool
+          map: { on: data, success: success }
+    topics:
+      # Reports what the output is actually driving, which is what makes a
+      # miswired valve visible without a multimeter. period_us=0 makes it
+      # commit-triggered: the frame goes out when the handler publishes,
+      # and a bus full of idle valves carries no traffic for them.
+      state:
+        dir: s2m
+        period_us: 0
+        fields: { on: bool }
+        ros:
+          type: std_msgs/msg/Bool
+          map: { on: data }
