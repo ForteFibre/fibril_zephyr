@@ -58,17 +58,31 @@ west update
 
 ## ビルドと書き込み
 
+実機に焼くファームウェアは `apps/` にある。
+fibril_can スレーブはすべて `apps/node` 1 つで、何を担うかはビルド時に選ぶ snippet が決める。
+
 ```shell
 cd fibril_zephyr
-west build -b <ボード名> app
+west build -b fibril_rc26_mainair_v01 apps/node -S rc26-air
 west flash
 ```
 
-診断用の Kconfig をまとめた `app/debug.conf` を追加で適用できる。
+| snippet | ボード | 内容 |
+| --- | --- | --- |
+| `rc26-air` | RC26 MainAir V01 | 6 系統の電磁弁を ROS Service で駆動する |
+
+ボード持ち込みの動作確認には `app/` を使う。fibril_can を使わない。
 
 ```shell
-west build -b <ボード名> app -- -DEXTRA_CONF_FILE=debug.conf
+west build -b <ボード名> app
+west build -b <ボード名> app -- -DEXTRA_CONF_FILE=debug.conf   # 診断用 Kconfig
 ```
+
+`apps/node` のビルドには `fcan_codegen` が要る。
+`ros-jazzy-fibril-can-codegen` パッケージが入っていれば自動で見つかる。
+入っていなければ絶対パスを渡す（`-- -DFCAN_CODEGEN=/abs/path/fcan_codegen`）。
+
+構成の考え方と機能の足し方は [doc/apps.md](doc/apps.md) にある。
 
 ## ドライバ
 
@@ -102,6 +116,7 @@ west twister -T tests --integration
 | 知りたいこと | 参照先 |
 | --- | --- |
 | 全体像と workspace のどこに何があるか | [doc/overview.md](doc/overview.md) |
+| アプリケーションの構成と機能の足し方 | [doc/apps.md](doc/apps.md) |
 | ボードごとのピン配置とクロック | 上のボード表の「文書」列 |
 | ドライバの使い方と配線の要件 | [doc/drivers/](doc/drivers) |
 | テストの構成 | [doc/testing.md](doc/testing.md) |

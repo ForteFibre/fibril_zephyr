@@ -23,5 +23,8 @@
  *
  * @brief Custom libraries
  *
+ * @defgroup fibril_can_node fibril_can node functions
+ * @brief Registration of a schema block type's implementation
+ *
  * @}
  */
