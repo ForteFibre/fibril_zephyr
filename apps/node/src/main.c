@@ -4,16 +4,16 @@
  *
  * fibril_can slave entry point.
  *
- * Names no block type. The functions this image carries register themselves
- * in the fibril_fcan_func section (see include/fibril_can_node/func.h), and
- * the schema decides which of them survive the build, so adding a valve or a
- * motor to the bus does not touch this file.
+ * Names no block type and no transport. The functions this image carries
+ * register themselves in the fibril_fcan_func section (see
+ * include/fibril_can_node/func.h), and how their frames reach the bus is
+ * decided by the devicetree (see include/fcan_transport/transport.h). Adding
+ * a valve, or putting the same node behind a CAN hub, does not touch this
+ * file.
  */
 
 #include <stdint.h>
 
-#include <zephyr/device.h>
-#include <zephyr/drivers/can.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/random/random.h>
@@ -21,8 +21,7 @@
 #include <fibril_can/fcan.h>
 #include <fibril_can/fcan_protocol.h>
 
-#include <fibril_can_zephyr/can_hal.h>
-
+#include <fcan_transport/transport.h>
 #include <fibril_can_node/func.h>
 
 #include "schema_gen.h"
@@ -34,8 +33,6 @@ extern const uint64_t fcan_schema_hash;
 
 LOG_MODULE_REGISTER(fibril_node, CONFIG_APP_LOG_LEVEL);
 
-#define CAN_BUS_DEV DEVICE_DT_GET(DT_CHOSEN(zephyr_canbus))
-
 #define MASTER_LOST_US 300000U /* SPEC §5.11 */
 
 /* fcan_init carves every variable-length buffer from this once. Sized with
@@ -44,51 +41,28 @@ LOG_MODULE_REGISTER(fibril_node, CONFIG_APP_LOG_LEVEL);
  */
 K_HEAP_DEFINE(fcan_heap, 16 * 1024);
 
-#define FCAN_RX_QUEUE_DEPTH 32
-K_MSGQ_DEFINE(fcan_rx_msgq, sizeof(struct fcan_zephyr_can_rx_item), FCAN_RX_QUEUE_DEPTH, 4);
-
-static struct k_timer tick_timer;
-
 static void * heap_alloc(size_t size, size_t align, void * ctx)
 {
   ARG_UNUSED(ctx);
   return k_heap_aligned_alloc(&fcan_heap, align, size, K_NO_WAIT);
 }
 
-/* Bounds scheduler_wait so the function ticks keep a ~1 kHz cadence even when
- * fcan has no closer deadline of its own.
- */
-static void tick_expiry(struct k_timer * timer)
+static void run_ticks(void)
 {
-  fcan_notify_tx_ready(k_timer_user_data_get(timer));
-}
-
-static const char * state_str(fcan_node_state_t s)
-{
-  switch (s) {
-  case FCAN_STATE_UNPROVISIONED: return "UNPROVISIONED";
-  case FCAN_STATE_PROVISIONED: return "PROVISIONED";
-  case FCAN_STATE_RUNNING: return "RUNNING";
-  case FCAN_STATE_FAULT: return "FAULT";
-  case FCAN_STATE_SUSPENDED: return "SUSPENDED";
-  default: return "?";
+  STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
+    if (f->tick != NULL) {
+      f->tick();
+    }
   }
 }
 
 int main(void)
 {
-  const struct device * can_dev = CAN_BUS_DEV;
-  static struct fcan_zephyr_can_hal hal;
-
-  if (!device_is_ready(can_dev)) {
-    LOG_ERR("CAN device %s not ready", can_dev->name);
-    return -ENODEV;
-  }
-
   /* Indexed by the codegen's FCAN_ARRAY_*, so a function fills its own slot
    * whatever order the schema puts the block arrays in.
    */
   uint8_t counts[FCAN_NUM_BLOCK_ARRAYS] = {0};
+  bool any_tick = false;
 
   STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
     int ret = (f->init != NULL) ? f->init() : 0;
@@ -99,24 +73,13 @@ int main(void)
     }
 
     counts[f->array] = f->count;
+    any_tick = any_tick || (f->tick != NULL);
     LOG_INF("%s: %u instance(s) on block array %u", f->name, f->count, f->array);
   }
 
-  int rc = can_set_mode(can_dev, CAN_MODE_FD);
+  int rc = fcan_transport_init();
 
   if (rc != 0) {
-    LOG_ERR("can_set_mode(FD) rc=%d", rc);
-    return rc;
-  }
-
-  rc = fcan_zephyr_can_hal_init(&hal, can_dev, &fcan_rx_msgq);
-  if (rc != 0) {
-    return rc;
-  }
-
-  rc = can_start(can_dev);
-  if (rc != 0) {
-    LOG_ERR("can_start rc=%d", rc);
     return rc;
   }
 
@@ -151,7 +114,7 @@ int main(void)
         .service_buffer = FCAN_SERVICE_BUFFER,
         .service_reassembly = FCAN_SERVICE_REASSEMBLY,
       },
-    .hal = fcan_zephyr_can_hal_get(&hal),
+    .hal = fcan_transport_hal(),
     .allocator = {.alloc = heap_alloc, .ctx = NULL},
     .master_lost_us = MASTER_LOST_US,
   };
@@ -171,74 +134,23 @@ int main(void)
   }
   LOG_INF("fcan_register_all OK");
 
-  fcan_zephyr_can_hal_attach_node(&hal, node);
-
-  bool any_tick = false;
+  rc = fcan_transport_attach(node);
+  if (rc != 0) {
+    return rc;
+  }
 
   STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
-    if (f->start != NULL) {
-      int ret = f->start();
+    int ret = (f->start != NULL) ? f->start() : 0;
 
-      if (ret != 0) {
-        LOG_ERR("%s: start failed (%d)", f->name, ret);
-        return ret;
-      }
-    }
-
-    any_tick = any_tick || (f->tick != NULL);
-  }
-
-  /* Only pay for the 1 kHz wake if something is waiting for it. With every
-   * function publishing on change, scheduler_wait can sleep until fcan's
-   * next deadline instead.
-   */
-  if (any_tick) {
-    k_timer_init(&tick_timer, tick_expiry, NULL);
-    k_timer_user_data_set(&tick_timer, node);
-    k_timer_start(&tick_timer, K_MSEC(1), K_MSEC(1));
-  }
-
-  LOG_INF(
-    "entering main loop (state=%s, periodic ticks %s)", state_str(fcan_state(node)),
-    any_tick ? "on" : "off");
-
-  fcan_node_state_t last_state = fcan_state(node);
-  uint32_t last_tick_ms = k_uptime_get_32();
-
-  while (true) {
-    /* Block until the HAL posts a wake (RX enqueue, TX complete, topic
-     * commit, or the 1 ms timer above) or fcan's next deadline falls due,
-     * drain RX onto this thread so fcan_on_can_rx() never races fcan_poll(),
-     * then advance the state machine and the TX scheduler.
-     */
-    fcan_zephyr_can_hal_scheduler_wait(&hal, node);
-    fcan_zephyr_can_hal_drain_rx(&hal);
-    fcan_poll(node);
-
-    const uint32_t now_ms = k_uptime_get_32();
-
-    /* scheduler_wait returns more often than 1 kHz during bursts; gate the
-     * function ticks on the millisecond boundary so a burst does not run
-     * them faster than they were written for.
-     */
-    if (any_tick && (int32_t)(now_ms - last_tick_ms) > 0) {
-      STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
-        if (f->tick != NULL) {
-          f->tick();
-        }
-      }
-      last_tick_ms = now_ms;
-    }
-
-    const fcan_node_state_t s = fcan_state(node);
-
-    if (s != last_state) {
-      LOG_INF(
-        "state: %s -> %s (fault=%d)", state_str(last_state), state_str(s),
-        (int)fcan_fault(node));
-      last_state = s;
+    if (ret != 0) {
+      LOG_ERR("%s: start failed (%d)", f->name, ret);
+      return ret;
     }
   }
+
+  LOG_INF("handing over to the transport (periodic ticks %s)", any_tick ? "on" : "off");
+
+  fcan_transport_run(node, any_tick ? run_ticks : NULL);
 
   return 0;
 }

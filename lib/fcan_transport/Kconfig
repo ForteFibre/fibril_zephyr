@@ -1,0 +1,34 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config FCAN_TRANSPORT
+	bool "fibril_can node transport backends"
+	depends on FIBRIL_CAN
+	help
+	  Hide from the application where a node's HAL comes from and which
+	  thread drives fcan_poll. The devicetree picks the backend.
+
+if FCAN_TRANSPORT
+
+config FCAN_TRANSPORT_HUB
+	bool
+	default y
+	depends on CAN_FCAN_HUB
+	help
+	  The node is the self port of a CAN hub. Selected by a
+	  "fibril,can-hub" node in the devicetree, which is what turns
+	  CAN_FCAN_HUB on in the first place.
+
+config FCAN_TRANSPORT_DIRECT
+	bool
+	default y
+	depends on !CAN_FCAN_HUB
+	help
+	  The node sits directly on the CAN controller named by the
+	  zephyr,canbus chosen node.
+
+module = FCAN_TRANSPORT
+module-str = fcan_transport
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # FCAN_TRANSPORT

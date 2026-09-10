@@ -26,5 +26,8 @@
  * @defgroup fibril_can_node fibril_can node functions
  * @brief Registration of a schema block type's implementation
  *
+ * @defgroup fcan_transport fibril_can node transport
+ * @brief How a node's frames reach the bus
+ *
  * @}
  */

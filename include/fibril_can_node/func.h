@@ -36,10 +36,16 @@ struct fibril_fcan_func
    */
   int (*start)(void);
   /**
-   * Publish periodic S2M topics. Called from the thread that runs
-   * fcan_poll(), at roughly 1 kHz. Optional, and worth leaving out: a
-   * function whose state only changes on a service call should publish from
-   * the handler instead, which costs nothing while nothing happens.
+   * Publish periodic S2M topics. Called at roughly 1 kHz from a single
+   * thread, which is not necessarily the one running fcan_poll() — behind a
+   * CAN hub the poll belongs to the driver thread. Publishing is safe either
+   * way, because a topic commit is built for a committer and a scheduler in
+   * different contexts, but a tick must not assume it can observe the node's
+   * state without racing the poll.
+   *
+   * Optional, and worth leaving out: a function whose state only changes on
+   * a service call should publish from the handler instead, which costs
+   * nothing while nothing happens.
    */
   void (*tick)(void);
 };

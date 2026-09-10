@@ -61,7 +61,7 @@ cd doc && pip install -r requirements.txt && doxygen && make html
 | ディレクトリの責務、ビルド構成 | `doc/overview.md` |
 | サンプルの追加 | サンプルの `README.md`、README のサンプル表 |
 | 機能（ブロック型）の追加 | `lib/fibril_can_node/<type>/type.yaml` と実装を対で置く、`doc/apps.md`、必要なら `dts/bindings/` |
-| snippet（焼く単位）の追加 | README の snippet 表、`doc/apps.md` |
+| snippet（焼く単位）の追加 | README の snippet 表、`apps/node/sample.yaml` のシナリオ、`doc/apps.md` |
 | `west.yml` の fibril_can revision | `doc/overview.md` の固定の説明、必要なら `instance_counts` の移行 |
 | 非自明な設計判断 | `doc/adr/` に新規 ADR と `doc/adr/index.md` の一覧 |
 

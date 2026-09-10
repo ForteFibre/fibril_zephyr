@@ -30,3 +30,17 @@ tests:
       - fibril_rc26_mainair_v01
     integration_platforms:
       - fibril_rc26_mainair_v01
+
+  app.node.rc26_air_chain:
+    tags:
+      - fibril_can
+      - can
+      - hub
+    # Same functions and same schema as rc26_air; only the transport differs.
+    # Kept as a scenario so the hub backend does not rot untested.
+    extra_args:
+      - SNIPPET=rc26-air-chain
+    platform_allow:
+      - fibril_rc26_mainair_v01
+    integration_platforms:
+      - fibril_rc26_mainair_v01

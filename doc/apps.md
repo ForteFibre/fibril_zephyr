@@ -24,6 +24,7 @@ west build -b fibril_rc26_mainair_v01 apps/node -S rc26-air
 | --- | --- | --- |
 | 基板 | ペリフェラルの実体 | `boards/fibril/<board>/` |
 | 機能 | ブロック型とその実装 | `lib/fibril_can_node/<type>/` |
+| トランスポート | フレームがバスに届く経路 | `lib/fcan_transport/`（devicetree が選ぶ） |
 | 焼く単位 | schema、配線の割り当て、node_id | `snippets/<大会>/<名前>/` |
 | 個体 | node_id | 実行時（当面は snippet の Kconfig） |
 
@@ -139,6 +140,48 @@ publish はハンドラの中と `start` の 2 か所からになる。
 
 `tick` を持つ機能が 1 つも無いイメージでは、アプリケーションが 1 kHz のタイマを起動しない。
 `fcan_poll` はランタイム自身の期限（ハートビート、ANNOUNCE、周期 S2M スロット）と、RX・TX 完了・commit の 3 つのイベントで回るので、タイマが無くても止まらない。
+
+## トランスポートを差し替える
+
+ノードのフレームがバスに届く経路は 2 通りある。
+CAN コントローラに直結する形と、複数のセグメントを橋渡しする hub の self port になる形である。
+
+**選ぶのは devicetree で、アプリケーションも機能も書き換えない。**
+
+| overlay に書くもの | 選ばれるバックエンド |
+| --- | --- |
+| `chosen { zephyr,canbus = &fdcanN; }` | `lib/fcan_transport/direct.c` |
+| `compatible = "fibril,can-hub"` のノード | `lib/fcan_transport/hub.c` |
+
+`fibril,can-hub` のノードを置くと `CONFIG_CAN_FCAN_HUB` が自動で立ち、それが
+`CONFIG_FCAN_TRANSPORT_HUB` を選ぶ。conf に書き足すことはない。
+
+2 つの違いは 2 点に尽きる。
+
+**HAL の出どころ。** 直結は `fcan_zephyr_can_hal_get()`、hub は
+`fcan_hub_get_self_hal()` である。後者は Zephyr の CAN device のラッパではない。
+hub の self は「自分も port の 1 つ」の対称モデルに従い、送信を全 live port に
+broadcast する。方向を知らずに済むので、USB が繋がっている port を静的に決めなくてよい。
+
+**`fcan_poll` を回すスレッド。** 直結はアプリケーションのループが回す。
+hub は **ドライバのスレッドが回す**（`fcan_hub_poll` が attach 済みの self を駆動する）。
+`fcan_hub_on_rx` は内部ロックを持たず、呼ぶスレッドを 1 本に保つ約束なので、
+hub 構成でアプリケーションが並行して poll してはいけない。
+`fcan_transport_run()` が hub では即座に返るのはこのためである。
+
+hub 構成では `can_start()` を呼ばない。
+外部 port を開けるのはゲートウェイの仕事で、peer はドライバの init で既に上がっている。
+ホストを繋がない基板でも peer セグメントにハートビートが流れる。
+
+### tick の契約
+
+hub 構成では、周期処理が `fcan_poll` とは別のスレッドで走る。
+ドライバのループにアプリケーション用のフックが無いためである。
+
+publish は安全側にある。トピックの commit は、commit する側とスケジューラが別の
+コンテキストで走る前提で作られている。
+ただし **`tick` は `fcan_poll` と同じスレッドにいると仮定してはいけない。**
+`func.h` の `tick` の説明はこの前提で書いてある。
 
 ## `instance_counts` の埋め方
 

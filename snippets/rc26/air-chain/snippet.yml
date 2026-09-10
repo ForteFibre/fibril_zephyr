@@ -1,0 +1,23 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# The same pneumatics node, bridging the board's two CAN segments instead of
+# sitting on one. RC26 MainAir V01 carries two transceivers, so a node placed
+# mid-chain can join the segment on either side of it into one logical bus.
+#
+# The external hub port has no wire here: nothing binds a gs_usb gateway to
+# it. That is a supported shape — the peers come up with the driver, so the
+# node heartbeats onto both segments whether or not a host ever attaches.
+
+name: rc26-air-chain
+
+append:
+  EXTRA_CONF_FILE: air-chain.conf
+
+boards:
+  # A regex, not a bare name: the key is matched against
+  # "<board>/<qualifiers>", so an exact-match key never fires on a board that
+  # names its SoC.
+  /fibril_rc26_mainair_v01.*/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: fibril_rc26_mainair_v01.overlay
