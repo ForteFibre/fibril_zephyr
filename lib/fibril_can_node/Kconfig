@@ -1,0 +1,45 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig FIBRIL_CAN_NODE
+	bool "fibril_can node functions"
+	depends on FIBRIL_CAN
+	help
+	  Implementations of the schema's block types, layered on this
+	  repository's drivers.
+
+	  Every source under this option includes the codegen's schema_gen.h,
+	  which only exists in an application that calls fcan_invoke_codegen().
+	  Applications that are not fibril_can slaves leave this off.
+
+if FIBRIL_CAN_NODE
+
+config FIBRIL_NODE_SCHEMA
+	string "Node schema, relative to this repository's root"
+	help
+	  The YAML describing what this image exposes on the bus: the node
+	  name, the resource limits, and which block types are instantiated.
+
+	  Snippets set this. The application resolves it against
+	  ZEPHYR_FIBRIL_ZEPHYR_MODULE_DIR and hands it to the codegen.
+
+config FIBRIL_NODE_ID
+	int "fibril_can node id"
+	range 0 126
+	default 16
+	help
+	  0x7F is the broadcast address and cannot be used.
+
+	  Interim: on a real board the id comes from a DIP switch or a config
+	  ROM, so that two identical boards can run one image. RC26 MainAir V01
+	  has no such input in its devicetree yet, so the id is fixed at build
+	  time here. Replace this with the runtime read once lib/node_id/
+	  exists.
+
+rsource "solenoid/Kconfig"
+
+module = FIBRIL_CAN_NODE
+module-str = fibril_can_node
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # FIBRIL_CAN_NODE

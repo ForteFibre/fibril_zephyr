@@ -4,5 +4,6 @@
 menu "Custom libraries"
 
 rsource "custom/Kconfig"
+rsource "fibril_can_node/Kconfig"
 
 endmenu
