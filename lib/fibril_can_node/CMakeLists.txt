@@ -3,15 +3,15 @@
 
 zephyr_library()
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/instance_schema.cmake)
+
 add_subdirectory(solenoid)
 
-# Every block type's sources are compiled unconditionally and guard their own
-# body on the codegen's FCAN_<TYPE>_MAX_COUNT. The schema is then the only
-# place that decides which functions this image carries; a Kconfig per block
-# type would be a second answer to the same question and could disagree with
-# the first.
-#
-# The list of type.yaml files each subdirectory contributes is collected on a
-# global property, which the application reads and passes to the codegen.
-get_property(_schemas GLOBAL PROPERTY fibril_can_node_type_schemas)
-message(STATUS "[fibril_can_node] block type schemas: ${_schemas}")
+# Each block type contributes two things on global properties, which the
+# application reads and hands to the codegen: its type.yaml, and the
+# `instances:` fragment derived from its devicetree node. The devicetree is
+# then the only place that decides which functions this image carries.
+get_property(_types GLOBAL PROPERTY fibril_can_node_type_schemas)
+get_property(_instances GLOBAL PROPERTY fibril_can_node_instance_schemas)
+message(STATUS "[fibril_can_node] block types: ${_types}")
+message(STATUS "[fibril_can_node] instances:   ${_instances}")

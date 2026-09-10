@@ -1,10 +1,14 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: Apache-2.0
 #
-# RC26's pneumatics node: the six valve outputs of a MainAir V01, on CAN0.
+# RC26's pneumatics node: who this board is on the bus, and the six valve
+# outputs it wires. It carries no transport, so it is layered on the board's
+# transport snippet:
 #
-# A snippet is one image. Boards that carry the same functions with the same
-# wiring share it and are told apart at runtime by their node id.
+#   west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
+#
+# Boards that carry the same functions with the same wiring share it and are
+# told apart at runtime by their node id.
 
 name: rc26-air
 

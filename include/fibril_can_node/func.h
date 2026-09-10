@@ -24,7 +24,7 @@ struct fibril_fcan_func
   const char * name;
   /** FCAN_ARRAY_<TYPE> from the codegen: the block array this fills. */
   uint8_t array;
-  /** Instances this board actually wires, at most the schema's max_count. */
+  /** Instances this board actually wires, at most FCAN_<TYPE>_MAX_COUNT. */
   uint8_t count;
   /** Claim the hardware. Called before fcan_init(). Optional. */
   int (*init)(void);
@@ -54,8 +54,8 @@ struct fibril_fcan_func
  * @brief Register a block type implementation.
  * @ingroup fibril_can_node
  *
- * Place inside the codegen's `#if defined(FCAN_<TYPE>_MAX_COUNT)` guard so
- * that a schema without this block type drops the function entirely.
+ * The source holding this is compiled only when the devicetree describes the
+ * function's hardware, which is also what puts the block type in the schema.
  */
 #define FIBRIL_FCAN_FUNC_DEFINE(_ident, ...)                                   \
   static const STRUCT_SECTION_ITERABLE(fibril_fcan_func, _ident) = {           \

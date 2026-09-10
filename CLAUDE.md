@@ -27,7 +27,7 @@ fibril_can 側の設計と不変条件はそのリポジトリの `CLAUDE.md` �
 **`west build` と `west flash` はサンドボックスの外で実行する。** ツールチェーンと USB デバイスにアクセスする必要がある。
 
 ```shell
-west build -b <board> apps/node -S <snippet>                # 実機に焼く fibril_can スレーブ
+west build -b <board> apps/node -S <transport> -S <deployment>   # 実機に焼く fibril_can スレーブ
 west build -b <board> app                                   # ボード持ち込みの動作確認アプリ
 west build -b <board> app -- -DEXTRA_CONF_FILE=debug.conf   # 診断用 Kconfig を重ねる
 west twister -T tests --integration                          # ztest（native_sim で完結する）
@@ -60,7 +60,7 @@ cd doc && pip install -r requirements.txt && doxygen && make html
 | `west.yml` の revision | README と `doc/overview.md` のバージョン記述 |
 | ディレクトリの責務、ビルド構成 | `doc/overview.md` |
 | サンプルの追加 | サンプルの `README.md`、README のサンプル表 |
-| 機能（ブロック型）の追加 | `lib/fibril_can_node/<type>/type.yaml` と実装を対で置く、`doc/apps.md`、必要なら `dts/bindings/` |
+| 機能（ブロック型）の追加 | `lib/fibril_can_node/<type>/` に `type.yaml`、実装、`dts/bindings/` の binding を対で置く、`doc/apps.md` |
 | snippet（焼く単位）の追加 | README の snippet 表、`apps/node/sample.yaml` のシナリオ、`doc/apps.md` |
 | `west.yml` の fibril_can revision | `doc/overview.md` の固定の説明、必要なら `instance_counts` の移行 |
 | 非自明な設計判断 | `doc/adr/` に新規 ADR と `doc/adr/index.md` の一覧 |

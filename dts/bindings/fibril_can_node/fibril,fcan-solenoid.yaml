@@ -5,6 +5,10 @@ description: |
   Solenoid valve outputs exposed on the CAN bus as the schema's Solenoid block
   type.
 
+  This node is what puts Solenoid on the bus. The build reads it to emit the
+  schema's `instances:` entry, so describing the hardware is the whole of
+  adding the function to an image; there is no second list to keep in step.
+
   One node describes every valve the board drives. Each entry of `gpios` becomes
   one schema instance, in the order written, so instance 0 on the bus is the
   first phandle here. The order is the contract with the ROS side and with the
@@ -12,23 +16,32 @@ description: |
 
     fcan_solenoid: fcan-solenoid {
         compatible = "fibril,fcan-solenoid";
+        fcan-ns = "air{i}";
         gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>,
                 <&gpioa 6 GPIO_ACTIVE_HIGH>;
         status = "okay";
     };
 
-  The number of entries has to fit the `max_count` the schema declares for
-  Solenoid. A BUILD_ASSERT in the implementation checks it, because the two
-  numbers live in different files and nothing else ties them together.
-
-  This node carries no reg and there is no reason to have two of them: the
-  implementation drives instance 0 only.
+  There is no reason to have two of these, and the build rejects a second
+  enabled one: the implementation drives devicetree instance 0 only, and a
+  second node would add instances to the schema that no handler serves.
 
 compatible: "fibril,fcan-solenoid"
 
 include: base.yaml
 
 properties:
+  fcan-ns:
+    type: string
+    required: true
+    description: |
+      The instance namespace on the bus, which becomes the ROS name prefix.
+      It has to contain `{i}`, expanded to the instance index, whenever more
+      than one valve is wired; `air{i}` gives air0..airN.
+
+      Required rather than defaulted: a name that reaches the ROS graph
+      belongs to the robot, not to the binding.
+
   gpios:
     type: phandle-array
     required: true
@@ -36,3 +49,8 @@ properties:
       One entry per valve, in bus-instance order. Active level belongs here
       rather than in the driver: a board may switch the load high-side or
       low-side, and only the schematic says which.
+
+      The count has to fit CONFIG_FIBRIL_CAN_NODE_SOLENOID_MAX, which is the
+      static ceiling the generated code allocates for. CMake cannot read a
+      phandle-array, so the ceiling is a Kconfig value rather than this
+      length; a BUILD_ASSERT in the implementation catches an overflow.
