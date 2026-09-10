@@ -12,12 +12,12 @@
 | `app/` | ボード持ち込みの動作確認。fibril_can を使わない |
 
 `apps/node/` はブロック型の名前を 1 つも持たない。
-何を担うかは、ビルド時に選ぶ snippet が決める。
+何を担うかは、ビルド時に重ねる snippet が決める。
 
-## イメージが決まる 4 つの軸
+## イメージが決まる軸
 
 ```shell
-west build -b fibril_rc26_mainair_v01 apps/node -S rc26-air
+west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
 ```
 
 | 軸 | 決めるもの | 置き場 |
@@ -25,20 +25,39 @@ west build -b fibril_rc26_mainair_v01 apps/node -S rc26-air
 | 基板 | ペリフェラルの実体 | `boards/fibril/<board>/` |
 | 機能 | ブロック型とその実装 | `lib/fibril_can_node/<type>/` |
 | トランスポート | フレームがバスに届く経路 | `lib/fcan_transport/`（devicetree が選ぶ） |
-| 焼く単位 | schema、配線の割り当て、node_id | `snippets/<大会>/<名前>/` |
+| 焼く単位 | 配線の割り当て、ノード名、node_id | `snippets/<大会>/<名前>/` |
 | 個体 | node_id | 実行時（当面は snippet の Kconfig） |
 
-snippet 1 つが 1 つのイメージである。
-機能の組み合わせと配線が同じ基板は、何枚あっても同じイメージで動き、実行時の node_id だけが違う。
+## snippet を 2 層に重ねる
+
+`-S` は複数渡せて、並べた順に append される。
+これを使って、焼く単位を 2 つの層に割ってある。
+
+| 層 | 決めるもの | 例 |
+| --- | --- | --- |
+| トランスポート | 基板がバスに出る経路 | `rc26-mainair-usb` |
+| デプロイ | ノード名、node_id、どの機能をどのピンに出すか | `rc26-air` |
+
+RC26 MainAir には必ず USB の CAN が載り、電磁弁やエンコーダは搭載の有無が変わる。
+経路を別の層に括り出しておくと、機能の増減がデプロイ snippet 1 つの中で閉じる。
+
+機能側の overlay はボードが定義するラベルしか参照しない。
+トランスポート snippet が作るラベル（`fcan_hub` など）には触れない。
+この約束があるので、`-S` の順序を入れ替えても同じ blob が出る。
 
 ## snippet の中身
 
 ```text
-snippets/rc26/air/
+snippets/rc26/mainair-usb/
 ├── snippet.yml                        name と、何を append するか
+├── mainair-usb.conf                   USB スタックとログ
+└── fibril_rc26_mainair_v01.overlay    gs_usb、hub、CAN、RNG
+
+snippets/rc26/air/
+├── snippet.yml
 ├── air.conf                           CONFIG_FIBRIL_NODE_SCHEMA と node_id
-├── fibril_rc26_mainair_v01.overlay    配線の割り当て、CAN、RNG
-└── schema/air.yaml                    node、limits、instances
+├── fibril_rc26_mainair_v01.overlay    機能ノードと配線の割り当て
+└── schema/air.yaml                    node と limits
 ```
 
 `snippet.yml` の `boards:` キーは正規表現にする。
@@ -51,17 +70,33 @@ boards:
       EXTRA_DTC_OVERLAY_FILE: fibril_rc26_mainair_v01.overlay
 ```
 
-ノードの schema は `types:` を持たない。
-実装済みのブロック型はアプリケーションがすべて codegen に渡し、インスタンス化しない型は blob から落ちる。
-schema が言うのは、このノードがどの機能をいくつ動かすかだけである。
+## schema は 3 種類の断片から組む
+
+codegen は複数のファイルを決定的にマージする。
+`apps/node` はそれを使って、手で書く部分を最小にしている。
+
+| 断片 | 出どころ | 中身 |
+| --- | --- | --- |
+| ノードヘッダ | `CONFIG_FIBRIL_NODE_SCHEMA` が指す YAML | `node:`、`protocol:`、`limits:` |
+| ブロック型 | 各機能の `type.yaml` | `types:` |
+| インスタンス | 各機能が devicetree から生成 | `instances:` |
+
+ブロック型は実装済みのものを全部渡す。
+インスタンス化されない型は blob を作る前に落とされるので、渡す一覧を誰も管理しなくてよい。
+
+**このイメージが何を担うかは devicetree だけが決める。**
+`fibril,fcan-*` のノードを置くと、そのノードから `instances:` の断片が生成され、機能のソースがコンパイルされる。
+ノードを消せば両方消える。
+
+手で書くのはノードヘッダだけになる。
 
 ```yaml
 node: rc26_air{i}
+protocol: 2
+
 limits:
   max_frames: 16
   max_copy_entries: 128
-instances:
-  - { type: Solenoid, max_count: 6, ns: "air{i}" }
 ```
 
 ノード名の `{i}` は起動時の node_id で置換される。
@@ -69,32 +104,48 @@ schema はロボット 1 台の役割を述べるもので、基板 1 枚を述�
 
 ## 機能を 1 つ足す
 
-`lib/fibril_can_node/<type>/` に 4 つのファイルを置く。
+`lib/fibril_can_node/<type>/` に 4 つのファイルと、binding を 1 つ置く。
 アプリケーションには触らない。
 
 | ファイル | 内容 |
 | --- | --- |
 | `type.yaml` | ブロック型の定義。バスから見た姿 |
 | `impl.c` | 生成されるハンドラの実装 |
-| `Kconfig` | devicetree にノードがあるときだけ y になる真偽値 |
-| `CMakeLists.txt` | ソースの登録と、`type.yaml` をグローバルプロパティに積む 1 行 |
+| `Kconfig` | devicetree にノードがあるときだけ y になる真偽値と、`_MAX` |
+| `CMakeLists.txt` | ソースの登録、`type.yaml` の登録、`fibril_can_node_instances()` |
+| `dts/bindings/fibril_can_node/fibril,fcan-<type>.yaml` | ハードウェアの記述と `fcan-ns` |
 
-`impl.c` は本体を生成マクロで囲む。
+`CMakeLists.txt` はこの形になる。
 
-```c
-#include "schema_gen.h"
+```cmake
+zephyr_library_sources_ifdef(CONFIG_FIBRIL_CAN_NODE_SOLENOID solenoid.c)
 
-#if defined(FCAN_SOLENOID_MAX_COUNT)
-/* ... */
-#endif
+if(CONFIG_FIBRIL_CAN_NODE_SOLENOID)
+  set_property(GLOBAL APPEND PROPERTY fibril_can_node_type_schemas
+               "${CMAKE_CURRENT_SOURCE_DIR}/type.yaml")
+
+  fibril_can_node_instances(
+    TYPE       Solenoid
+    COMPATIBLE "fibril,fcan-solenoid"
+    MAX        ${CONFIG_FIBRIL_CAN_NODE_SOLENOID_MAX})
+endif()
 ```
 
-**このガードが、機能の有無を schema 1 か所で決めている仕掛けである。**
-schema が型をインスタンス化しなければ生成マクロが出ず、ファイルは空になる。
-だから機能ごとの Kconfig を作らない。作れば schema と 2 か所で同じことを決めることになる。
+`fibril_can_node_instances()` は devicetree から `fcan-ns` を読んで `instances:` の断片を吐く。
+compatible を持つノードが 2 つ以上 okay なら、その場でビルドを止める。
+実装は devicetree インスタンス 0 しか駆動しないので、2 つ目はハンドラの無いインスタンス群になるためである。
 
-インスタンスとハードウェアの対応は devicetree が持つ。
-phandle 配列の並びがそのままバス上のインスタンス番号になるので、並べ替えると全部の名前が変わる。
+### `max_count` を Kconfig で持つ理由
+
+`max_count` は静的確保の上限であって、個数ではない。
+blob には現れず、バスと ROS グラフに出るのは実行時のインスタンス数だけである。
+6 と 16 で生成物を比べても、`schema_blob.c` は完全に一致し、変わるのは状態配列の長さ 1 行だけだった。
+
+余らせたコストは `sizeof(state)` × 余りバイトの `.bss` に収まる。
+一方、CMake の devicetree API は phandle 配列を読めない（`dt_prop` が扱うのは string、int、boolean、array、uint8-array、string-array、path）。
+配線の本数を CMake から数える手段がない以上、devicetree に本数を重複して書くより、Kconfig の上限で済ませるほうが行が減る。
+
+`impl.c` の `BUILD_ASSERT` が、配線が上限を超えたときに落とす。
 
 ```c
 static const struct gpio_dt_spec valves[] = {
@@ -102,11 +153,11 @@ static const struct gpio_dt_spec valves[] = {
 };
 
 BUILD_ASSERT(ARRAY_SIZE(valves) <= FCAN_SOLENOID_MAX_COUNT,
-             "more gpios wired than the schema's Solenoid max_count");
+             "more gpios wired than CONFIG_FIBRIL_CAN_NODE_SOLENOID_MAX");
 ```
 
-配線の数と schema の上限は別のファイルに書かれていて、ほかに両者を結ぶものがない。
-この `BUILD_ASSERT` を省くと、余ったバルブがバスから触れないまま黙って残る。
+インスタンスとハードウェアの対応は devicetree が持つ。
+phandle 配列の並びがそのままバス上のインスタンス番号になるので、並べ替えると全部の名前が変わる。
 
 最後に自分を登録する。
 
@@ -244,6 +295,6 @@ static const uint8_t counts[FCAN_NUM_BLOCK_ARRAYS] = {
 入っていない場合は絶対パスを渡す。twister には環境変数で渡す。
 
 ```shell
-west build -b <board> apps/node -S <snippet> -- -DFCAN_CODEGEN=/abs/path/fcan_codegen
+west build -b <board> apps/node -S <transport> -S <deployment> -- -DFCAN_CODEGEN=/abs/path/fcan_codegen
 FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps
 ```

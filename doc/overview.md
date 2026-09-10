@@ -59,7 +59,7 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 | --- | --- |
 | `apps/` | 実機に焼くアプリケーション。`apps/node/` が fibril_can スレーブ |
 | `app/` | ボード持ち込みの動作確認用アプリケーション |
-| `snippets/` | 焼く単位ごとの schema、Kconfig、overlay の組 |
+| `snippets/` | 焼く単位。トランスポート層とデプロイ層に分かれる |
 | `boards/fibril/` | 自作ボードの定義。ボードごとの詳細は各 `doc/index.rst` |
 | `drivers/` | out-of-tree ドライバの実装 |
 | `dts/bindings/` | 上記ドライバと機能の devicetree binding |
@@ -71,7 +71,7 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 | `doc/` | このドキュメントと Doxygen の設定 |
 
 `apps/` と `lib/fibril_can_node/` と `snippets/` の関係は [アプリケーションと機能](apps.md) にある。
-どの機能を載せるかは snippet が選ぶノードの schema が決め、アプリケーションはブロック型の名前を持たない。
+どの機能を載せるかは snippet の overlay が置く `fibril,fcan-*` ノードが決め、アプリケーションはブロック型の名前を持たない。
 
 ## ドライバ
 
