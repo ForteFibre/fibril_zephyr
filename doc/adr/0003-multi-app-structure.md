@@ -103,7 +103,7 @@ schema のノード名に `{i}` を書くと起動時の node_id で置換され
 
 ## Consequences
 
-機能を 1 つ足す作業が `lib/fibril_can_node/<type>/` を 1 つ作ることに閉じる。
+機能を 1 つ足す作業が、`lib/fibril_can_node/<type>/` を 1 つと binding を 1 つ作ることに閉じる。
 同じ機能が、直結の基板でも hub を兼ねる基板でも、同じ機械語のまま動く。
 アプリケーションはブロック型の名前を 1 つも知らない。機能は登録セクションに自分を載せ、`main` はそれを走査して `fcan_config_t::instance_counts` を埋める。
 
