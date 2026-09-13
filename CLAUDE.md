@@ -51,7 +51,8 @@ worktree は `fibril_zephyr/` という名前で置く（`.west/config` の `[ma
 symlink では west と CMake が realpath を取るため落ちる。
 worktree 側を編集すると hardlink が切れるので、編集のたびにコピーし直す。
 
-どちらの木を読んだかは `build/zephyr/snippets_generated.cmake` に出る絶対パスで確認する。
+どちらの木を読んだかは `build/zephyr/zephyr_modules.txt` の `fibril_zephyr` の行に出る絶対パスで確認する。
+モジュールごとに 1 行あるので、`fibril_can` など他の木の取り違えも同時に見える。
 
 ## ビルドとテスト
 
