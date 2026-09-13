@@ -22,6 +22,37 @@ fibril_can 側の設計と不変条件はそのリポジトリの `CLAUDE.md` �
 
 各ディレクトリの責務は [doc/overview.md](doc/overview.md) の「リポジトリの構成」にある。
 
+## 作業の進め方
+
+**変更は worktree で行う。** main checkout は複数のブランチとセッションで共有されるので、そこで編集すると無関係な作業と混ざる。
+
+```shell
+git worktree add .claude/worktrees/<name> -b <branch> origin/main
+```
+
+worktree は `.claude/worktrees/` の下に置く（`.gitignore` 済み）。
+ブランチは `origin/main` から切る。`main` の上では作業しない。
+このパスは main checkout を起点にした相対指定である。
+既に worktree の中にいるなら絶対パスで書く。相対のまま叩くと worktree の中に worktree ができる。
+
+git stash のスタックは main checkout と全ての worktree で共有される。
+退避が要るなら stash ではなく WIP コミットを積む。
+
+### worktree からビルドを検証するとき
+
+**worktree の中で `west build` / `west twister` を回しても、`lib/`、`boards/`、`snippets/` は main checkout の（＝別ブランチの）中身が読まれる。**
+このリポジトリが west の manifest repository そのものなので、`ZEPHYR_FIBRIL_ZEPHYR_MODULE_DIR` が main checkout を指すためである。
+**エラーにならず黙って通るので、検証したつもりになる。**
+
+検証するなら使い捨ての west topdir を別の場所に作り、`zephyr/`、`modules/`、この worktree を **hardlink コピー（`cp -al`）** で並べる。
+worktree は `fibril_zephyr/` という名前で置く（`.west/config` の `[manifest] path` に合わせる）。
+その `.west/config` は workspace のものをコピーする。
+各コピーの `.git` は消さない。無いと west が zephyr を未 clone とみなし、`west twister` が生えない。
+symlink では west と CMake が realpath を取るため落ちる。
+worktree 側を編集すると hardlink が切れるので、編集のたびにコピーし直す。
+
+どちらの木を読んだかは `build/zephyr/snippets_generated.cmake` に出る絶対パスで確認する。
+
 ## ビルドとテスト
 
 **`west build` と `west flash` はサンドボックスの外で実行する。** ツールチェーンと USB デバイスにアクセスする必要がある。
