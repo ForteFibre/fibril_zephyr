@@ -24,6 +24,15 @@
 
 LOG_MODULE_REGISTER(fcan_solenoid, CONFIG_FIBRIL_CAN_NODE_LOG_LEVEL);
 
+/* One node describes every valve the board drives, and the list below reads
+ * instance 0 only. A second enabled node would build and then be invisible
+ * from the bus, so refuse it here rather than ship an image that drives half
+ * the valves.
+ */
+BUILD_ASSERT(
+  DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 1,
+  "exactly one enabled fibril,fcan-solenoid node; put every valve in its gpios");
+
 static const struct gpio_dt_spec valves[] = {
   DT_INST_FOREACH_PROP_ELEM_SEP(0, gpios, GPIO_DT_SPEC_GET_BY_IDX, (, ))
 };

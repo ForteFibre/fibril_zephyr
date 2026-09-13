@@ -21,8 +21,9 @@ description: |
   Solenoid. A BUILD_ASSERT in the implementation checks it, because the two
   numbers live in different files and nothing else ties them together.
 
-  This node carries no reg and there is no reason to have two of them: the
-  implementation drives instance 0 only.
+  This node carries no reg and there is no reason to have two of them. The
+  implementation reads the first enabled node only, so a second one is a
+  build error rather than a silently ignored list of valves.
 
 compatible: "fibril,fcan-solenoid"
 
