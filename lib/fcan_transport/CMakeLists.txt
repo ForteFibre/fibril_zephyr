@@ -8,5 +8,6 @@ zephyr_library()
 zephyr_library_sources_ifdef(CONFIG_FCAN_TRANSPORT_DIRECT direct.c)
 zephyr_library_sources_ifdef(CONFIG_FCAN_TRANSPORT_HUB hub.c)
 
-# Orthogonal to the backend: it dresses whichever external port exists.
+# Dresses the hub's external port. Only the hub has one, so the Kconfig
+# symbol is gated on that backend.
 zephyr_library_sources_ifdef(CONFIG_FCAN_TRANSPORT_GS_USB gs_usb.c)
