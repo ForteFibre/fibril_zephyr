@@ -17,9 +17,10 @@
 /**
  * Bind @p channel as the gs_usb channel and enable the USB device.
  *
- * Must run after the node has been attached to the transport: enabling the
- * device is what lets the host enumerate, and the host opening the channel
- * is what starts the external port.
+ * Must run after the node has been attached to the transport, and therefore
+ * after every function's start hook: enabling the device is what lets the
+ * host enumerate, and the host opening the channel is what starts the
+ * external port.
  */
 int fcan_transport_gs_usb_start(const struct device * channel);
 

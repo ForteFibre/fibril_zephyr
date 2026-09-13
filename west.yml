@@ -30,10 +30,11 @@ manifest:
       # application passes in fcan_config_t::instance_counts. Bump this
       # deliberately, together with any migration the release notes call for.
       #
-      # Currently a commit on feat/schema-merge (fibril_can PR #55), because
-      # apps/node hands the codegen one node schema plus every block type this
-      # repository implements, and only that branch merges them. Move to the
-      # merge commit on main once the PR lands.
-      revision: 854ff384fbf769022186d5f9bd8f415724d81f12
+      # Currently the merge commit of fibril_can PR #56 on main. #55 brought
+      # the schema merging apps/node relies on (one node schema plus every
+      # block type this repository implements), #56 the codegen lookup and the
+      # generated-header visibility the build needs. Both are past v0.1.2, so
+      # there is no tag to point at yet.
+      revision: dedeacd8c35dee269be0c8da79e6e96af16d179a
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can

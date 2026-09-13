@@ -29,10 +29,14 @@ struct fibril_fcan_func
   /** Claim the hardware. Called before fcan_init(). Optional. */
   int (*init)(void);
   /**
-   * First contact with the bus, called once after fcan_register_all().
-   * Optional. A function whose S2M topics are commit-triggered publishes
-   * their initial value here; the runtime holds the request until the node
-   * reaches RUNNING.
+   * First contact with the bus, called once between fcan_register_all() and
+   * fcan_transport_attach(). Optional. A function whose S2M topics are
+   * commit-triggered publishes their initial value here; the runtime holds
+   * the request until the node reaches RUNNING.
+   *
+   * Nothing can reach the node yet — attaching is what starts delivery — so
+   * a service handler cannot run concurrently with this and undo what it
+   * publishes.
    */
   int (*start)(void);
   /**
