@@ -1,0 +1,47 @@
+description: |
+  RobStride actuator.
+
+  The properties here are the ones that are fixed once the actuator is wired
+  into the machine. Loop gains and the targets themselves are set at run time
+  through include/drivers/motor/robstride.h.
+
+  The direction of rotation and the gear ratio are deliberately absent. Both
+  end up as a scale the control layer applies when it turns counts into a
+  physical quantity, and splitting that scale between the driver and the
+  control layer makes the accumulated position harder to reason about.
+
+compatible: "robstride,motor"
+
+include: base.yaml
+
+on-bus: robstride
+
+properties:
+  reg:
+    required: true
+    description: >
+      CAN ID of this actuator, in the range 1..127. It must differ from the
+      master-can-id of the bus.
+  model:
+    type: string
+    required: true
+    enum:
+      - rs00
+      - rs05
+    description: >
+      Actuator model. It fixes the velocity, torque and current ranges used to
+      encode commands and decode feedback, so a wrong value silently scales
+      every value on this motor.
+  max-current-ma:
+    type: int
+    description: >
+      Current limit written to the motor, in mA. Defaults to the model limit.
+  max-velocity-mrad-s:
+    type: int
+    description: >
+      Velocity limit written to the motor, in mrad/s. Defaults to the model
+      limit.
+  max-torque-mnm:
+    type: int
+    description: >
+      Torque limit written to the motor, in mNm. Defaults to the model limit.

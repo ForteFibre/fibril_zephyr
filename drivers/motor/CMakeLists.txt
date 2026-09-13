@@ -3,3 +3,4 @@
 
 zephyr_library()
 zephyr_library_sources_ifdef(CONFIG_MOTOR_DJI_ROBOMASTER robomaster.c)
+zephyr_library_sources_ifdef(CONFIG_MOTOR_ROBSTRIDE robstride.c)

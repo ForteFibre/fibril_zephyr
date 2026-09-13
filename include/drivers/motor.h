@@ -77,8 +77,15 @@ struct motor_feedback
   int16_t current;
   /** Latest measured velocity. */
   int16_t velocity;
-  /** Accumulated or absolute position, depending on the driver. */
-  int32_t position;
+  /**
+   * @brief Position accumulated by the driver, in driver-specific counts.
+   *
+   * The driver resolves the wrap of the underlying device and accumulates
+   * here, so a control loop sees a continuous value. What one count is worth
+   * depends on the device, and is documented by each driver; converting to a
+   * physical unit belongs to the control layer.
+   */
+  int64_t position;
   /** Instantaneous orientation reported by the motor. */
   int32_t orientation;
   /** Latest measured temperature. */
