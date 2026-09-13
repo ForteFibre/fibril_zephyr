@@ -31,10 +31,9 @@ workspace のディレクトリに他のものが置かれていても、この 
 サンプルが参照する fibril_can はこのリポジトリの中ではなく `modules/lib/fibril_can` にある。
 private repository なので、`west update` を通すには先に GitHub の認証が必要である。
 
-fibril_can の revision は現状 `main` を参照している。
-これは apps/node が必要とする schema-merge 系の更新を追従するための一時運用で、同じコミットを checkout しても取得される fibril_can の内容は時点で変わりうる。
-codegen が決めるブロック配列の並びはワイヤの契約の一部で、これが変わると `fcan_config_t::instance_counts` の割り当ても変わる。
-追従するときは必要な移行をこのリポジトリ側の変更に含める。
+fibril_can の revision はブランチではなくコミットで固定してある。
+codegen が決めるブロック配列の並びはワイヤの契約の一部で、`main` を追いかけていると `fcan_config_t::instance_counts` の割り当てが黙って変わる。
+上げるときは意図して上げ、必要な移行を同じ変更に含める。
 
 ## Zephyr module としての入口
 
