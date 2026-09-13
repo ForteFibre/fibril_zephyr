@@ -42,6 +42,20 @@
     bitrate-data = <5000000>;
 };
 
+/* CAN0's transceiver IC2 holds STB high by default, which leaves the
+ * controller talking to a disconnected bus. Nothing in the driver touches the
+ * pin, so the hog takes it low before any device init runs and leaves it
+ * there: this node has no reason to enter standby.
+ */
+&gpioa {
+    can0_stb_hog {
+        gpio-hog;
+        gpios = <9 GPIO_ACTIVE_HIGH>;
+        output-low;
+        line-name = "CAN0_STB";
+    };
+};
+
 /* boot_id decides which node survives an id collision and jitters T_listen, so
  * two boards powering up together must not draw the same value. The board DTS
  * already leaves HSI48 running, which is all the RNG needs.
