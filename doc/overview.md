@@ -31,6 +31,10 @@ workspace のディレクトリに他のものが置かれていても、この 
 サンプルが参照する fibril_can はこのリポジトリの中ではなく `modules/lib/fibril_can` にある。
 private repository なので、`west update` を通すには先に GitHub の認証が必要である。
 
+fibril_can の revision はブランチではなくコミットで固定してある。
+codegen が決めるブロック配列の並びはワイヤの契約の一部で、`main` を追いかけていると `fcan_config_t::instance_counts` の割り当てが黙って変わる。
+上げるときは意図して上げ、必要な移行を同じ変更に含める。
+
 ## Zephyr module としての入口
 
 このリポジトリは Zephyr module でもある。
@@ -42,7 +46,9 @@ private repository なので、`west update` を通すには先に GitHub の認
 | `build.cmake` | `.`（`CMakeLists.txt`） | `drivers/` と `lib/` を `add_subdirectory` する |
 | `settings.board_root` | `.` | `boards/` を追加のボード検索パスにする |
 | `settings.dts_root` | `.` | `dts/` と `dts/bindings/` を追加の検索パスにする |
+| `settings.snippet_root` | `.` | `snippets/` を snippet の検索パスにする |
 | `runners` | `scripts/example_runner.py` | `west flash` の runner を追加する |
+| `name` | `fibril_zephyr` | `ZEPHYR_FIBRIL_ZEPHYR_MODULE_DIR` を clone 先の名前から切り離す |
 
 `CMakeLists.txt` は `include/` をインクルードパスに加え、`zephyr_syscall_include_directories()` も呼ぶ。
 `include/drivers/motor.h` などが `__syscall` を使うため、これがないとシステムコールが生成されない。
@@ -51,16 +57,21 @@ private repository なので、`west update` を通すには先に GitHub の認
 
 | ディレクトリ | 内容 |
 | --- | --- |
+| `apps/` | 実機に焼くアプリケーション。`apps/node/` が fibril_can スレーブ |
 | `app/` | ボード持ち込みの動作確認用アプリケーション |
+| `snippets/` | 焼く単位ごとの schema、Kconfig、overlay の組 |
 | `boards/fibril/` | 自作ボードの定義。ボードごとの詳細は各 `doc/index.rst` |
 | `drivers/` | out-of-tree ドライバの実装 |
-| `dts/bindings/` | 上記ドライバの devicetree binding |
+| `dts/bindings/` | 上記ドライバと機能の devicetree binding |
 | `include/` | 公開ヘッダ。ドライバクラスの API はここが正本 |
-| `lib/` | out-of-tree ライブラリ |
+| `lib/` | out-of-tree ライブラリ。`lib/fibril_can_node/` にブロック型の実装、`lib/fcan_transport/` にバスへの繋ぎ方 |
 | `samples/` | ドライバ単体および fibril_can と組み合わせたサンプル |
 | `tests/` | Twister から走る ztest |
 | `scripts/` | west の拡張コマンドと runner |
 | `doc/` | このドキュメントと Doxygen の設定 |
+
+`apps/` と `lib/fibril_can_node/` と `snippets/` の関係は [アプリケーションと機能](apps.md) にある。
+どの機能を載せるかは snippet が選ぶノードの schema が決め、アプリケーションはブロック型の名前を持たない。
 
 ## ドライバ
 

@@ -1,0 +1,56 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * RC26 pneumatics node acting as the robot's USB gateway on a MainAir V01.
+ *   external port (port 0) = USB FS -> gs_usb -> fcan_hub device
+ *   peer port     (port 1) = FDCAN3, board silkscreen CAN0
+ */
+
+/ {
+    gs_usb0: gs_usb0 {
+        compatible = "gs_usb";
+        label = "gs_usb";
+    };
+
+    /* No zephyr,canbus chosen node: the hub owns the controller exclusively,
+     * and handing it to a second consumer would give two owners to the same
+     * filters and the same start/stop.
+     */
+    fcan_hub: fcan_hub {
+        compatible = "fibril,can-hub";
+        status = "okay";
+        peers = <&fdcan3>;
+    };
+
+    /* Same six outputs as rc26-air. The function does not change with the
+     * transport.
+     */
+    fcan_solenoid: fcan-solenoid {
+        compatible = "fibril,fcan-solenoid";
+        gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>,   /* Air0 - J18 */
+                <&gpioa 6 GPIO_ACTIVE_HIGH>,   /* Air1 - J19 */
+                <&gpioa 0 GPIO_ACTIVE_HIGH>,   /* Air2 - J20 */
+                <&gpioa 5 GPIO_ACTIVE_HIGH>,   /* Air3 - J21 */
+                <&gpioa 7 GPIO_ACTIVE_HIGH>,   /* Air4 - J22 */
+                <&gpioa 4 GPIO_ACTIVE_HIGH>;   /* Air5 - J23 */
+        status = "okay";
+    };
+};
+
+/* 1 Mbps arbitration and 5 Mbps data are what the 80 MHz PLL_Q kernel clock
+ * divides cleanly (80 and 16 tq/bit); see the clock comment in the board's
+ * .dts. The board leaves HSI48 running, which is what feeds USB.
+ */
+&fdcan3 {
+    status = "okay";
+    bitrate = <1000000>;
+    bitrate-data = <5000000>;
+};
+
+/* boot_id decides which node survives an id collision and jitters T_listen,
+ * so two boards powering up together must not draw the same value.
+ */
+&rng {
+    status = "okay";
+};

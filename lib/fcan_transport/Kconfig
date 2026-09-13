@@ -1,0 +1,47 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config FCAN_TRANSPORT
+	bool "fibril_can node transport backends"
+	depends on FIBRIL_CAN
+	help
+	  Hide from the application where a node's HAL comes from and which
+	  thread drives fcan_poll. The devicetree picks the backend.
+
+if FCAN_TRANSPORT
+
+config FCAN_TRANSPORT_HUB
+	bool
+	default y
+	depends on CAN_FCAN_HUB
+	help
+	  The node is the self port of a CAN hub. Selected by a
+	  "fibril,can-hub" node in the devicetree, which is what turns
+	  CAN_FCAN_HUB on in the first place.
+
+config FCAN_TRANSPORT_DIRECT
+	bool
+	default y
+	depends on !CAN_FCAN_HUB
+	help
+	  The node sits directly on the CAN controller named by the
+	  zephyr,canbus chosen node.
+
+config FCAN_TRANSPORT_GS_USB
+	bool "Face the external port at a USB host through CANnectivity gs_usb"
+	default y
+	depends on USBD_GS_USB
+	help
+	  A PC on SocketCAN then sees this node's bus as a single canX
+	  interface. USBD_GS_USB itself defaults on from a "gs_usb" node in
+	  the devicetree, so describing the hardware is enough; the
+	  application still has to turn USB_DEVICE_STACK_NEXT on.
+
+	  Only a backend with an external port can use this. A node wired
+	  straight to a CAN controller has none.
+
+module = FCAN_TRANSPORT
+module-str = fcan_transport
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # FCAN_TRANSPORT

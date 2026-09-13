@@ -1,0 +1,51 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * RC26 pneumatics node on a MainAir V01.
+ */
+
+/ {
+    chosen {
+        /* Board silkscreen "CAN0" is FDCAN3. The robot's bus is wired to
+         * CAN0 on every node, so the schematic and the harness agree.
+         */
+        zephyr,canbus = &fdcan3;
+    };
+
+    /* The six +12 V outputs J18-J23, in silkscreen order. The pins are not
+     * consecutive on the port because the TBD62783A inputs were placed to
+     * keep the +12 V traces short; taking them from the board's air0..air5
+     * nodes is not possible, since those are gpio-leds children rather than
+     * a GPIO phandle-array.
+     */
+    fcan_solenoid: fcan-solenoid {
+        compatible = "fibril,fcan-solenoid";
+        gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>,   /* Air0 - J18 */
+                <&gpioa 6 GPIO_ACTIVE_HIGH>,   /* Air1 - J19 */
+                <&gpioa 0 GPIO_ACTIVE_HIGH>,   /* Air2 - J20 */
+                <&gpioa 5 GPIO_ACTIVE_HIGH>,   /* Air3 - J21 */
+                <&gpioa 7 GPIO_ACTIVE_HIGH>,   /* Air4 - J22 */
+                <&gpioa 4 GPIO_ACTIVE_HIGH>;   /* Air5 - J23 */
+        status = "okay";
+    };
+};
+
+/* The board leaves every FDCAN disabled and hands the bitrate to the user, so
+ * that a node picks the bus it is wired to. 1 Mbps arbitration and 5 Mbps data
+ * are what the 80 MHz PLL_Q kernel clock divides cleanly (80 and 16 tq/bit);
+ * see the clock comment in the board's .dts.
+ */
+&fdcan3 {
+    status = "okay";
+    bitrate = <1000000>;
+    bitrate-data = <5000000>;
+};
+
+/* boot_id decides which node survives an id collision and jitters T_listen, so
+ * two boards powering up together must not draw the same value. The board DTS
+ * already leaves HSI48 running, which is all the RNG needs.
+ */
+&rng {
+    status = "okay";
+};
