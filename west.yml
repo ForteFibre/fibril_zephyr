@@ -25,9 +25,10 @@ manifest:
       revision: v1.4.0
       path: modules/third_party/cannectivity
     - name: fibril_can
-      # Tracks main. If the codegen changes the block-array order, update this
-      # repository in the same change because fcan_config_t::instance_counts
-      # depends on it.
+      # Tracks main for now so apps/node can follow the schema-merge support
+      # after fibril_can PR #55. This gives up reproducibility across time: if
+      # the codegen changes the block-array order, update this repository in
+      # the same change because fcan_config_t::instance_counts depends on it.
       revision: main
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
