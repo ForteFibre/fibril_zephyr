@@ -149,10 +149,16 @@ int main(void)
 	}
 
 	/* MotorDriver has max_count=4 in the schema; ship 1 instance to keep
-	 * the RAM footprint small on native_sim. Imu is fixed count=1. */
-	static const uint8_t counts[] = {1U, 1U};
-	BUILD_ASSERT(ARRAY_SIZE(counts) == FCAN_NUM_BLOCK_ARRAYS,
-		     "counts[] must match the schema's block-array count");
+	 * the RAM footprint small on native_sim. Imu is fixed count=1.
+	 *
+	 * Indexed by FCAN_ARRAY_*, never positionally: the block array order
+	 * is derived from the schema, so a positional initialiser keeps
+	 * compiling while handing a count to the wrong block.
+	 */
+	static const uint8_t counts[FCAN_NUM_BLOCK_ARRAYS] = {
+		[FCAN_ARRAY_MOTORDRIVER] = 1U,
+		[FCAN_ARRAY_IMU] = 1U,
+	};
 
 	fcan_config_t cfg = {
 		.node_id = NODE_ID,

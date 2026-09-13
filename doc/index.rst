@@ -11,6 +11,7 @@ API リファレンスは Doxygen が別に生成する。
    :caption: ガイド
 
    overview
+   apps
    testing
 
 .. toctree::

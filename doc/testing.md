@@ -1,7 +1,7 @@
 # テスト
 
 テストは Twister から走らせる。
-`tests/` 以下が ztest、`app/` が実機向けアプリケーションのビルド確認である。
+`tests/` 以下が ztest、`apps/` と `app/` がアプリケーションのビルド確認である。
 
 ## 実行
 
@@ -22,10 +22,23 @@ west twister -T tests/drivers/motor --integration
 
 ```shell
 west twister -T app --integration
+west twister -T apps --integration
 ```
 
 `app/sample.yaml` は `build_only: true` で、`integration_platforms` に `nucleo_g474re` を指定している。
 `app.default` と、`debug.conf` を重ねた `app.debug` の 2 通りをビルドする。
+
+`apps/node/sample.yaml` も `build_only: true` で、`integration_platforms` は `fibril_rc26_mainair_v01` である。
+snippet ごとに 1 シナリオで、`rc26-air`、`rc26-air-chain`、`rc26-air-usb` の 3 通りをビルドする。
+
+`apps/` のビルドは `fcan_codegen` CLI を要求する。
+`ros-jazzy-fibril-can-codegen` を入れた環境では自動で見つかる。
+そうでなければ環境変数で渡す。
+twister の `--extra-args=-DFCAN_CODEGEN=...` はヘルパに届かないので効かない。
+
+```shell
+FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps --integration
+```
 
 ## 構成
 

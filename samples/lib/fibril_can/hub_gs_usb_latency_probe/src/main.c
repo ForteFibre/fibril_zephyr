@@ -155,10 +155,13 @@ int main(void)
     return -ENOMEM;
   }
 
-  static const uint8_t counts[] = {1U};
-  BUILD_ASSERT(
-    ARRAY_SIZE(counts) == FCAN_NUM_BLOCK_ARRAYS,
-    "counts[] must match the schema's block-array count");
+  /* Indexed by FCAN_ARRAY_*, never positionally: the block array order is
+   * derived from the schema, so a positional initialiser keeps compiling
+   * while handing a count to the wrong block.
+   */
+  static const uint8_t counts[FCAN_NUM_BLOCK_ARRAYS] = {
+    [FCAN_ARRAY_LATENCYPROBE] = 1U,
+  };
 
   fcan_config_t cfg = {
     .node_id = NODE_ID,

@@ -1,0 +1,20 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# The pneumatics node doubling as the robot's USB gateway. A PC on SocketCAN
+# sees the whole bus — this node's own traffic included — through one canX
+# interface, because the hub joins the USB-facing external port and the CAN0
+# segment into a single logical bus.
+
+name: rc26-air-usb
+
+append:
+  EXTRA_CONF_FILE: air-usb.conf
+
+boards:
+  # A regex, not a bare name: the key is matched against
+  # "<board>/<qualifiers>", so an exact-match key never fires on a board that
+  # names its SoC.
+  /fibril_rc26_mainair_v01.*/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: fibril_rc26_mainair_v01.overlay

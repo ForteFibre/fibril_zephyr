@@ -1,0 +1,12 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config FIBRIL_CAN_NODE_SOLENOID
+	bool
+	default y
+	depends on DT_HAS_FIBRIL_FCAN_SOLENOID_ENABLED
+	select GPIO
+	help
+	  Compiled whenever the devicetree describes the valves. Whether the
+	  block type reaches the bus is decided by the schema, not here: the
+	  source is empty unless the schema instantiates Solenoid.

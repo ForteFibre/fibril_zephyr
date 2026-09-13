@@ -25,6 +25,16 @@ manifest:
       revision: v1.4.0
       path: modules/third_party/cannectivity
     - name: fibril_can
+      # Pinned, not tracking main: the codegen's block-array order is part of
+      # the wire contract, and a change to it silently reassigns the counts an
+      # application passes in fcan_config_t::instance_counts. Bump this
+      # deliberately, together with any migration the release notes call for.
+      #
+      # Currently the merge commit of fibril_can PR #56 on main. #55 brought
+      # the schema merging apps/node relies on (one node schema plus every
+      # block type this repository implements), #56 the codegen lookup and the
+      # generated-header visibility the build needs. Both are past v0.1.2, so
+      # there is no tag to point at yet.
+      revision: dedeacd8c35dee269be0c8da79e6e96af16d179a
       url: https://github.com/ForteFibre/fibril_can.git
-      revision: main
       path: modules/lib/fibril_can
