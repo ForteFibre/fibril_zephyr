@@ -14,6 +14,10 @@
  * @defgroup motor_interface Motor driver class
  * @brief Generic motor interface
  *
+ * @defgroup motor_robstride RobStride driver
+ * @ingroup motor_interface
+ * @brief Targets and parameters specific to the RobStride driver
+ *
  * @}
  */
 
