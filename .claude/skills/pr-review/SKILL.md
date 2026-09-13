@@ -13,15 +13,26 @@ PR の未解決レビュースレッドを 1 つずつ片付ける。
 PR 番号は引数で受け取る。無ければ `gh pr view --json number -q .number`。
 
 ```shell
-gh api graphql -f query='
-query($owner:String!,$repo:String!,$num:Int!){
+gh api graphql --paginate -f query='
+query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){ pullRequest(number:$num){
-    reviewThreads(first:100){ nodes{
-      id isResolved isOutdated path line
-      comments(first:100){ nodes{ databaseId author{login} body } } } } } }
+    reviewThreads(first:100, after:$endCursor){
+      nodes{
+        id isResolved isOutdated path line
+        comments(first:100){ nodes{ databaseId author{login} body } } }
+      pageInfo{ hasNextPage endCursor } } } }
 }' -F owner=ForteFibre -F repo=fibril_zephyr -F num=<N> \
   --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)'
 ```
+
+**`--paginate` を外さない。** レビュアーが bot だとスレッドは簡単に 100 を超える。
+黙って先頭 100 件だけを見て、残りを対応済みと誤認する。
+
+`--paginate` が使う変数名は `$endCursor` で固定されている。
+`pageInfo` を持つ一番外側の接続だけを辿るので、`comments` の側には `pageInfo` を置かない。
+返信先に使う先頭コメントは必ず最初のページにあるため、これで困らない。
+
+`--jq` はページごとに適用される。出力は JSON の配列ではなく 1 スレッド 1 行になる。
 
 `isOutdated` のスレッドも読む。行がずれただけで指摘が生きていることがある。
 
