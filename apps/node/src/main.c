@@ -134,11 +134,13 @@ int main(void)
   }
   LOG_INF("fcan_register_all OK");
 
-  rc = fcan_transport_attach(node);
-  if (rc != 0) {
-    return rc;
-  }
-
+  /* Before attach, not after. Attaching is what lets frames reach the node —
+   * behind a hub the driver thread starts polling it, and a gs_usb build
+   * enumerates on the same call — so a service handler could otherwise run
+   * while a function is still publishing its initial state and overwrite a
+   * just-commanded output. Committing here is not a lost publish: the runtime
+   * holds the request until the node is allowed to transmit.
+   */
   STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
     int ret = (f->start != NULL) ? f->start() : 0;
 
@@ -146,6 +148,11 @@ int main(void)
       LOG_ERR("%s: start failed (%d)", f->name, ret);
       return ret;
     }
+  }
+
+  rc = fcan_transport_attach(node);
+  if (rc != 0) {
+    return rc;
   }
 
   LOG_INF("handing over to the transport (periodic ticks %s)", any_tick ? "on" : "off");
