@@ -120,16 +120,20 @@ schema はロボット 1 台の役割を述べるもので、基板 1 枚を述�
 ```cmake
 zephyr_library_sources_ifdef(CONFIG_FIBRIL_CAN_NODE_SOLENOID solenoid.c)
 
-if(CONFIG_FIBRIL_CAN_NODE_SOLENOID)
-  set_property(GLOBAL APPEND PROPERTY fibril_can_node_type_schemas
-               "${CMAKE_CURRENT_SOURCE_DIR}/type.yaml")
+set_property(GLOBAL APPEND PROPERTY fibril_can_node_type_schemas
+             "${CMAKE_CURRENT_SOURCE_DIR}/type.yaml")
 
+if(CONFIG_FIBRIL_CAN_NODE_SOLENOID)
   fibril_can_node_instances(
     TYPE       Solenoid
     COMPATIBLE "fibril,fcan-solenoid"
     MAX        ${CONFIG_FIBRIL_CAN_NODE_SOLENOID_MAX})
 endif()
 ```
+
+`type.yaml` の登録だけ guard の外にある。
+型は実装済みのものを全部渡すのが約束で、載るかどうかは `instances:` が決めるためである。
+`fibril_can_node_instances()` を包んでいるのは、`MAX` が読む Kconfig が機能を無効にすると存在しなくなるからにすぎない。
 
 `fibril_can_node_instances()` は devicetree から `fcan-ns` を読んで `instances:` の断片を吐く。
 compatible を持つノードが 2 つ以上 okay なら、その場でビルドを止める。
