@@ -36,8 +36,13 @@ properties:
     required: true
     description: |
       The instance namespace on the bus, which becomes the ROS name prefix.
-      It has to contain `{i}`, expanded to the instance index, whenever more
-      than one valve is wired; `air{i}` gives air0..airN.
+      `{i}` expands to the instance index, so `air{i}` gives air0..airN.
+
+      It is required unless CONFIG_FIBRIL_CAN_NODE_SOLENOID_MAX is 1 — the
+      rule is keyed on that ceiling, not on how many valves are wired, so
+      the default of 8 requires it even for a lone valve. The codegen
+      rejects a namespace that lacks it, so this is a build error, not a
+      collision discovered on the ROS graph.
 
       Required rather than defaulted: a name that reaches the ROS graph
       belongs to the robot, not to the binding.
