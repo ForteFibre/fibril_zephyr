@@ -65,6 +65,12 @@ int fcan_transport_attach(fcan_node_t * node)
   /* Mutates state the hub thread reads, so it has to happen before the device
    * is started — that is, before a host can open the external port. Boot-time
    * attachment satisfies this with room to spare.
+   *
+   * This is also the moment the node becomes reachable: the peers are already
+   * up from the driver's init, so from here the hub thread polls the node and
+   * a peer's request can be served. The application runs every start hook
+   * before calling this, which is what keeps that request from racing a
+   * function's initial publish.
    */
   if (fcan_hub_attach_self(hub, node) != FCAN_OK) {
     LOG_ERR("fcan_hub_attach_self failed");

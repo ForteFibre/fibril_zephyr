@@ -4,9 +4,10 @@
 # Solenoid valve, as seen from the bus. Paired with solenoid.c, which
 # implements the handlers this generates.
 #
-# Until the codegen can merge several schema files, a node schema copies this
-# block into its own `types:`. Once it can, the node schema drops the copy and
-# this file is passed alongside it.
+# Not copied into a node schema. apps/node/CMakeLists.txt passes this file to
+# the codegen alongside the node schema, so a node schema only names Solenoid
+# in its `instances:`. Duplicating the block in a node's own `types:` would
+# define the type twice.
 
 types:
   Solenoid:

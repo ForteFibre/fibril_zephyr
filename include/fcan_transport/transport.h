@@ -39,7 +39,12 @@ fcan_hal_t fcan_transport_hal(void);
 /**
  * @brief Hand the initialised node to the transport and bring it up.
  *
- * Call after fcan_init() and fcan_register_all().
+ * This is what opens the node to the bus: behind a hub the driver thread
+ * starts polling it, and a backend whose external port faces a USB host lets
+ * the host enumerate here. Call it last in the boot sequence — after
+ * fcan_init(), fcan_register_all() and every function's start hook — so that
+ * no request can be served while a function is still publishing its initial
+ * state.
  *
  * @retval 0 on success, negative errno otherwise.
  */
