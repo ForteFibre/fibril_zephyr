@@ -25,5 +25,14 @@
 			model = "rs05";
 			max-current-ma = <5000>;
 		};
+
+		/* Asks for more than the rs05 can do, so the driver has to hold
+		 * it down to the model limit of 50 rad/s. */
+		motor2: motor@2 {
+			compatible = "robstride,motor";
+			reg = <2>;
+			model = "rs05";
+			max-velocity-mrad-s = <100000>;
+		};
 	};
 };

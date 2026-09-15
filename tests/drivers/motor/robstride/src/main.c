@@ -12,6 +12,7 @@
 #include <zephyr/fff.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/ztest.h>
 
@@ -21,6 +22,7 @@
 #define TEST_MASTER_ID 0xFDU
 #define TEST_MOTOR0_ID 0x7FU
 #define TEST_MOTOR1_ID 0x01U
+#define TEST_MOTOR2_ID 0x02U
 
 #define TYPE_GET_ID 0x00U
 #define TYPE_OP_CONTROL 0x01U
@@ -46,6 +48,7 @@
 
 #define RS00_VELOCITY_MAX 33.0F
 #define RS00_TORQUE_MAX 14.0F
+#define RS05_VELOCITY_MAX 50.0F
 #define POSITION_MAX 12.56637F
 
 /* Long enough for the driver to work through every handshake stage. */
@@ -54,6 +57,7 @@
 static const struct device * const test_can = DEVICE_DT_GET(DT_NODELABEL(test_can0));
 static const struct device * const motor0 = DEVICE_DT_GET(DT_NODELABEL(motor0));
 static const struct device * const motor1 = DEVICE_DT_GET(DT_NODELABEL(motor1));
+static const struct device * const motor2 = DEVICE_DT_GET(DT_NODELABEL(motor2));
 
 #define CAPTURE_MAX 32
 
@@ -62,6 +66,10 @@ static size_t captured_count;
 static can_rx_callback_t rx_callback;
 static void * rx_user_data;
 static struct can_filter rx_filter;
+
+/* Makes can_send() refuse the way a controller with a full transmit queue
+ * does, for the tests that check what the driver does with the refusal. */
+static atomic_t send_fails;
 
 DEFINE_FFF_GLOBALS;
 
@@ -83,6 +91,10 @@ static int test_fake_can_send(
   can_tx_callback_t callback, void * user_data)
 {
   ARG_UNUSED(timeout);
+
+  if (atomic_get(&send_fails) != 0) {
+    return -EAGAIN;
+  }
 
   if (captured_count < CAPTURE_MAX) {
     captured[captured_count] = *frame;
@@ -236,8 +248,10 @@ static void before_each(void * fixture)
   fake_can_start_fake.custom_fake = test_fake_can_start;
   fake_can_add_rx_filter_fake.custom_fake = test_fake_can_add_rx_filter;
 
+  atomic_set(&send_fails, 0);
   (void)motor_disable(motor0);
   (void)motor_disable(motor1);
+  (void)motor_disable(motor2);
   k_msleep(CONFIG_MOTOR_ROBSTRIDE_TX_INTERVAL_MS * 2);
   clear_captures();
 }
@@ -299,7 +313,12 @@ ZTEST(robstride_motor, test_handshake_writes_limits_then_enables_then_commands)
   zassert_within(frame_param_float(command), 2.0F, 0.001F, "wrong current target");
 }
 
-ZTEST(robstride_motor, test_gains_are_written_only_after_the_application_sets_them)
+/*
+ * One test because the three phases are one life-cycle on one motor: whether
+ * gains have been overridden is state that outlives a test, so splitting them
+ * would make them depend on the execution order.
+ */
+ZTEST(robstride_motor, test_gains_are_written_only_once_the_application_sets_them_and_again_after_a_fault)
 {
   zassert_ok(robstride_set_current(motor0, 1.0F));
   enable_and_settle(motor0);
@@ -330,6 +349,18 @@ ZTEST(robstride_motor, test_gains_are_written_only_after_the_application_sets_th
   zassert_not_null(cur_ki, "every gain in the struct must reach the motor");
   zassert_within(frame_param_float(loc_kp), 30.0F, 0.001F, "wrong position gain");
   zassert_within(frame_param_float(cur_ki), 0.01F, 0.001F, "wrong current integral gain");
+
+  uint8_t data[8] = {0};
+
+  clear_captures();
+  sys_put_le32(0x00000004U, &data[0]);
+  inject(TYPE_FAULT, 0U, TEST_MOTOR0_ID, data);
+  k_msleep(HANDSHAKE_MS);
+
+  const struct can_frame * recovered = find_set_param(TEST_MOTOR0_ID, PARAM_LOC_KP);
+
+  zassert_not_null(recovered, "a tripped motor has dropped the gains we supplied");
+  zassert_within(frame_param_float(recovered), 30.0F, 0.001F, "wrong position gain on recovery");
 }
 
 ZTEST(robstride_motor, test_devicetree_limit_overrides_the_model_limit)
@@ -341,6 +372,36 @@ ZTEST(robstride_motor, test_devicetree_limit_overrides_the_model_limit)
 
   zassert_not_null(limit_cur, "no current limit write");
   zassert_within(frame_param_float(limit_cur), 5.0F, 0.001F, "max-current-ma must win");
+}
+
+ZTEST(robstride_motor, test_devicetree_limit_above_the_model_limit_is_clamped)
+{
+  zassert_ok(robstride_set_current(motor2, 1.0F));
+  enable_and_settle(motor2);
+
+  const struct can_frame * limit_spd = find_set_param(TEST_MOTOR2_ID, PARAM_LIMIT_SPD);
+
+  zassert_not_null(limit_spd, "no velocity limit write");
+  zassert_within(
+    frame_param_float(limit_spd), RS05_VELOCITY_MAX, 0.001F,
+    "the devicetree must not put a limit on the wire that robstride_set_limits() would reject");
+}
+
+ZTEST(robstride_motor, test_a_fault_does_not_write_gains_the_application_never_supplied)
+{
+  uint8_t data[8] = {0};
+
+  zassert_ok(robstride_set_current(motor2, 1.0F));
+  enable_and_settle(motor2);
+  clear_captures();
+
+  sys_put_le32(0x00000004U, &data[0]);
+  inject(TYPE_FAULT, 0U, TEST_MOTOR2_ID, data);
+  k_msleep(HANDSHAKE_MS);
+
+  zassert_is_null(
+    find_set_param(TEST_MOTOR2_ID, PARAM_LOC_KP),
+    "recovering must not overwrite the motor's own gains with zeros");
 }
 
 ZTEST(robstride_motor, test_target_is_clamped_to_the_model_limit)
@@ -419,6 +480,66 @@ ZTEST(robstride_motor, test_feedback_is_unavailable_until_the_motor_answers)
    * inject feedback for it. */
   zassert_equal(robstride_get_feedback(motor1, &si), -ENODATA, "nothing has answered yet");
   zassert_false(si.online, "a motor that never answered is not online");
+}
+
+ZTEST(robstride_motor, test_a_motor_that_only_answered_a_probe_publishes_no_measurement)
+{
+  struct motor_feedback feedback;
+  uint8_t data[8] = {0};
+
+  /* motor2 receives feedback from no test, so the probe reply below is the
+   * only thing it has ever answered. */
+  inject(TYPE_GET_ID, 0U, TEST_MOTOR2_ID, data);
+
+  zassert_equal(
+    motor_get_feedback(motor2, &feedback), -EAGAIN,
+    "presence alone is not a measurement");
+  zassert_true(feedback.online, "a motor that answered the probe is online");
+  zassert_equal(feedback.valid_mask, 0U, "nothing has been measured yet");
+  zassert_true(feedback.stale, "there is no fresh measurement to report");
+}
+
+ZTEST(robstride_motor, test_a_probe_reply_does_not_make_an_old_measurement_look_fresh)
+{
+  struct motor_feedback feedback;
+  uint8_t data[8] = {0};
+
+  inject_feedback(TEST_MOTOR0_ID, 1000U, 0U, 0U, 0);
+  zassert_ok(motor_get_feedback(motor0, &feedback));
+
+  k_msleep(60);
+  inject(TYPE_GET_ID, 0U, TEST_MOTOR0_ID, data);
+
+  zassert_equal(
+    motor_get_feedback(motor0, &feedback), -EAGAIN,
+    "a presence reply says the motor is there, not that the position is current");
+  zassert_true(feedback.stale, "feedback should still be stale");
+}
+
+ZTEST(robstride_motor, test_set_zero_makes_the_next_reading_seed_the_accumulator)
+{
+  struct motor_feedback feedback;
+
+  /*
+   * The accumulator stays congruent to the raw code until a full turn has gone
+   * by, so it has to be carried past one before the two behaviours can be told
+   * apart at all.
+   */
+  inject_feedback(TEST_MOTOR0_ID, 1000U, 0U, 0U, 0);
+  inject_feedback(TEST_MOTOR0_ID, 30000U, 0U, 0U, 0);
+  inject_feedback(TEST_MOTOR0_ID, 60000U, 0U, 0U, 0);
+  inject_feedback(TEST_MOTOR0_ID, 20000U, 0U, 0U, 0);
+  zassert_ok(motor_get_feedback(motor0, &feedback));
+  zassert_not_equal(
+    feedback.position, 20000, "the accumulator has not left the raw code behind");
+
+  zassert_ok(robstride_set_zero(motor0));
+
+  /* Accumulating instead would carry the whole turn across the new origin. */
+  inject_feedback(TEST_MOTOR0_ID, 5000U, 0U, 0U, 0);
+  zassert_ok(motor_get_feedback(motor0, &feedback));
+  zassert_equal(
+    feedback.position, 5000, "the accumulator must restart from the reading after the zero");
 }
 
 ZTEST(robstride_motor, test_feedback_decodes_and_accumulates_across_the_wrap)
@@ -500,6 +621,9 @@ ZTEST(robstride_motor, test_fault_report_makes_the_driver_configure_the_motor_ag
 
   zassert_ok(robstride_set_current(motor0, 1.0F));
   enable_and_settle(motor0);
+  /* A motor that trips was running, and the fault frame itself carries no
+   * measurement, so the feedback below is what keeps the snapshot fresh. */
+  inject_feedback(TEST_MOTOR0_ID, 1000U, 0U, 0U, 0);
   clear_captures();
 
   sys_put_le32(0x00000004U, &data[0]);
@@ -579,6 +703,57 @@ ZTEST(robstride_motor, test_disable_stops_the_motor_without_waiting_for_the_inte
 
   zassert_not_null(
     find_frame(TEST_MOTOR0_ID, TYPE_STOP, 0), "disable must send the stop frame itself");
+}
+
+ZTEST(robstride_motor, test_disable_reports_a_stop_it_could_not_queue_and_sends_it_later)
+{
+  zassert_ok(robstride_set_current(motor0, 1.0F));
+  enable_and_settle(motor0);
+  clear_captures();
+
+  atomic_set(&send_fails, 1);
+
+  zassert_not_equal(
+    motor_disable(motor0), 0,
+    "a motor still holding its last target must not be reported as stopped");
+
+  atomic_set(&send_fails, 0);
+  k_msleep(HANDSHAKE_MS);
+
+  zassert_not_null(
+    find_frame(TEST_MOTOR0_ID, TYPE_STOP, 0), "the stop owed to the motor must be sent again");
+  zassert_is_null(
+    find_set_param(TEST_MOTOR0_ID, PARAM_IQ_REF), "a disabled motor must not be commanded");
+}
+
+ZTEST(robstride_motor, test_a_handshake_stage_the_bus_refused_is_built_again)
+{
+  zassert_ok(robstride_set_current(motor0, 2.0F));
+
+  /* A controller whose transceiver has no power takes nothing, so the whole
+   * handshake has to survive being refused rather than counting itself done. */
+  atomic_set(&send_fails, 1);
+  zassert_ok(motor_enable(motor0));
+  k_msleep(HANDSHAKE_MS);
+
+  zassert_equal(captured_count, 0U, "nothing can have reached a bus that refuses every frame");
+
+  atomic_set(&send_fails, 0);
+  k_msleep(HANDSHAKE_MS);
+
+  const struct can_frame * stop = find_frame(TEST_MOTOR0_ID, TYPE_STOP, 0);
+  const struct can_frame * run_mode = find_set_param(TEST_MOTOR0_ID, PARAM_RUN_MODE);
+  const struct can_frame * enable = find_frame(TEST_MOTOR0_ID, TYPE_ENABLE, 0);
+
+  zassert_not_null(stop, "no stop frame after the bus came back");
+  zassert_not_null(run_mode, "no run mode write after the bus came back");
+  zassert_not_null(find_set_param(TEST_MOTOR0_ID, PARAM_LIMIT_CUR), "no current limit write");
+  zassert_not_null(find_set_param(TEST_MOTOR0_ID, PARAM_LIMIT_SPD), "no velocity limit write");
+  zassert_not_null(find_set_param(TEST_MOTOR0_ID, PARAM_LIMIT_TORQUE), "no torque limit write");
+  zassert_not_null(enable, "no enable frame after the bus came back");
+  zassert_not_null(find_set_param(TEST_MOTOR0_ID, PARAM_IQ_REF), "no target frame");
+  zassert_true(stop < run_mode, "the stages must keep their order on the retry");
+  zassert_true(run_mode < enable, "the stages must keep their order on the retry");
 }
 
 static void param_reply_work_handler(struct k_work * work)
