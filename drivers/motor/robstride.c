@@ -853,9 +853,24 @@ static int robstride_motor_get_feedback(const struct device * dev, void * feedba
   return ret;
 }
 
+/*
+ * Resolve one devicetree limit. ROBSTRIDE_LIMIT_ABSENT stands for a property
+ * the devicetree left out, which the model's own limit fills in; the model
+ * table cannot be read from the static initialiser that builds the config.
+ */
+static float robstride_resolve_limit(float requested, float model_limit)
+{
+  if (requested < 0.0F) {
+    return model_limit;
+  }
+
+  return MIN(requested, model_limit);
+}
+
 static int robstride_motor_init(const struct device * dev)
 {
   const struct robstride_motor_config * config = dev->config;
+  const struct robstride_model_limits * model = &robstride_model_limits[config->model];
   struct robstride_motor_data * data = dev->data;
 
   if (!device_is_ready(config->bus)) {
@@ -865,7 +880,11 @@ static int robstride_motor_init(const struct device * dev)
 
   data->can_bus = ROBSTRIDE_CANBUS_UNKNOWN;
   data->mode = ROBSTRIDE_MODE_CURRENT;
-  data->limits = config->limits;
+  /* Held to the same range as robstride_set_limits(), so the devicetree cannot
+   * put a limit on the wire that the run-time call would have rejected. */
+  data->limits.current = robstride_resolve_limit(config->limits.current, model->current);
+  data->limits.velocity = robstride_resolve_limit(config->limits.velocity, model->velocity);
+  data->limits.torque = robstride_resolve_limit(config->limits.torque, model->torque);
   /* The motor keeps the gains in its own memory unless the application
    * overrides them, so nothing is written until robstride_set_gains(). */
   data->gains_applied = true;
@@ -1189,6 +1208,9 @@ int robstride_get_parameter(const struct device * dev, uint16_t index, float * v
   BUILD_ASSERT(                                                                        \
     DT_INST_PROP_LEN(inst, cans) <= ROBSTRIDE_MAX_CANS,                                \
     "Too many CAN devices configured for RobStride bus");                              \
+  BUILD_ASSERT(                                                                        \
+    IN_RANGE(DT_INST_PROP(inst, master_can_id), 0, UINT8_MAX),                         \
+    "master-can-id does not fit in the low byte of the identifier");                   \
   static const struct device * const robstride_can_devs_##inst[] = {                   \
     LISTIFY(DT_INST_PROP_LEN(inst, cans), ROBSTRIDE_CAN_DEV_ELEM, (, ), inst)};        \
   static struct robstride_bus_data robstride_bus_data_##inst;                          \
@@ -1207,16 +1229,30 @@ DT_INST_FOREACH_STATUS_OKAY(ROBSTRIDE_BUS_DEFINE)
 #undef DT_DRV_COMPAT
 #define DT_DRV_COMPAT robstride_motor
 
-/* A limit left out of the devicetree falls back to the model's own limit. */
-#define ROBSTRIDE_LIMIT_INIT(inst, prop, field)                                              \
+/*
+ * A limit left out of the devicetree is carried as ROBSTRIDE_LIMIT_ABSENT and
+ * resolved against the model in robstride_motor_init(). Naming the model table
+ * here instead would read a const array from a static initialiser, which only
+ * the common compilers accept.
+ */
+#define ROBSTRIDE_LIMIT_ABSENT (-1.0F)
+
+#define ROBSTRIDE_LIMIT_INIT(inst, prop)                                                     \
   COND_CODE_1(                                                                               \
     DT_INST_NODE_HAS_PROP(inst, prop), ((float)DT_INST_PROP(inst, prop) / 1000.0F),           \
-    (robstride_model_limits[DT_INST_ENUM_IDX(inst, model)].field))
+    (ROBSTRIDE_LIMIT_ABSENT))
+
+/* Negative would otherwise be indistinguishable from the property being absent. */
+#define ROBSTRIDE_LIMIT_ASSERT(inst, prop) \
+  BUILD_ASSERT(DT_INST_PROP_OR(inst, prop, 0) >= 0, #prop " must not be negative");
 
 #define ROBSTRIDE_MOTOR_DEFINE(inst)                                                        \
   BUILD_ASSERT(                                                                             \
     DT_INST_ENUM_IDX(inst, model) < ARRAY_SIZE(robstride_model_limits),                     \
     "Unknown RobStride model");                                                             \
+  ROBSTRIDE_LIMIT_ASSERT(inst, max_current_ma)                                              \
+  ROBSTRIDE_LIMIT_ASSERT(inst, max_velocity_mrad_s)                                         \
+  ROBSTRIDE_LIMIT_ASSERT(inst, max_torque_mnm)                                              \
   static struct robstride_motor_data robstride_motor_data_##inst;                           \
   static const struct robstride_motor_config robstride_motor_config_##inst = {              \
     .bus = DEVICE_DT_GET(DT_INST_PARENT(inst)),                                             \
@@ -1224,9 +1260,9 @@ DT_INST_FOREACH_STATUS_OKAY(ROBSTRIDE_BUS_DEFINE)
     .model = (enum robstride_model)DT_INST_ENUM_IDX(inst, model),                           \
     .limits =                                                                               \
       {                                                                                     \
-        .current = ROBSTRIDE_LIMIT_INIT(inst, max_current_ma, current),                     \
-        .velocity = ROBSTRIDE_LIMIT_INIT(inst, max_velocity_mrad_s, velocity),              \
-        .torque = ROBSTRIDE_LIMIT_INIT(inst, max_torque_mnm, torque),                       \
+        .current = ROBSTRIDE_LIMIT_INIT(inst, max_current_ma),                              \
+        .velocity = ROBSTRIDE_LIMIT_INIT(inst, max_velocity_mrad_s),                        \
+        .torque = ROBSTRIDE_LIMIT_INIT(inst, max_torque_mnm),                               \
       },                                                                                    \
   };                                                                                        \
   DEVICE_DT_INST_DEFINE(                                                                    \
