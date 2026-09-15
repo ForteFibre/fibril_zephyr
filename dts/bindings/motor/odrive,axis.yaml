@@ -1,0 +1,35 @@
+description: |
+  ODrive axis.
+
+  One node per axis, which is one ODrive on the Pro, S1 and Micro. The
+  properties here are the ones that are fixed once the ODrive is wired into the
+  machine.
+
+  Limits and gains are deliberately absent. They live in the ODrive's own
+  configuration, written with odrivetool and kept across reboots by
+  save_configuration(); writing them from the firmware on every enable would
+  make it ambiguous which of the two is in effect. Targets and run-time
+  overrides are set through include/drivers/motor/odrive.h.
+
+compatible: "odrive,axis"
+
+include: base.yaml
+
+on-bus: odrive
+
+properties:
+  reg:
+    required: true
+    description: >
+      CAN node ID of this axis, in the range 0 to 62. 63 is the unaddressed
+      value an unconfigured ODrive starts with and is rejected at init. It must
+      be unique on the bus.
+  has-motor-thermistor:
+    type: boolean
+    description: >
+      Set when a motor thermistor is wired and configured on this ODrive.
+      Without one the ODrive reports a motor temperature of 0, and 0 degrees
+      reads as a real measurement rather than as a missing sensor, so the
+      driver leaves MOTOR_FEEDBACK_TEMPERATURE out of the snapshot unless this
+      is set. The FET temperature is reported through odrive_get_feedback()
+      either way.

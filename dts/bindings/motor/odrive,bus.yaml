@@ -1,0 +1,42 @@
+description: |
+  ODrive CANSimple bus.
+
+  One node per CAN controller that carries CANSimple traffic. The protocol is
+  classic CAN with 11-bit identifiers, so a controller under this node cannot
+  also carry CAN FD traffic.
+
+compatible: "odrive,bus"
+
+include: base.yaml
+
+bus: odrive
+
+properties:
+  "#address-cells":
+    required: true
+    const: 1
+  "#size-cells":
+    required: true
+    const: 0
+  can:
+    type: phandle
+    required: true
+    description: >
+      CAN controller used to talk to the ODrives on this bus. An ODrive is
+      addressed by its own node ID and the host carries no identifier of its
+      own, so the driver never has to work out which controller an axis is on.
+      A board with two controllers gets two bus nodes.
+  heartbeat-timeout-ms:
+    type: int
+    default: 300
+    description: >
+      An axis is reported offline when no heartbeat has arrived within this
+      timeout. The ODrive sends one every heartbeat_msg_rate_ms, which defaults
+      to 100, so this has to leave room for several of them.
+  estimate-timeout-ms:
+    type: int
+    default: 100
+    description: >
+      Position and velocity are reported stale when no Get_Encoder_Estimates
+      frame has arrived within this timeout. The ODrive sends one every
+      encoder_msg_rate_ms, which defaults to 10.
