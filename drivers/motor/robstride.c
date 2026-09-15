@@ -486,11 +486,15 @@ static void robstride_bus_tx_timer_handler(struct k_timer * timer)
   k_work_submit(&bus->tx_work);
 }
 
-static void robstride_mark_seen(struct robstride_motor_data * data, uint8_t can_bus, int64_t now)
+/*
+ * Presence only. Every type the motor sends proves it is there and says which
+ * controller it is on, but only a feedback frame carries measurements, so the
+ * timestamp the staleness check reads is not touched here.
+ */
+static void robstride_mark_seen(struct robstride_motor_data * data, uint8_t can_bus)
 {
   data->can_bus = can_bus;
   data->online = true;
-  data->timestamp_ms = now;
 }
 
 static void robstride_handle_feedback(
@@ -542,8 +546,9 @@ static void robstride_handle_feedback(
 
   data->run_state = run_state;
   data->error_code = (uint8_t)((id >> 16) & 0x3FU);
+  data->timestamp_ms = k_uptime_get();
 
-  robstride_mark_seen(data, can_bus, k_uptime_get());
+  robstride_mark_seen(data, can_bus);
   k_spin_unlock(&data->lock, key);
 }
 
@@ -566,7 +571,7 @@ static void robstride_handle_fault(
     data->enable_sent = false;
   }
 
-  robstride_mark_seen(data, can_bus, k_uptime_get());
+  robstride_mark_seen(data, can_bus);
   k_spin_unlock(&data->lock, key);
 }
 
@@ -587,7 +592,7 @@ static void robstride_handle_param(
     complete = true;
   }
 
-  robstride_mark_seen(data, can_bus, k_uptime_get());
+  robstride_mark_seen(data, can_bus);
   k_spin_unlock(&data->lock, key);
 
   if (complete) {
@@ -642,7 +647,7 @@ static void robstride_rx_callback(
       struct robstride_motor_data * data = motor_dev->data;
       k_spinlock_key_t key = k_spin_lock(&data->lock);
 
-      robstride_mark_seen(data, (uint8_t)can_bus, k_uptime_get());
+      robstride_mark_seen(data, (uint8_t)can_bus);
       k_spin_unlock(&data->lock, key);
       break;
     }
@@ -830,10 +835,14 @@ static int robstride_motor_get_feedback(const struct device * dev, void * feedba
 
   /*
    * Only the two fields that mean the same thing here as in the other motor
-   * drivers are published. The rest are SI values with no unit agreed across
-   * the class; robstride_get_feedback() reports them.
+   * drivers are published, and only once a feedback frame has carried them: a
+   * motor that has answered nothing but a presence probe is online with no
+   * measurement to its name.
    */
-  out->valid_mask = MOTOR_FEEDBACK_POSITION | MOTOR_FEEDBACK_TEMPERATURE;
+  if (data->has_last_position) {
+    out->valid_mask = MOTOR_FEEDBACK_POSITION | MOTOR_FEEDBACK_TEMPERATURE;
+  }
+
   out->position = data->position_counts;
   out->temperature = (int16_t)data->temperature;
   out->online = data->online;
