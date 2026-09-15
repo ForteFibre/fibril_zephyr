@@ -1420,9 +1420,15 @@ DT_INST_FOREACH_STATUS_OKAY(ROBSTRIDE_BUS_DEFINE)
     DT_INST_NODE_HAS_PROP(inst, prop), ((float)DT_INST_PROP(inst, prop) / 1000.0F),           \
     (ROBSTRIDE_LIMIT_ABSENT))
 
-/* Negative would otherwise be indistinguishable from the property being absent. */
-#define ROBSTRIDE_LIMIT_ASSERT(inst, prop) \
-  BUILD_ASSERT(DT_INST_PROP_OR(inst, prop, 0) >= 0, #prop " must not be negative");
+/*
+ * A devicetree integer reaches C unsigned, so a negative limit arrives as a
+ * value above INT32_MAX rather than as a negative one and would otherwise be
+ * taken for a very large limit and quietly cut down to the model's.
+ */
+#define ROBSTRIDE_LIMIT_ASSERT(inst, prop)          \
+  BUILD_ASSERT(                                     \
+    DT_INST_PROP_OR(inst, prop, 0) <= INT32_MAX,    \
+    #prop " must be positive and within int32 range");
 
 #define ROBSTRIDE_MOTOR_DEFINE(inst)                                                        \
   BUILD_ASSERT(                                                                             \
