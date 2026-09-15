@@ -7,6 +7,21 @@ config FIBRIL_CAN_NODE_SOLENOID
 	depends on DT_HAS_FIBRIL_FCAN_SOLENOID_ENABLED
 	select GPIO
 	help
-	  Compiled whenever the devicetree describes the valves. Whether the
-	  block type reaches the bus is decided by the schema, not here: the
-	  source is empty unless the schema instantiates Solenoid.
+	  Compiled whenever the devicetree describes the valves, which is also
+	  what puts Solenoid instances into the schema. Describing the hardware
+	  is the whole of adding this function to an image.
+
+config FIBRIL_CAN_NODE_SOLENOID_MAX
+	int "Solenoid instances to allocate for"
+	default 8
+	range 1 32
+	depends on FIBRIL_CAN_NODE_SOLENOID
+	help
+	  The schema's max_count for Solenoid: how many instances the generated
+	  code reserves state for. It is a ceiling, not a count. It never
+	  reaches the schema blob, so the bus and the ROS graph see only the
+	  valves the devicetree actually wires; overshooting costs one byte of
+	  .bss per unused instance.
+
+	  Raise it only for a board with more valves than this. Lowering it
+	  below the devicetree's length fails the BUILD_ASSERT in solenoid.c.

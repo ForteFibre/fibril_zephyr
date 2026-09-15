@@ -59,19 +59,19 @@ west update
 ## ビルドと書き込み
 
 実機に焼くファームウェアは `apps/` にある。
-fibril_can スレーブはすべて `apps/node` 1 つで、何を担うかはビルド時に選ぶ snippet が決める。
+fibril_can スレーブはすべて `apps/node` 1 つで、何を担うかはビルド時に重ねる snippet が決める。
+ボードがバスに出る経路を決めるトランスポート snippet と、そのボードが何を駆動するかを決めるデプロイ snippet を並べる。
 
 ```shell
 cd fibril_zephyr
-west build -b fibril_rc26_mainair_v01 apps/node -S rc26-air
+west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
 west flash
 ```
 
-| snippet | ボード | 内容 |
-| --- | --- | --- |
-| `rc26-air` | RC26 MainAir V01 | 6 系統の電磁弁を ROS Service で駆動する |
-| `rc26-air-chain` | RC26 MainAir V01 | 同じ電磁弁に加え、CAN0 と CAN1 を 1 本の論理バスに繋ぐ |
-| `rc26-air-usb` | RC26 MainAir V01 | 同じ電磁弁に加え、CAN0 を gs_usb で PC に見せる |
+| snippet | 層 | ボード | 内容 |
+| --- | --- | --- | --- |
+| `rc26-mainair-usb` | トランスポート | RC26 MainAir V01 | CAN0 を gs_usb で PC に見せ、自ノードを同じ論理バスに載せる |
+| `rc26-air` | デプロイ | RC26 MainAir V01 | 6 系統の電磁弁を ROS Service で駆動する |
 
 ボード持ち込みの動作確認には `app/` を使う。fibril_can を使わない。
 
@@ -92,6 +92,7 @@ west build -b <ボード名> app -- -DEXTRA_CONF_FILE=debug.conf   # 診断用 K
 | --- | --- | --- |
 | エンコーダ | AMT21x アブソリュートエンコーダ（RS485） | [doc/drivers/amt21.md](doc/drivers/amt21.md) |
 | モータ | DJI RoboMaster C610 / C620（CAN） | [doc/drivers/robomaster.md](doc/drivers/robomaster.md) |
+| モータ | ODrive Pro / S1 / Micro（CAN） | [doc/drivers/odrive.md](doc/drivers/odrive.md) |
 | モータ | RobStride アクチュエータ（CAN） | [doc/drivers/robstride.md](doc/drivers/robstride.md) |
 
 ## サンプル

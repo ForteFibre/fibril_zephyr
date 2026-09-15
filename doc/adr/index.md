@@ -38,6 +38,7 @@
 | [0003](0003-multi-app-structure.md) | 複数用途のファームウェアを 1 つのアプリケーションと機能ライブラリで構成する | Proposed |
 | [0004](0004-robstride-control-api-layering.md) | RobStride の制御 API を汎用 motor クラスと機種固有ヘッダに分ける | Proposed |
 | [0005](0005-motor-position-64bit.md) | motor_feedback.position を 64 bit の積算カウントにする | Proposed |
+| [0006](0006-odrive-control-api-layering.md) | ODrive の制御 API を push 型 feedback と機種固有ヘッダで載せる | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -48,4 +49,5 @@
 0003-multi-app-structure
 0004-robstride-control-api-layering
 0005-motor-position-64bit
+0006-odrive-control-api-layering
 ```

@@ -1,0 +1,27 @@
+/ {
+	test_can0: fake_can0 {
+		compatible = "zephyr,fake-can";
+		status = "okay";
+	};
+
+	odrive_test: odrive-bus {
+		compatible = "odrive,bus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		can = <&test_can0>;
+		/* Short enough that a test can wait both of them out. */
+		heartbeat-timeout-ms = <60>;
+		estimate-timeout-ms = <40>;
+
+		axis0: axis@0 {
+			compatible = "odrive,axis";
+			reg = <0>;
+		};
+
+		axis1: axis@5 {
+			compatible = "odrive,axis";
+			reg = <5>;
+			has-motor-thermistor;
+		};
+	};
+};
