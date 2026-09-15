@@ -29,7 +29,8 @@ west twister -T apps --integration
 `app.default` と、`debug.conf` を重ねた `app.debug` の 2 通りをビルドする。
 
 `apps/node/sample.yaml` も `build_only: true` で、`integration_platforms` は `fibril_rc26_mainair_v01` である。
-snippet ごとに 1 シナリオで、`rc26-air`、`rc26-air-chain`、`rc26-air-usb` の 3 通りをビルドする。
+焼く単位ごとに 1 シナリオで、トランスポート snippet とデプロイ snippet を重ねた組み合わせをビルドする。
+現状は `rc26-mainair-usb` と `rc26-air` を重ねた `app.node.rc26_air` の 1 通りである。
 
 `apps/` のビルドは `fcan_codegen` CLI を要求する。
 `ros-jazzy-fibril-can-codegen` を入れた環境では自動で見つかる。

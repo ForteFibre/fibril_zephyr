@@ -15,13 +15,15 @@ menuconfig FIBRIL_CAN_NODE
 if FIBRIL_CAN_NODE
 
 config FIBRIL_NODE_SCHEMA
-	string "Node schema, relative to this repository's root"
+	string "Node schema header, relative to this repository's root"
 	help
-	  The YAML describing what this image exposes on the bus: the node
-	  name, the resource limits, and which block types are instantiated.
+	  The YAML naming this node on the bus and declaring its resource
+	  limits. It carries no instances: those come from the devicetree,
+	  one fragment per enabled function.
 
 	  Snippets set this. The application resolves it against
-	  ZEPHYR_FIBRIL_ZEPHYR_MODULE_DIR and hands it to the codegen.
+	  ZEPHYR_FIBRIL_ZEPHYR_MODULE_DIR and hands it to the codegen
+	  alongside the generated fragments.
 
 config FIBRIL_NODE_ID
 	int "fibril_can node id"
