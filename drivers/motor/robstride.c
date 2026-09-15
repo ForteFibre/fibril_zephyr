@@ -1114,7 +1114,27 @@ static int robstride_send_simple(const struct device * dev, uint8_t type, uint8_
 
 int robstride_set_zero(const struct device * dev)
 {
-  return robstride_send_simple(dev, ROBSTRIDE_TYPE_SET_ZERO, 0x01U);
+  struct robstride_motor_data * data;
+  k_spinlock_key_t key;
+  const int ret = robstride_send_simple(dev, ROBSTRIDE_TYPE_SET_ZERO, 0x01U);
+
+  if (ret != 0) {
+    return ret;
+  }
+
+  data = dev->data;
+
+  /*
+   * Everything after this counts from the new origin, so the next reading has
+   * to seed the accumulator instead of being differenced against a sample that
+   * belongs to the old one. Zeroing only takes effect on a stopped motor, and
+   * a stopped motor is sent no commands, so no feedback is on its way here.
+   */
+  key = k_spin_lock(&data->lock);
+  data->has_last_position = false;
+  k_spin_unlock(&data->lock, key);
+
+  return 0;
 }
 
 int robstride_save_parameters(const struct device * dev)
