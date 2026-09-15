@@ -1,0 +1,56 @@
+config MOTOR_ODRIVE
+	bool "ODrive motor controller driver"
+	default y
+	depends on CAN
+	depends on DT_HAS_ODRIVE_BUS_ENABLED
+	help
+	  Enable support for ODrive Pro, S1 and Micro on a classic CAN bus with
+	  11-bit identifiers, speaking CANSimple. Targets are set through
+	  include/drivers/motor/odrive.h; the generic motor class carries
+	  enable, disable and the feedback snapshot.
+
+if MOTOR_ODRIVE
+
+config MOTOR_ODRIVE_MAX_AXES
+	int "Maximum axes per ODrive bus"
+	default 4
+	range 1 16
+	help
+	  Size of the registration table of one bus node. Each entry is a
+	  pointer. The driver adds one hardware receive filter per axis, so this
+	  is also bounded by what the controller offers.
+
+config MOTOR_ODRIVE_TX_INTERVAL_MS
+	int "Command interval in milliseconds"
+	default 10
+	range 1 100
+	help
+	  How often each armed axis is commanded. This feeds the ODrive's
+	  watchdog and bounds how stale a setpoint can be. Feedback does not
+	  depend on it: the ODrive broadcasts on its own schedule.
+
+config MOTOR_ODRIVE_STATE_RETRY_MS
+	int "Axis state retry interval in milliseconds"
+	default 200
+	range 10 5000
+	help
+	  How long to wait for the heartbeat to confirm closed loop control
+	  before requesting it again. The retry never clears errors, so an axis
+	  that trips is not cycled through a fault automatically.
+
+config MOTOR_ODRIVE_WORKQ_STACK_SIZE
+	int "Callback work queue stack size"
+	default 1024
+	help
+	  Stack of the per-bus thread that runs the application callbacks
+	  registered through odrive.h. It must fit whatever those callbacks do.
+
+config MOTOR_ODRIVE_WORKQ_PRIORITY
+	int "Callback work queue thread priority"
+	default 5
+	help
+	  Priority of the per-bus callback thread. Commands are sent from the
+	  system work queue, so a callback that runs long delays only other
+	  callbacks.
+
+endif # MOTOR_ODRIVE
