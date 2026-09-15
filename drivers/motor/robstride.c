@@ -119,6 +119,22 @@ struct robstride_motor_config
   struct robstride_limits limits;
 };
 
+/*
+ * The stage a single interval's burst belongs to. Every stage but the command
+ * marks itself done as it is built, so the work has to be able to take that
+ * back when the frames do not reach the controller.
+ */
+enum robstride_tx_stage {
+  ROBSTRIDE_TX_STAGE_NONE,
+  ROBSTRIDE_TX_STAGE_STOP,
+  ROBSTRIDE_TX_STAGE_PROBE,
+  ROBSTRIDE_TX_STAGE_CONFIGURE,
+  ROBSTRIDE_TX_STAGE_LIMITS,
+  ROBSTRIDE_TX_STAGE_GAINS,
+  ROBSTRIDE_TX_STAGE_ENABLE,
+  ROBSTRIDE_TX_STAGE_COMMAND,
+};
+
 struct robstride_motor_data
 {
   struct k_spinlock lock;
@@ -130,6 +146,9 @@ struct robstride_motor_data
   struct robstride_motion_target motion;
   struct robstride_limits limits;
   struct robstride_gains gains;
+  /* Set once robstride_set_gains() has supplied gains of our own. Until then
+   * the motor runs on the gains in its own memory and we write none. */
+  bool gains_overridden;
 
   /*
    * Handshake progress. Every flag is cleared whenever the motor has to be
@@ -140,6 +159,8 @@ struct robstride_motor_data
   bool limits_applied;
   bool gains_applied;
   bool enable_sent;
+  /* A stop frame the immediate send could not queue, re-sent by the work. */
+  bool stop_pending;
 
   /* What the motor reported. */
   bool has_last_position;
@@ -325,6 +346,26 @@ static int robstride_motor_send(const struct device * motor_dev, const struct ca
 }
 
 /*
+ * Make the motor run the whole handshake again. Used wherever the motor may
+ * have dropped what we wrote, or may never have received it.
+ */
+static void robstride_restart_handshake(struct robstride_motor_data * data)
+{
+  data->configured = false;
+  data->limits_applied = false;
+  data->enable_sent = false;
+
+  /*
+   * Leaving gains_applied set is what keeps the driver off a motor that is
+   * meant to run on its own stored gains; only an override of ours has to be
+   * written again.
+   */
+  if (data->gains_overridden) {
+    data->gains_applied = false;
+  }
+}
+
+/*
  * Bring up any bus that would not start earlier. Called from the transmit work
  * but throttled to ROBSTRIDE_START_RETRY_MS, because can_start() on a
  * controller stuck in initialisation mode costs a hardware timeout.
@@ -334,6 +375,7 @@ static void robstride_bus_retry_start(const struct device * dev)
   const struct robstride_bus_config * config = dev->config;
   struct robstride_bus_data * data = dev->data;
   const int64_t now = k_uptime_get();
+  bool started_any = false;
 
   if ((now - data->last_start_retry) < ROBSTRIDE_START_RETRY_MS) {
     return;
@@ -350,8 +392,36 @@ static void robstride_bus_retry_start(const struct device * dev)
 
     if ((ret == 0) || (ret == -EALREADY)) {
       data->started[i] = true;
+      started_any = true;
       LOG_INF("CAN bus %u started", (unsigned int)i);
     }
+  }
+
+  if (!started_any) {
+    return;
+  }
+
+  /*
+   * A frame counts as sent once any started bus takes it, so with a second bus
+   * already up the handshake of a motor sitting on the bus that was down ran
+   * to completion against nobody. A motor that has answered has a known bus
+   * and that bus was up, so only the unlocated ones have to start over.
+   */
+  for (size_t i = 0; i < ARRAY_SIZE(data->motors); ++i) {
+    const struct device * motor_dev = data->motors[i];
+
+    if (motor_dev == NULL) {
+      continue;
+    }
+
+    struct robstride_motor_data * motor = motor_dev->data;
+    k_spinlock_key_t key = k_spin_lock(&motor->lock);
+
+    if (motor->can_bus == ROBSTRIDE_CANBUS_UNKNOWN) {
+      robstride_restart_handshake(motor);
+    }
+
+    k_spin_unlock(&motor->lock, key);
   }
 }
 
@@ -361,7 +431,8 @@ static void robstride_bus_retry_start(const struct device * dev)
  * after it is enabled.
  */
 static size_t robstride_build_tx(
-  const struct device * motor_dev, struct can_frame * frames, int64_t now)
+  const struct device * motor_dev, struct can_frame * frames, int64_t now,
+  enum robstride_tx_stage * stage)
 {
   const struct robstride_motor_config * config = motor_dev->config;
   const struct robstride_bus_config * bus_config = config->bus->config;
@@ -370,6 +441,17 @@ static size_t robstride_build_tx(
   const uint8_t motor_id = config->motor_id;
   size_t count = 0;
 
+  *stage = ROBSTRIDE_TX_STAGE_NONE;
+
+  /* A stop the API could not get out takes priority over everything else,
+   * including the handshake a later enable may already have restarted. */
+  if (data->stop_pending) {
+    robstride_frame_init(&frames[count++], ROBSTRIDE_TYPE_STOP, master, motor_id);
+    data->stop_pending = false;
+    *stage = ROBSTRIDE_TX_STAGE_STOP;
+    return count;
+  }
+
   if (!data->enabled) {
     if ((now - data->last_probe_ms) < ROBSTRIDE_PROBE_INTERVAL_MS) {
       return 0;
@@ -377,6 +459,7 @@ static size_t robstride_build_tx(
 
     data->last_probe_ms = now;
     robstride_frame_init(&frames[count++], ROBSTRIDE_TYPE_GET_ID, master, motor_id);
+    *stage = ROBSTRIDE_TX_STAGE_PROBE;
     return count;
   }
 
@@ -388,6 +471,7 @@ static size_t robstride_build_tx(
       (float)robstride_run_mode(data->mode));
     data->configured = true;
     data->enable_sent = false;
+    *stage = ROBSTRIDE_TX_STAGE_CONFIGURE;
     return count;
   }
 
@@ -399,6 +483,7 @@ static size_t robstride_build_tx(
     robstride_build_set_param(
       &frames[count++], master, motor_id, ROBSTRIDE_PARAM_LIMIT_TORQUE, data->limits.torque);
     data->limits_applied = true;
+    *stage = ROBSTRIDE_TX_STAGE_LIMITS;
     return count;
   }
 
@@ -414,12 +499,14 @@ static size_t robstride_build_tx(
     robstride_build_set_param(
       &frames[count++], master, motor_id, ROBSTRIDE_PARAM_CUR_KI, data->gains.current_ki);
     data->gains_applied = true;
+    *stage = ROBSTRIDE_TX_STAGE_GAINS;
     return count;
   }
 
   if (!data->enable_sent) {
     robstride_frame_init(&frames[count++], ROBSTRIDE_TYPE_ENABLE, master, motor_id);
     data->enable_sent = true;
+    *stage = ROBSTRIDE_TX_STAGE_ENABLE;
     return count;
   }
 
@@ -445,7 +532,38 @@ static size_t robstride_build_tx(
       break;
   }
 
+  *stage = ROBSTRIDE_TX_STAGE_COMMAND;
+
   return count;
+}
+
+/*
+ * Undo what robstride_build_tx() marked done, so the stage is built again on
+ * the next interval. The command repeats on its own and the probe comes round
+ * again on its own interval, so neither has anything to take back.
+ */
+static void robstride_retry_tx_stage(
+  struct robstride_motor_data * data, enum robstride_tx_stage stage)
+{
+  switch (stage) {
+    case ROBSTRIDE_TX_STAGE_STOP:
+      data->stop_pending = true;
+      break;
+    case ROBSTRIDE_TX_STAGE_CONFIGURE:
+      data->configured = false;
+      break;
+    case ROBSTRIDE_TX_STAGE_LIMITS:
+      data->limits_applied = false;
+      break;
+    case ROBSTRIDE_TX_STAGE_GAINS:
+      data->gains_applied = false;
+      break;
+    case ROBSTRIDE_TX_STAGE_ENABLE:
+      data->enable_sent = false;
+      break;
+    default:
+      break;
+  }
 }
 
 static void robstride_bus_tx_work_handler(struct k_work * work)
@@ -465,17 +583,34 @@ static void robstride_bus_tx_work_handler(struct k_work * work)
 
     struct robstride_motor_data * data = motor_dev->data;
     struct can_frame frames[ROBSTRIDE_TX_BURST];
+    enum robstride_tx_stage stage;
     k_spinlock_key_t key;
     size_t count;
+    bool queued = true;
 
     key = k_spin_lock(&data->lock);
-    count = robstride_build_tx(motor_dev, frames, now);
+    count = robstride_build_tx(motor_dev, frames, now, &stage);
     k_spin_unlock(&data->lock, key);
 
     for (size_t f = 0; f < count; ++f) {
-      /* A frame lost to a busy bus is re-sent on the next interval. */
-      (void)robstride_motor_send(motor_dev, &frames[f]);
+      if (robstride_motor_send(motor_dev, &frames[f]) != 0) {
+        queued = false;
+      }
     }
+
+    if (queued) {
+      continue;
+    }
+
+    /*
+     * Taking the stage back rather than confirming it after a successful send
+     * is what keeps this correct against the API calls that clear the same
+     * flags: re-clearing a flag another thread has just cleared is a no-op,
+     * whereas setting one would swallow the request it stands for.
+     */
+    key = k_spin_lock(&data->lock);
+    robstride_retry_tx_stage(data, stage);
+    k_spin_unlock(&data->lock, key);
   }
 }
 
@@ -566,9 +701,7 @@ static void robstride_handle_fault(
 
   if (fault_bits != 0U) {
     /* A tripped motor disables itself and forgets what we configured. */
-    data->configured = false;
-    data->limits_applied = false;
-    data->enable_sent = false;
+    robstride_restart_handshake(data);
   }
 
   robstride_mark_seen(data, can_bus);
@@ -767,9 +900,10 @@ static int robstride_motor_enable(const struct device * dev)
      * talking to it, so start the handshake from the beginning rather than
      * assuming it still holds what we wrote.
      */
-    data->configured = false;
-    data->limits_applied = false;
-    data->enable_sent = false;
+    robstride_restart_handshake(data);
+    /* The handshake opens with a stop of its own, so a stop still owed from an
+     * earlier disable has nothing left to do. */
+    data->stop_pending = false;
   }
 
   k_spin_unlock(&data->lock, key);
@@ -784,19 +918,33 @@ static int robstride_motor_disable(const struct device * dev)
   struct robstride_motor_data * data = dev->data;
   struct can_frame frame;
   k_spinlock_key_t key;
+  int ret;
 
   key = k_spin_lock(&data->lock);
+  /*
+   * Dropping this now is what makes the transmit work stop commanding the
+   * motor; it must not wait on the bus. The stop frame is a separate promise,
+   * and the motor holds its last target until it arrives.
+   */
   data->enabled = false;
   data->enable_sent = false;
+  data->stop_pending = true;
   k_spin_unlock(&data->lock, key);
 
   /* Stopping is the safety-critical direction, so it does not wait for the
    * next transmit interval. */
   robstride_frame_init(&frame, ROBSTRIDE_TYPE_STOP, bus_config->master_can_id, config->motor_id);
+  ret = robstride_motor_send(dev, &frame);
 
-  /* The transmit work stops commanding this motor either way, so a bus that
-   * cannot take the frame right now does not make disabling fail. */
-  (void)robstride_motor_send(dev, &frame);
+  if (ret != 0) {
+    /* The work keeps re-sending, but the caller has to know the motor has not
+     * been told to stop yet. */
+    return ret;
+  }
+
+  key = k_spin_lock(&data->lock);
+  data->stop_pending = false;
+  k_spin_unlock(&data->lock, key);
 
   return 0;
 }
@@ -1096,6 +1244,7 @@ int robstride_set_gains(const struct device * dev, const struct robstride_gains 
 
   key = k_spin_lock(&data->lock);
   data->gains = *gains;
+  data->gains_overridden = true;
   data->gains_applied = false;
   k_spin_unlock(&data->lock, key);
 
