@@ -182,7 +182,19 @@ struct robstride_motor_data
   struct k_sem param_sem;
   uint16_t param_index;
   uint32_t param_raw;
+  /*
+   * There is one slot, and these three say which part of it is taken.
+   * param_pending owns the slot from the claim until the caller that made it
+   * releases it, and is what -EBUSY reports; releasing it in the receive path
+   * instead would let a second caller in before the first read its result.
+   * param_armed says replies may now be matched, and stays clear until the
+   * semaphore has been drained, so a reply to a read that already gave up
+   * cannot be counted for the one being set up. param_complete says the reply
+   * landed, which the caller trusts over the semaphore in the timeout race.
+   */
   bool param_pending;
+  bool param_armed;
+  bool param_complete;
 };
 
 static float robstride_u16_to_float(uint16_t raw, float min, float max)
@@ -751,9 +763,10 @@ static void robstride_handle_param(
 
   key = k_spin_lock(&data->lock);
 
-  if (data->param_pending && (data->param_index == index)) {
+  /* The slot stays taken; only the waiting caller gives it up. */
+  if (data->param_armed && (data->param_index == index)) {
     data->param_raw = raw;
-    data->param_pending = false;
+    data->param_complete = true;
     complete = true;
   }
 
@@ -1394,11 +1407,21 @@ int robstride_get_parameter(const struct device * dev, uint16_t index, float * v
     return -EBUSY;
   }
 
-  data->param_index = index;
+  /* Take the slot before the semaphore is touched, but leave it unarmed: a
+   * reply matched now would be signalled and then thrown away by the reset. */
   data->param_pending = true;
+  data->param_armed = false;
+  data->param_complete = false;
   k_spin_unlock(&data->lock, key);
 
+  /* Drop a signal left behind by a read whose reply arrived after it gave up. */
   k_sem_reset(&data->param_sem);
+
+  key = k_spin_lock(&data->lock);
+  data->param_index = index;
+  data->param_armed = true;
+  k_spin_unlock(&data->lock, key);
+
   robstride_build_get_param(&frame, bus_config->master_can_id, config->motor_id, index);
   ret = robstride_motor_send(dev, &frame);
 
@@ -1411,7 +1434,15 @@ int robstride_get_parameter(const struct device * dev, uint16_t index, float * v
   }
 
   key = k_spin_lock(&data->lock);
+  data->param_armed = false;
   raw = data->param_raw;
+
+  /* A reply that landed just as the wait expired is still this read's answer,
+   * so the flag decides rather than how the wait ended. */
+  if (data->param_complete) {
+    ret = 0;
+  }
+
   data->param_pending = false;
   k_spin_unlock(&data->lock, key);
 

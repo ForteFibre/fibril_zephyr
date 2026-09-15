@@ -818,6 +818,84 @@ ZTEST(robstride_motor, test_parameter_read_times_out_without_a_reply)
     "a read nobody answers must time out");
 }
 
+/* Lower priority than the test thread, so answering the reader below does not
+ * hand the CPU over before the assertion that follows it runs. */
+#define READER_PRIORITY (CONFIG_ZTEST_THREAD_PRIORITY + 1)
+#define READER_STACK_SIZE 1024
+
+static K_THREAD_STACK_DEFINE(reader_stack, READER_STACK_SIZE);
+static struct k_thread reader_thread;
+static int reader_result;
+static float reader_value;
+
+static void reader_entry(void * a, void * b, void * c)
+{
+  ARG_UNUSED(a);
+  ARG_UNUSED(b);
+  ARG_UNUSED(c);
+
+  reader_result = robstride_get_parameter(motor0, PARAM_LIMIT_TORQUE, &reader_value);
+}
+
+ZTEST(robstride_motor, test_a_read_holds_the_motor_until_the_caller_that_made_it_returns)
+{
+  uint8_t data[8] = {0};
+  const float answer = 4.5F;
+  uint32_t bits;
+  float value = 0.0F;
+
+  memcpy(&bits, &answer, sizeof(bits));
+  sys_put_le16(PARAM_LIMIT_TORQUE, &data[0]);
+  sys_put_le32(bits, &data[4]);
+
+  reader_result = -EINPROGRESS;
+  k_thread_create(
+    &reader_thread, reader_stack, READER_STACK_SIZE, reader_entry, NULL, NULL, NULL,
+    READER_PRIORITY, 0, K_NO_WAIT);
+
+  /* Let the reader claim the slot and block on the reply. */
+  k_msleep(5);
+  zassert_equal(
+    robstride_get_parameter(motor0, PARAM_LIMIT_SPD, &value), -EBUSY,
+    "a second read must be refused while one is in flight");
+
+  /*
+   * Answering makes the reader runnable but does not run it, because it is the
+   * lower priority. The slot has to stay taken across this gap: releasing it
+   * here would let the call below overwrite the reply the reader has not read.
+   */
+  inject(TYPE_GET_PARAM, 0U, TEST_MOTOR0_ID, data);
+  zassert_equal(
+    robstride_get_parameter(motor0, PARAM_LIMIT_SPD, &value), -EBUSY,
+    "the reply belongs to the reader until it has taken it");
+
+  zassert_ok(k_thread_join(&reader_thread, K_MSEC(500)), "the reader never finished");
+  zassert_ok(reader_result, "the reader must get its answer");
+  zassert_within(reader_value, 4.5F, 0.001F, "the reader got the wrong value");
+
+  /* And the slot is free again once it has. */
+  zassert_equal(
+    robstride_get_parameter(motor0, PARAM_LIMIT_SPD, &value), -ETIMEDOUT,
+    "the slot must be released when the read returns");
+}
+
+ZTEST(robstride_motor, test_an_integer_parameter_rejects_a_value_it_cannot_carry)
+{
+  clear_captures();
+
+  zassert_equal(
+    robstride_set_parameter(motor0, PARAM_RUN_MODE, -1.0F), -EINVAL,
+    "a negative value has no uint32 representation");
+  zassert_equal(
+    robstride_set_parameter(motor0, PARAM_RUN_MODE, 5.0e9F), -EINVAL,
+    "a value past uint32 has no representation");
+  zassert_is_null(
+    find_set_param(TEST_MOTOR0_ID, PARAM_RUN_MODE), "a rejected write must not reach the bus");
+
+  /* A float-payload index carries the same values without complaint. */
+  zassert_ok(robstride_set_parameter(motor0, PARAM_LIMIT_TORQUE, -1.0F));
+}
+
 ZTEST(robstride_motor, test_calls_reject_a_device_that_is_not_a_robstride_motor)
 {
   struct robstride_feedback si;

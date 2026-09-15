@@ -312,7 +312,10 @@ int robstride_set_parameter(const struct device * dev, uint16_t index, float val
  * @retval 0 Success.
  * @retval -EINVAL @p dev is not a RobStride motor, or @p value is NULL.
  * @retval -ETIMEDOUT The motor did not answer in time.
- * @retval -EBUSY Another read of this motor is already in flight.
+ * @retval -EBUSY Another read of this motor is already in flight. A read holds
+ *                the motor from the call until it returns, so this is reported
+ *                for the whole of that window and not only until the reply
+ *                arrives.
  * @retval negative_errno The request could not be queued.
  */
 int robstride_get_parameter(const struct device * dev, uint16_t index, float * value);
