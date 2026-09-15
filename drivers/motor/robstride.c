@@ -197,6 +197,10 @@ static uint16_t robstride_float_to_u16(float value, float min, float max)
   return (uint16_t)((clamped - min) * (float)UINT16_MAX / (max - min));
 }
 
+/* One past the largest value the uint32 payload of an integer parameter can
+ * hold; the conversion is undefined from here up. */
+#define ROBSTRIDE_PARAM_INT_LIMIT 4294967296.0F
+
 /* These three indices carry an integer payload rather than a float. */
 static bool robstride_param_is_int(uint16_t index)
 {
@@ -213,21 +217,40 @@ static void robstride_frame_init(
   frame->flags = CAN_FRAME_IDE;
 }
 
-static void robstride_build_set_param(
+/*
+ * Build a parameter write, reporting whether the value could be carried.
+ * Only an integer-payload index can fail, and only from
+ * robstride_set_parameter(): the transmit path writes either a float payload
+ * or the run mode, which robstride_run_mode() keeps in range. The frame is
+ * always left well-formed so a caller that ignores the result cannot send
+ * uninitialised memory.
+ */
+static int robstride_build_set_param(
   struct can_frame * frame, uint8_t master, uint8_t motor_id, uint16_t index, float value)
 {
-  uint32_t bits;
-
-  robstride_frame_init(frame, ROBSTRIDE_TYPE_SET_PARAM, master, motor_id);
-  sys_put_le16(index, &frame->data[0]);
+  uint32_t bits = 0;
+  int ret = 0;
 
   if (robstride_param_is_int(index)) {
-    bits = (uint32_t)value;
+    /*
+     * Converting a float that is negative, too large, or not a number to
+     * uint32_t is undefined, and this value comes from the caller. NaN fails
+     * both comparisons, so the range test rejects it too.
+     */
+    if ((value >= 0.0F) && (value < ROBSTRIDE_PARAM_INT_LIMIT)) {
+      bits = (uint32_t)value;
+    } else {
+      ret = -EINVAL;
+    }
   } else {
     memcpy(&bits, &value, sizeof(bits));
   }
 
+  robstride_frame_init(frame, ROBSTRIDE_TYPE_SET_PARAM, master, motor_id);
+  sys_put_le16(index, &frame->data[0]);
   sys_put_le32(bits, &frame->data[4]);
+
+  return ret;
 }
 
 static void robstride_build_get_param(
@@ -1336,8 +1359,12 @@ int robstride_set_parameter(const struct device * dev, uint16_t index, float val
   config = dev->config;
   bus_config = config->bus->config;
 
-  robstride_build_set_param(
-    &frame, bus_config->master_can_id, config->motor_id, index, value);
+  const int ret =
+    robstride_build_set_param(&frame, bus_config->master_can_id, config->motor_id, index, value);
+
+  if (ret != 0) {
+    return ret;
+  }
 
   return robstride_motor_send(dev, &frame);
 }

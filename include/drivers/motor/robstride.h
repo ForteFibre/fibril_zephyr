@@ -290,9 +290,12 @@ int robstride_save_parameters(const struct device * dev);
  *
  * @param dev RobStride motor device instance.
  * @param index Parameter index, as defined by the RobStride protocol.
- * @param value Value to write.
+ * @param value Value to write. For an index whose payload is an integer it has
+ *              to be a number in the range of @c uint32_t; anything else has no
+ *              representation on the wire and is rejected rather than converted.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not a RobStride motor.
+ * @retval -EINVAL @p dev is not a RobStride motor, or @p value cannot be
+ *                 carried by this index.
  * @retval negative_errno The frame could not be queued.
  */
 int robstride_set_parameter(const struct device * dev, uint16_t index, float value);

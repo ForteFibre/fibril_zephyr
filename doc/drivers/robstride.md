@@ -201,6 +201,10 @@ RobStride の指令は機種で範囲が変わる SI 量で、`enum motor_output
 `robstride_get_parameter()` はモータの応答を待ってブロックする。
 制御ループや割り込みから呼んではならない。
 
+`robstride_set_parameter()` は整数 payload のインデックスに限り、値が `uint32_t` で表せることを確かめる。
+負値、`uint32_t` を超える値、NaN は `-EINVAL` で、フレームは送らない。
+線路上に載せようがない値を変換すると未定義動作になる。
+
 ## テスト
 
 ```shell
