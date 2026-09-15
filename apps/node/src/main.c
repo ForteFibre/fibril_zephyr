@@ -36,8 +36,8 @@ LOG_MODULE_REGISTER(fibril_node, CONFIG_APP_LOG_LEVEL);
 #define MASTER_LOST_US 300000U /* SPEC §5.11 */
 
 /* fcan_init carves every variable-length buffer from this once. Sized with
- * headroom rather than tuned: the node schema can gain a block type without
- * a matching edit here, and running out is a boot failure, not a slow path.
+ * headroom rather than tuned: the image can gain a block type without a
+ * matching edit here, and running out is a boot failure, not a slow path.
  */
 K_HEAP_DEFINE(fcan_heap, 16 * 1024);
 

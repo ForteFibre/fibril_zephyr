@@ -49,28 +49,37 @@ fibril_can 側の事情も 2 つ効く。
 
 ハードウェアの扱いは `drivers/` に、fibril_can に依存しない制御ロジックは `lib/` の別の場所に置き、`impl.c` はその上に載る糊に保つ。
 
-### 3. どの機能が生きるかは schema の `instances:` だけが決める
+### 3. どの機能が生きるかは devicetree だけが決める
+
+機能ごとに binding を用意する。
+`fibril,fcan-<type>` のノードが okay なら、その機能のソースがコンパイルされ、同じノードから schema の `instances:` 断片が生成される。
+ノードを消せば両方消える。
 
 アプリケーションは、実装済みのブロック型の `type.yaml` を全部 codegen に渡す。
-インスタンス化しない型は blob に載らず、生成マクロも出ない。
-`impl.c` は本体を `#if defined(FCAN_<TYPE>_MAX_COUNT)` で囲み、型が無ければ空になる。
+インスタンス化されない型は blob に載らない。
+手で書く schema はノード名と `limits:` だけになる。
 
-機能ごとの Kconfig を作らない。
-schema と Kconfig の 2 つが同じ問いに答えると、食い違ったときにどちらが正しいか決められない。
+### 4. インスタンスとハードウェアの対応も同じノードが持つ
 
-### 4. インスタンスとハードウェアの対応は devicetree が持つ
+`gpios` のような phandle 配列の並びがバス上のインスタンス番号になり、実際のインスタンス数はその長さから取る。
+ROS の名前空間はノードの `fcan-ns` プロパティが持つ。
 
-機能ごとに binding を用意し、`gpios` のような phandle 配列の並びがバス上のインスタンス番号になる。
-実際のインスタンス数はその長さから取り、schema の上限を超えていないことを `BUILD_ASSERT` で確かめる。
+`max_count` は Kconfig の整数で与える。
+これは静的確保の上限であって個数ではなく、blob には現れないので、余らせても `sizeof(state)` × 余りバイトの `.bss` しか増えない。
+CMake の devicetree API は phandle 配列を読めないため、正確な長さを CMake 側に持ち込むには devicetree に本数を重複して書くことになる。
+`BUILD_ASSERT` が配線と上限の食い違いを落とす。
 
-### 5. 焼く単位は snippet で表す
+### 5. 焼く単位は 2 層の snippet で表す
 
-`snippets/<大会>/<名前>/` が、ノードの schema、Kconfig、devicetree overlay を 1 組で持つ。
-1 つの snippet が 1 つのイメージである。
+`-S` は複数渡せて、並べた順に append される。
+基板がバスに出る経路を決めるトランスポート snippet と、ノード名と機能の配線を決めるデプロイ snippet に割る。
 
 ```shell
-west build -b fibril_rc26_mainair_v01 apps/node -S rc26-air
+west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
 ```
+
+機能側の overlay はボードが定義するラベルしか参照しない。
+この約束があるので `-S` の順序が結果を変えない。
 
 ### 6. トランスポートも devicetree で選び、実体は `lib/fcan_transport/` に置く
 
@@ -94,7 +103,7 @@ schema のノード名に `{i}` を書くと起動時の node_id で置換され
 
 ## Consequences
 
-機能を 1 つ足す作業が `lib/fibril_can_node/<type>/` を 1 つ作ることに閉じる。
+機能を 1 つ足す作業が、`lib/fibril_can_node/<type>/` を 1 つと binding を 1 つ作ることに閉じる。
 同じ機能が、直結の基板でも hub を兼ねる基板でも、同じ機械語のまま動く。
 アプリケーションはブロック型の名前を 1 つも知らない。機能は登録セクションに自分を載せ、`main` はそれを走査して `fcan_config_t::instance_counts` を埋める。
 
@@ -120,6 +129,11 @@ LD テンプレート向けの `sections-ram.ld` と CMake リンカジェネレ
 `west.yml` は fibril_can を revision で固定する。
 ブロック配列の並びはワイヤの契約の一部であり、`main` を追いかけていると `instance_counts` の割り当てが黙って変わる。
 
+機能が devicetree から `instances:` を吐くので、schema は 3 種類の断片から組まれる。
+断片の合成は codegen の決定的マージに任せ、`lib/fibril_can_node/instance_schema.cmake` が生成を 1 か所にまとめる。
+compatible を持つノードが 2 つ以上 okay ならビルドを止める。
+実装が devicetree インスタンス 0 しか駆動しない以上、2 つ目はハンドラの無いインスタンス群になり、実行時の沈黙としてしか現れないためである。
+
 ## 却下した選択肢
 
 **`apps/<大会>/<役割>/` に切る。**
@@ -138,16 +152,20 @@ LD テンプレート向けの `sections-ram.ld` と CMake リンカジェネレ
 
 **機能を Kconfig で選ぶ。**
 `drivers/` が `zephyr_library_sources_ifdef` で並べている流儀に揃う。
-しかし schema が同じことを既に決めているので、2 つが食い違ったときに解決できない。
-生成マクロで囲めば、正本は schema 1 つで済む。
+しかし機能の有無は配線の有無であり、それを述べる場所は既に devicetree にある。
+Kconfig を正本にすると、ノードを消し忘れたイメージと消したイメージを区別できない。
+`DT_HAS_*_ENABLED` から導く真偽値は devicetree の言い換えであって、2 つ目の答えではない。
 
 **schema の糊も `lib/` ではなくアプリケーションに残す。**
 `lib/` が fibril_can なしで使える状態を保てる。
 しかし扱うファームウェアの大半が fibril_can スレーブなので、その再利用性は仮定の話である。
 機能あたり 20〜50 行を分けるために継ぎ目を 1 つ増やす価値はない。
 
-**`instances:` を devicetree から生成する。**
-配線とインスタンス数の重複が消える。
-しかし schema の `count:` は静的な上限にすぎず、実行時の `instance_counts` は別に残るので、消えるのは手書きの片方だけである。
-代償として、バスに何を出すかを述べた唯一のリストが生成物になってレビューの diff から消え、ROS の名前空間を devicetree に書くことになる。
-数の正本を devicetree に置く狙いは、C 側を devicetree から組み立てることで生成器なしに達成できる。
+**`instances:` を手で書き続ける。**
+バスに何を出すかを述べたリストが 1 か所にまとまり、レビューの diff に出る。
+これを最初は採ったが、機能を増減するたびに overlay と schema の両方を触ることになり、片方だけ直す事故がそのまま黙った不整合になる。
+
+生成に切り替えたのは、当初の反対理由が 2 つとも崩れたからである。
+`max_count` は blob に現れないと実測で分かったので（6 と 16 で `schema_blob.c` が一致する）、上限は Kconfig で十分になった。
+そして codegen の report が型とインスタンスの出所をファイル単位で並べるので、生成物がレビューから消えるわけでもない。
+`fibril,fcan-*` のノードはハードウェアではなく機能の合成を述べるノードなので、ROS の名前空間をそこに書くことも筋が通る。

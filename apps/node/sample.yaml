@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# One scenario per image that gets flashed. The board and the snippet together
-# name a node: the snippet says which functions and which schema, the board
-# says which silicon.
+# One scenario per image that gets flashed. Two snippets name a node: the
+# board's transport snippet says how it reaches the bus, the deployment
+# snippet says who it is and what it drives.
 
 sample:
   name: fibril_can node
   description: >-
-    fibril_can slave. Which block types it carries comes from the node schema
-    a snippet selects; the application itself names none of them.
+    fibril_can slave. Which block types it carries comes from the
+    fibril,fcan-* nodes in its devicetree; the application itself names none
+    of them.
 
 common:
   build_only: true
@@ -18,43 +19,19 @@ common:
   #   FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps
   # twister's --extra-args=-DFCAN_CODEGEN=... does not.
   filter: CONFIG_FIBRIL_CAN
+  platform_allow:
+    - fibril_rc26_mainair_v01
+  integration_platforms:
+    - fibril_rc26_mainair_v01
 
 tests:
   app.node.rc26_air:
     tags:
       - fibril_can
       - can
-    extra_args:
-      - SNIPPET=rc26-air
-    platform_allow:
-      - fibril_rc26_mainair_v01
-    integration_platforms:
-      - fibril_rc26_mainair_v01
-
-  app.node.rc26_air_chain:
-    tags:
-      - fibril_can
-      - can
-      - hub
-    # Same functions and same schema as rc26_air; only the transport differs.
-    # Kept as a scenario so the hub backend does not rot untested.
-    extra_args:
-      - SNIPPET=rc26-air-chain
-    platform_allow:
-      - fibril_rc26_mainair_v01
-    integration_platforms:
-      - fibril_rc26_mainair_v01
-
-  app.node.rc26_air_usb:
-    tags:
-      - fibril_can
-      - can
       - hub
       - usb
-    # The hub's external port faces a USB host instead of staying unused.
+    # Semicolons, not two SNIPPET= entries: twister turns each extra_args
+    # entry into one -D, and CMake reads SNIPPET as a list.
     extra_args:
-      - SNIPPET=rc26-air-usb
-    platform_allow:
-      - fibril_rc26_mainair_v01
-    integration_platforms:
-      - fibril_rc26_mainair_v01
+      - SNIPPET=rc26-mainair-usb;rc26-air
