@@ -27,6 +27,11 @@ extern "C" {
  * no counterpart in the class, and are read through
  * @ref robstride_get_feedback.
  *
+ * @ref motor_disable sends the stop frame itself rather than waiting for the
+ * next command interval, and returns the transmit error when it cannot: the
+ * motor holds its last target until the stop reaches it. The driver keeps
+ * re-sending that stop until it gets out.
+ *
  * Selecting a target also selects the mode it belongs to. Switching mode makes
  * the driver stop the motor, write the new mode and enable it again, which
  * takes a few command intervals.
@@ -142,11 +147,16 @@ struct robstride_feedback
   uint32_t fault_bits;
   /** Warnings from the most recent fault frame. */
   uint32_t warning_bits;
-  /** True when the motor has answered at least once and has not timed out. */
+  /** True when the motor has answered at least once, whatever it answered. */
   bool online;
-  /** True when the measurements are present but no longer fresh. */
+  /** True when no feedback frame has arrived within the configured timeout. */
   bool stale;
-  /** Timestamp of the most recent frame from this motor, in milliseconds. */
+  /**
+   * @brief Timestamp of the most recent feedback frame, in milliseconds.
+   *
+   * Only feedback frames carry measurements, so a presence or parameter reply
+   * marks the motor online without moving this on.
+   */
   int64_t timestamp_ms;
 };
 
@@ -214,7 +224,9 @@ int robstride_set_motion_target(
  * @retval 0 Success.
  * @retval -EINVAL @p dev is not a RobStride motor, or @p feedback is NULL.
  * @retval -ENODATA The motor has not answered yet.
- * @retval -EAGAIN The measurements are older than the configured timeout.
+ * @retval -EAGAIN The motor is online but no feedback frame has arrived within
+ *                 the configured timeout, which is also what a motor that has
+ *                 answered nothing but a presence probe reports.
  */
 int robstride_get_feedback(const struct device * dev, struct robstride_feedback * feedback);
 
@@ -233,6 +245,10 @@ int robstride_set_limits(const struct device * dev, const struct robstride_limit
 
 /**
  * @brief Override the gains of the motor's internal loops.
+ *
+ * Once this has been called the gains are part of what the driver writes back
+ * whenever the motor has to be configured again, so a fault does not leave the
+ * motor running on the gains stored in its own memory.
  *
  * @param dev RobStride motor device instance.
  * @param gains Gains to apply.
