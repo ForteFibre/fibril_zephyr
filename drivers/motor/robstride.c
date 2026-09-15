@@ -320,7 +320,8 @@ static int robstride_motor_send(const struct device * motor_dev, const struct ca
   struct robstride_motor_data * data = motor_dev->data;
   k_spinlock_key_t key;
   uint8_t can_bus;
-  int ret = -EIO;
+  bool attempted = false;
+  int ret = 0;
 
   key = k_spin_lock(&data->lock);
   can_bus = data->can_bus;
@@ -335,14 +336,22 @@ static int robstride_motor_send(const struct device * motor_dev, const struct ca
       continue;
     }
 
+    attempted = true;
+
     const int sent = can_send(bus_config->can_devs[i], frame, K_NO_WAIT, NULL, NULL);
 
-    if (sent == 0) {
-      ret = 0;
+    if (sent != 0) {
+      /*
+       * Every controller addressed here has to take the frame. While the motor
+       * is unlocated it could be behind any of them, so one that refuses is
+       * one that may have been the right one, and reporting success would
+       * strand the frame the way a discarded error used to.
+       */
+      ret = sent;
     }
   }
 
-  return ret;
+  return attempted ? ret : -EIO;
 }
 
 /*
@@ -998,6 +1007,15 @@ static int robstride_motor_get_feedback(const struct device * dev, void * feedba
 
   if (!data->online) {
     ret = -ENODATA;
+  } else if (!data->has_last_position) {
+    /*
+     * Online with nothing measured: either only a presence or parameter reply
+     * has come back, or the accumulator was emptied by a zeroing. The
+     * timestamp can still be inside the timeout in the second case, so
+     * freshness is not what decides this.
+     */
+    out->stale = true;
+    ret = -EAGAIN;
   } else if (
     (bus_config->feedback_timeout_ms > 0U) &&
     ((k_uptime_get() - data->timestamp_ms) > (int64_t)bus_config->feedback_timeout_ms)) {
@@ -1194,6 +1212,11 @@ int robstride_get_feedback(const struct device * dev, struct robstride_feedback 
 
   if (!data->online) {
     ret = -ENODATA;
+  } else if (!data->has_last_position) {
+    /* Same rule as the class-wide snapshot: the fault and mode fields above
+     * stay readable, but no measurement has arrived to be fresh. */
+    feedback->stale = true;
+    ret = -EAGAIN;
   } else if (
     (bus_config->feedback_timeout_ms > 0U) &&
     ((k_uptime_get() - data->timestamp_ms) > (int64_t)bus_config->feedback_timeout_ms)) {
@@ -1434,6 +1457,9 @@ DT_INST_FOREACH_STATUS_OKAY(ROBSTRIDE_BUS_DEFINE)
   BUILD_ASSERT(                                                                             \
     DT_INST_ENUM_IDX(inst, model) < ARRAY_SIZE(robstride_model_limits),                     \
     "Unknown RobStride model");                                                             \
+  BUILD_ASSERT(                                                                             \
+    IN_RANGE(DT_INST_REG_ADDR(inst), 1, 127),                                               \
+    "reg is the motor CAN ID and must be in 1..127");                                       \
   ROBSTRIDE_LIMIT_ASSERT(inst, max_current_ma)                                              \
   ROBSTRIDE_LIMIT_ASSERT(inst, max_velocity_mrad_s)                                         \
   ROBSTRIDE_LIMIT_ASSERT(inst, max_torque_mnm)                                              \

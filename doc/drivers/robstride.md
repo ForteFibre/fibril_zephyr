@@ -183,8 +183,17 @@ RobStride の指令は機種で範囲が変わる SI 量で、`enum motor_output
 `online` はモータからのどの種別のフレームでも立つが、**`timestamp_ms` と `stale` は feedback フレームの時刻だけで決まる**。
 存在確認やパラメータ応答が返っても、古い位置と速度が新しくなったことにはならない。
 
-どちらの feedback も、モータが一度も応答していなければ `-ENODATA`、測定値が `feedback-timeout-ms` より古ければ `stale` を立てて `-EAGAIN` を返す。
-無効なモータは指令を受けないので feedback も返らず、やがて `stale` になる。
+どちらの feedback も返り値は 3 つに分かれる。
+
+| 状態 | 返り値 |
+| --- | --- |
+| どの種別のフレームも返してこない | `-ENODATA` |
+| 応答はあるが feedback フレームを 1 度も受け取っていない | `stale` を立てて `-EAGAIN` |
+| feedback はあるが `feedback-timeout-ms` より古い | `stale` を立てて `-EAGAIN` |
+
+2 行目には、存在確認にしか答えていないモータと、`robstride_set_zero()` で積算をやり直した直後のモータが入る。
+どちらも直前のフレームは新しいが、読める測定値を持たない。
+無効なモータは指令を受けないので feedback が止まり、受け取り済みだったものもやがて 3 行目に落ちる。
 
 `robstride_set_position()` などの指令はモードの選択を兼ねる。
 モードが変わると上のハンドシェイクをやり直すので、切り替えには数周期かかる。

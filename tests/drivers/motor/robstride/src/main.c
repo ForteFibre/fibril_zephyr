@@ -542,6 +542,27 @@ ZTEST(robstride_motor, test_set_zero_makes_the_next_reading_seed_the_accumulator
     feedback.position, 5000, "the accumulator must restart from the reading after the zero");
 }
 
+ZTEST(robstride_motor, test_a_reseeded_accumulator_reports_no_measurement_until_it_is_filled)
+{
+  struct motor_feedback feedback;
+  struct robstride_feedback si;
+
+  inject_feedback(TEST_MOTOR0_ID, 1000U, 0U, 0U, 0);
+  zassert_ok(motor_get_feedback(motor0, &feedback));
+
+  zassert_ok(robstride_set_zero(motor0));
+
+  /* The timestamp is still inside the timeout, but there is nothing behind it
+   * any more, so freshness alone must not make this look like a measurement. */
+  zassert_equal(
+    motor_get_feedback(motor0, &feedback), -EAGAIN, "the accumulator has been emptied");
+  zassert_equal(feedback.valid_mask, 0U, "nothing has been measured since the zero");
+  zassert_true(feedback.stale, "an emptied accumulator is not fresh");
+
+  zassert_equal(robstride_get_feedback(motor0, &si), -EAGAIN, "the SI view must agree");
+  zassert_true(si.stale, "an emptied accumulator is not fresh");
+}
+
 ZTEST(robstride_motor, test_feedback_decodes_and_accumulates_across_the_wrap)
 {
   struct motor_feedback feedback;

@@ -224,9 +224,10 @@ int robstride_set_motion_target(
  * @retval 0 Success.
  * @retval -EINVAL @p dev is not a RobStride motor, or @p feedback is NULL.
  * @retval -ENODATA The motor has not answered yet.
- * @retval -EAGAIN The motor is online but no feedback frame has arrived within
- *                 the configured timeout, which is also what a motor that has
- *                 answered nothing but a presence probe reports.
+ * @retval -EAGAIN The motor is online but holds no measurement to report: no
+ *                 feedback frame has arrived within the configured timeout, or
+ *                 none has arrived at all because the motor has only answered
+ *                 a presence probe or has just been zeroed.
  */
 int robstride_get_feedback(const struct device * dev, struct robstride_feedback * feedback);
 
