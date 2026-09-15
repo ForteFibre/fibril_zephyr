@@ -296,7 +296,7 @@ ZTEST(robomaster_motor, test_feedback_decode_and_wraparound)
 {
 	struct motor_feedback feedback;
 	struct motor_feedback previous;
-	int32_t expected_position;
+	int64_t expected_position;
 
 	if (motor_get_feedback(motor0, &previous) != -ENODATA) {
 		expected_position = previous.position + wrapped_delta(8000, previous.orientation);

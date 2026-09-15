@@ -1,0 +1,42 @@
+description: |
+  RobStride actuator bus.
+
+  One node per set of CAN controllers that carry RobStride traffic. The
+  protocol is classic CAN with 29-bit identifiers at 1 Mbit/s, so a controller
+  under this node cannot also carry CAN FD traffic.
+
+compatible: "robstride,bus"
+
+include: base.yaml
+
+bus: robstride
+
+properties:
+  "#address-cells":
+    required: true
+    const: 1
+  "#size-cells":
+    required: true
+    const: 0
+  cans:
+    type: phandles
+    required: true
+    description: >
+      One or more CAN controller devices used to talk to RobStride actuators.
+      Motor IDs must be unique across this bus. Until a motor has answered, the
+      driver does not know which controller it is on and addresses all of them.
+  master-can-id:
+    type: int
+    default: 253
+    description: >
+      Host identifier carried in the low 8 bits of every frame. The driver
+      filters received frames on it, so it must differ from the reg of every
+      motor on this bus. 253 is the value the ROS 2 reference implementation
+      defaults to.
+  feedback-timeout-ms:
+    type: int
+    default: 100
+    description: >
+      Feedback is reported stale when no frame has arrived from a motor within
+      this timeout. Feedback arrives as the reply to each command, so this has
+      to leave room for several command intervals.
