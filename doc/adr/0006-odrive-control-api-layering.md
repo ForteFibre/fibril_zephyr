@@ -49,6 +49,13 @@ ODrive は同じ ID に対応する payload を載せた data frame で応答す
 `Set_Controller_Mode`（0x00B）が `control_mode` と `input_mode` を 1 フレームで運び、
 `Set_Input_Pos`（0x00C）、`Set_Input_Vel`（0x00D）、`Set_Input_Torque`（0x00E）が目標値を運ぶ。
 `axis.config.enable_watchdog` が有効なら、この 3 つのいずれかを周期的に送らないと軸が停止する。
+watchdog を戻すのはこの 3 つと closed loop への遷移だけで、ほかのフレームでは戻らない。
+
+`Set_Input_Pos` の `Vel_FF` と `Torque_FF` は符号付きの `int16` で、
+倍率は `axis.config.can.input_vel_scale` と `axis.config.can.input_torque_scale` が決める。
+どちらも既定は 0.001 である。
+
+`INPUT_MODE_TRAP_TRAJ` は、**同じ値の `Set_Input_Pos` を受け取るたびに軌道を再計画する**。
 
 Zephyr の `can_add_rx_filter()` に渡すコールバックは**割り込みコンテキストで呼ばれる**と文書化されている。
 `drivers/motor/robstride.c` の受信経路もそれを前提に、spinlock だけを使って受信処理をその場で完結させている。
@@ -98,7 +105,7 @@ ODrive 側で `circular_setpoints` を有効にすると `Pos_Estimate` が折�
 
 9. **`online` は heartbeat、`stale` は encoder estimates で判定する。** heartbeat は既定で有効な唯一のメッセージなので死活監視の鍵に適する。位置と速度の鮮度は encoder estimates の到着時刻で測る。binding は `heartbeat-timeout-ms`（既定 300）と `estimate-timeout-ms`（既定 100）を別々に持つ。
 
-10. **送信タイマーが送るのは指令フレームだけとする。** ODrive の watchdog は `Set_Input_*` の到着で再始動するので、有効な軸には `CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS` ごとに現在のモードの指令フレームを 1 通送る。feedback の取得には送信が要らないので、無効な軸には何も送らない。`odrive_set_*()` は指令を保存するだけで CAN の送信を待たず、制御ループから呼んでよい。
+10. **送信タイマーが送るのは指令フレームだけとする。ただし `INPUT_MODE_TRAP_TRAJ` では値が変わったときだけ送る。** ODrive の watchdog は `Set_Input_*` の到着で再始動するので、有効な軸には `CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS` ごとに現在のモードの指令フレームを 1 通送る。`INPUT_MODE_TRAP_TRAJ` だけは、同じ値を再送すると軌道が毎回振り出しに戻って `Trajectory_Done_Flag` が立たないので再送しない。feedback の取得には送信が要らないので、無効な軸には何も送らない。`odrive_set_*()` は指令を保存するだけで CAN の送信を待たず、制御ループから呼んでよい。
 
 11. **`motor_enable()` は `Clear_Errors` を 1 度だけ送る。** 手順は `Clear_Errors` → `Set_Controller_Mode` → `Set_Axis_State(CLOSED_LOOP_CONTROL)` で、heartbeat の `Axis_State` が 8 になるまで `Set_Controller_Mode` 以降を `CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` ごとに繰り返す。**再試行では `Clear_Errors` を送らない。** 過電流で落ちた軸をループの中で自動的に復帰させると、原因が取り除かれないまま再投入を繰り返すことになる。明示的に消したい場合のために `odrive_clear_errors()` を置く。
 
@@ -117,11 +124,10 @@ ODrive が受け付けない指令を送り続けても意味がなく、watchdo
 14. **指令とパラメータの読み書きは `include/drivers/motor/odrive.h` に置く。単位は線路上のものをそのまま使い、rev、rev/s、Nm、A とする。** ADR 0004 の決定 5 が `float` と SI を選んだのと同じ趣旨だが、ODrive の線路が rev であり、ゲインと上限の単位も rev 系である。rad に直すとヘッダの数値が odrivetool で設定した値と一致しなくなる。
 
 15. **`input_mode` は実行時の API で設定し、devicetree には置かない。** ADR 0004 の決定 11 と同じ判断である。既定は `INPUT_MODE_PASSTHROUGH` とし、`Set_Controller_Mode` を送るときに現在の `control_mode` と一緒に載せる。`INPUT_MODE_TRAP_TRAJ` のために `odrive_set_traj_limits()` を置く。
-**決定 10 との相互作用は未確認である。** `INPUT_MODE_TRAP_TRAJ` で同じ `Set_Input_Pos` を再送したときに ODrive が軌道を再計画するなら、
-`CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS` ごとにプロファイルが振り出しに戻り、`Trajectory_Done_Flag` が立たなくなる。
-`INPUT_MODE_PASSTHROUGH` と `INPUT_MODE_VEL_RAMP` にはこの懸念がない。
-実機で確かめ、再計画されるようなら `INPUT_MODE_TRAP_TRAJ` に限って値が変わったときだけ送る形に決定 10 を直す。
-その場合そのモードでは watchdog の餌が途切れるので、`enable_watchdog` との併用も併せて確かめる。
+`INPUT_MODE_TRAP_TRAJ` は同じ値の再送で軌道を再計画するので、決定 10 の再送から外す。
+**その結果、このモードでは watchdog の餌が途切れる。**
+watchdog を戻すのは `Set_Input_*` と closed loop への遷移だけなので、指令を送らない間を埋める手段がない。
+`INPUT_MODE_TRAP_TRAJ` と `enable_watchdog` は併用できないものとし、`doc/drivers/odrive.md` に書く。
 
 16. **`motor_feedback.temperature` にはモータ温度を入れ、`odrive,axis` に `has-motor-thermistor` を持たせる。** `drivers/motor/robomaster.c` と `drivers/motor/robstride.c` が同じフィールドに入れているのはモータ側の温度なので、FET 温度を入れると同じフィールドが実装ごとに別の場所を指す。サーミスタが未設定の ODrive はモータ温度に 0 を返し、0 ℃ は「冷えている」と読めてしまうので、**`has-motor-thermistor` がないノードでは `MOTOR_FEEDBACK_TEMPERATURE` を立てない。** サーミスタの有無は配線が決まれば変わらないので、ADR 0004 の決定 11 が devicetree に置いてよいとした条件に当てはまる。FET 温度は `odrive_feedback` からのみ読める。
 
@@ -133,7 +139,7 @@ ODrive が受け付けない指令を送り続けても意味がなく、watchdo
 
 20. **compatible の vendor prefix は `odrive` とする。** `dts/bindings/vendor-prefixes.txt` に 1 行足す。親が `odrive,bus`、子が `odrive,axis` になる。`reg` が `axis.config.can.node_id` に対応することが名前から分かるので、`robstride,motor` に揃えるより誤解が少ない。
 
-21. **`Set_Input_Pos` の前置補償は生成済みメッセージ定義に従い、0.001 倍率の `int16` で符号化する。** 参照実装は `int8` で書いているが、DBC 由来の定義と食い違っている。実機で確かめた時点で定義側が正しければこのままとし、違っていればコメントを添えて参照実装に合わせる。
+21. **`Set_Input_Pos` の前置補償は符号付き `int16`、倍率 0.001 で符号化する。** 実機で確かめた。参照実装が `int8` で書いているのは誤りである。倍率は ODrive 側の `input_vel_scale` と `input_torque_scale` が決めるもので、ドライバは既定の 0.001 を前提にする。決定 17 と同じく設定を書きにいかず、既定のままにしておくことを `doc/drivers/odrive.md` の要求設定に並べる。
 
 22. **軸ごとに 2 本のコールバックを実行時に登録できるようにする。** 状態コールバックは heartbeat が報告する `axis_state`、`procedure_result`、`active_errors` のいずれかが変わったときと、`heartbeat-timeout-ms` による online / offline の遷移で呼ぶ。feedback コールバックは `Get_Encoder_Estimates` が届いたときに呼ぶ。2 本に分けるのは、**再投入の判断だけが欲しい上位が 100 Hz の feedback を受け取らずに済むようにする**ためである。iq、temperature、torques、bus、error はスナップショットを更新するだけで呼び出さない。ODrive 側の周期設定によって発火頻度が変わるコールバックを増やしても、上位が使える保証がない。
 
@@ -151,6 +157,7 @@ ADR 0004 の Consequences と同じく、`CONFIG_FPU` を有効にした Cortex-
 **ドライバの振る舞いが ODrive 側の設定に依存する。**
 `iq_msg_rate_ms`、`temperature_msg_rate_ms`、`torques_msg_rate_ms`、`bus_voltage_msg_rate_ms`、`error_msg_rate_ms` は既定で無効なので、
 これらを有効にしない限り対応する `odrive_feedback` のフィールドは `valid_mask` が立たない。
+`input_vel_scale` と `input_torque_scale` も既定から変えられていないことが前提になる。
 `doc/drivers/odrive.md` に odrivetool のコマンドを含めて列挙する。
 
 放送を受けるだけなので、軸を増やしてもホストの送信は増えない。
@@ -159,6 +166,9 @@ RobStride のように「台数に比例してホストの送信が増える」�
 
 有効な軸に対しては、指令が変わらなくても `CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS` ごとにフレームが出る。
 `enable_watchdog` を使わない構成ではこの送信は冗長だが、指令の鮮度が一定に保たれる利点を採る。
+
+`INPUT_MODE_TRAP_TRAJ` だけはこの再送がないので、`enable_watchdog` と併用できない。
+軌道の完了を `Trajectory_Done_Flag` で待つ使い方と、通信断で軸が止まることを watchdog に頼る使い方は、このモードでは両立しない。
 
 故障からの復帰が手動になる。
 決定 11 と 12 により、ドライバは一度落ちた軸を自分で戻さない。
