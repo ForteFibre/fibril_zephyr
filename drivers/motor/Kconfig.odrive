@@ -50,7 +50,8 @@ config MOTOR_ODRIVE_WORKQ_PRIORITY
 	default 5
 	help
 	  Priority of the per-bus callback thread. Commands are sent from the
-	  system work queue, so a callback that runs long delays only other
-	  callbacks.
+	  system work queue, so a callback that runs long does not delay them.
+	  It does delay later callbacks, including the state change that
+	  reports a disarm, so it must not block.
 
 endif # MOTOR_ODRIVE

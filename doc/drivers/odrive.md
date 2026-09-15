@@ -163,6 +163,11 @@ heartbeat のタイムアウト判定も同じタイマーが行うので、有�
 ODrive が自分で disarm するのは故障したときであり、復帰には `Clear_Errors` が要る。
 ドライバは指令の送信を止め、自身の状態も無効に落とし、状態コールバックで知らせる。
 
+**heartbeat が `heartbeat-timeout-ms` を超えて途絶えたときも同じ扱いになる。**
+heartbeat が来ないということは closed loop にいる確認が取れないということであり、
+そのまま有効にしておくと、通信が戻った瞬間にドライバが黙って軸を再投入することになる。
+通信断からの復帰も上位が `motor_enable()` で明示的に行う。
+
 復帰させるかどうかは上位が決める。
 復帰は `motor_enable()` の 1 回で足りる（上の手順を最初からやり直すので、`odrive_clear_errors()` を先に呼ぶ必要はない）。
 
@@ -226,6 +231,9 @@ encoder estimates が `estimate-timeout-ms` を超えていれば `stale` を立
 
 `odrive_request_axis_state()` は、ドライバが軸を握っている間は `-EBUSY` を返す。
 キャリブレーションを走らせるには先に `motor_disable()` を呼ぶ。
+`motor_disable()` は `Set_Axis_State(IDLE)` をその場で送るので、
+ODrive は IDLE の直後に要求した状態を受け取ることになる。
+キャリブレーションは IDLE から始める手順なので、これで問題ない。
 
 `odrive_estop()` は `Estop` フレームを送り、軸を `ESTOP_REQUESTED` として disarm させる。
 これはエラーとして残るので、`motor_disable()` とは復帰の手間が違う。

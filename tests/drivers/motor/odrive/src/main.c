@@ -463,7 +463,12 @@ ZTEST(odrive, test_encoder_estimates_become_position_counts)
                "estimates are not marked valid");
 }
 
-ZTEST(odrive, test_feedback_callback_coalesces_a_burst_into_one_call)
+/*
+ * The ztest thread is cooperative and the callback work queue is preemptible,
+ * so the three injections below run without the queue in between. That is the
+ * same shape as a real burst, which arrives in the CAN receive interrupt.
+ */
+ZTEST(odrive, test_a_burst_of_estimates_yields_one_call_with_the_latest_snapshot)
 {
   zassert_ok(odrive_set_feedback_callback(axis0, record_state, &feedback_record));
   inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U);
@@ -502,6 +507,30 @@ ZTEST(odrive, test_losing_the_heartbeat_reports_the_axis_offline)
                 "a silent axis is still reported as online");
   zassert_true(state_record.count > 0U, "going offline was not reported");
   zassert_false(state_record.last.online, "the callback reported the axis as online");
+}
+
+ZTEST(odrive, test_losing_the_heartbeat_disables_the_axis_until_it_is_re_armed)
+{
+  zassert_ok(odrive_set_state_callback(axis0, record_state, &state_record));
+  zassert_ok(odrive_set_torque(axis0, 1.0F));
+  arm(axis0, AXIS0_NODE_ID);
+
+  state_record.count = 0;
+
+  k_sleep(K_MSEC(DT_PROP(DT_NODELABEL(odrive_test), heartbeat_timeout_ms) + DISPATCH_MS + 40));
+
+  zassert_true(state_record.count > 0U, "the timeout was not reported");
+  zassert_false(state_record.last.enabled,
+                "a silent axis is still enabled, so the driver would re-arm it by itself");
+
+  /* Heartbeats come back, but nothing asked for the axis to be armed again. */
+  clear_captures();
+  sleep_armed(AXIS0_NODE_ID, TICK_MS * 4);
+
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_INPUT_TORQUE), 0U,
+                "the driver re-armed the axis on its own once frames resumed");
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_AXIS_STATE), 0U,
+                "the driver asked for closed loop again without being told to");
 }
 
 ZTEST(odrive, test_temperature_reaches_the_class_only_with_a_thermistor)

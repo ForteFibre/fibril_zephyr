@@ -276,7 +276,8 @@ static void odrive_build_clear_errors(struct can_frame * frame, uint8_t node_id)
   odrive_frame_init(frame, node_id, ODRIVE_CMD_CLEAR_ERRORS, 1U);
 }
 
-static void odrive_build_setpoint(
+/* Returns false when the current mode has no setpoint frame to send. */
+static bool odrive_build_setpoint(
   struct can_frame * frame, uint8_t node_id, const struct odrive_axis_data * data)
 {
   switch (data->control_mode) {
@@ -296,11 +297,14 @@ static void odrive_build_setpoint(
       odrive_put_float(&frame->data[4], data->torque_ff);
       break;
     case ODRIVE_CONTROL_MODE_TORQUE:
-    default:
       odrive_frame_init(frame, node_id, ODRIVE_CMD_SET_INPUT_TORQUE, 4U);
       odrive_put_float(&frame->data[0], data->target_torque);
       break;
+    default:
+      return false;
   }
+
+  return true;
 }
 
 /*
@@ -355,7 +359,10 @@ static size_t odrive_build_tx(const struct device * axis_dev, struct can_frame *
     return 0;
   }
 
-  odrive_build_setpoint(frame, node_id, data);
+  if (!odrive_build_setpoint(frame, node_id, data)) {
+    return 0;
+  }
+
   data->setpoint_dirty = false;
 
   return 1;
@@ -378,6 +385,13 @@ static void odrive_check_timeout(const struct device * axis_dev, int64_t now)
 
   data->online = false;
   data->armed = false;
+  /*
+   * Without a heartbeat there is no confirmation that the axis is still in
+   * closed loop, so this is the same situation as a self-disarm: stop
+   * commanding and let the application re-arm. Staying enabled would make the
+   * driver silently re-arm the axis as soon as frames resumed.
+   */
+  data->enabled = false;
   data->pending |= ODRIVE_PENDING_STATE;
 }
 
