@@ -1,0 +1,38 @@
+config MOTOR_ROBSTRIDE
+	bool "RobStride actuator driver"
+	default y
+	depends on CAN
+	depends on DT_HAS_ROBSTRIDE_BUS_ENABLED
+	help
+	  Enable support for RobStride actuators on a classic CAN bus with
+	  29-bit identifiers. Targets are set through
+	  include/drivers/motor/robstride.h; the generic motor class carries
+	  enable, disable and the feedback snapshot.
+
+if MOTOR_ROBSTRIDE
+
+config MOTOR_ROBSTRIDE_MAX_MOTORS
+	int "Maximum motors per RobStride bus"
+	default 8
+	range 1 32
+	help
+	  Size of the registration table of one bus node. Each entry is a
+	  pointer.
+
+config MOTOR_ROBSTRIDE_TX_INTERVAL_MS
+	int "Command interval in milliseconds"
+	default 5
+	range 1 100
+	help
+	  How often each enabled motor is commanded. Feedback arrives as the
+	  reply to a command, so this also sets the feedback rate. Every motor
+	  needs its own frame, so the bus load grows with the motor count.
+
+config MOTOR_ROBSTRIDE_PARAM_TIMEOUT_MS
+	int "Parameter read timeout in milliseconds"
+	default 50
+	range 1 1000
+	help
+	  How long robstride_get_parameter() waits for the motor to answer.
+
+endif # MOTOR_ROBSTRIDE
