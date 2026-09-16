@@ -317,7 +317,12 @@ int robstride_set_parameter(const struct device * dev, uint16_t index, float val
  *                the motor from the call until it returns, so this is reported
  *                for the whole of that window and not only until the reply
  *                arrives.
-
+ *
+ * @note A reply carries only the parameter index, with nothing tying it to the
+ *       request it answers. After a read of an index times out, the next read
+ *       of that same index can therefore be completed by the earlier reply and
+ *       return the value it carried. Reading a parameter that changes is worth
+ *       repeating once after a timeout.
  * @retval negative_errno The request could not be queued.
  */
 int robstride_get_parameter(const struct device * dev, uint16_t index, float * value);
