@@ -161,6 +161,15 @@ struct robstride_motor_data
   bool enable_sent;
   /* A stop frame the immediate send could not queue, re-sent by the work. */
   bool stop_pending;
+  /*
+   * Queueing a frame and getting it onto the wire are separate events, so the
+   * stage the controller is still working on is kept here and the completion
+   * callback records a failure against it. A completion that arrives after the
+   * next burst was built lands on the newer stage, which costs one redundant
+   * re-send and nothing else, because every stage is idempotent.
+   */
+  enum robstride_tx_stage tx_stage_in_flight;
+  bool tx_failed;
 
   /* What the motor reported. */
   bool has_last_position;
@@ -344,10 +353,38 @@ static const struct device * robstride_find_motor(
 }
 
 /*
+ * Record a frame that the controller accepted but could not get onto the wire,
+ * so the transmit work builds its stage again.
+ */
+static void robstride_tx_done(const struct device * can_dev, int error, void * user_data)
+{
+  const struct device * motor_dev = user_data;
+  struct robstride_motor_data * data = motor_dev->data;
+  k_spinlock_key_t key;
+
+  ARG_UNUSED(can_dev);
+
+  if (error == 0) {
+    return;
+  }
+
+  key = k_spin_lock(&data->lock);
+  data->tx_failed = true;
+  k_spin_unlock(&data->lock, key);
+}
+
+/*
  * Send to the bus the motor last answered on. Until it has answered we do not
  * know which one that is, so the frame goes to every started bus.
+ *
+ * The result covers queueing only. can_send() with no completion callback
+ * waits for the frame to reach the wire with K_FOREVER, which would park the
+ * transmit work, and every caller below it, on a controller that cannot
+ * transmit. Delivery is reported through robstride_tx_done() instead.
  */
-static int robstride_motor_send(const struct device * motor_dev, const struct can_frame * frame)
+static int robstride_motor_send(
+  const struct device * motor_dev, const struct can_frame * frame,
+  enum robstride_tx_stage stage)
 {
   const struct robstride_motor_config * config = motor_dev->config;
   const struct robstride_bus_config * bus_config = config->bus->config;
@@ -360,6 +397,7 @@ static int robstride_motor_send(const struct device * motor_dev, const struct ca
 
   key = k_spin_lock(&data->lock);
   can_bus = data->can_bus;
+  data->tx_stage_in_flight = stage;
   k_spin_unlock(&data->lock, key);
 
   for (size_t i = 0; i < bus_config->can_count; ++i) {
@@ -373,7 +411,8 @@ static int robstride_motor_send(const struct device * motor_dev, const struct ca
 
     attempted = true;
 
-    const int sent = can_send(bus_config->can_devs[i], frame, K_NO_WAIT, NULL, NULL);
+    const int sent =
+      can_send(bus_config->can_devs[i], frame, K_NO_WAIT, robstride_tx_done, (void *)motor_dev);
 
     if (sent != 0) {
       /*
@@ -633,11 +672,19 @@ static void robstride_bus_tx_work_handler(struct k_work * work)
     bool queued = true;
 
     key = k_spin_lock(&data->lock);
+
+    /* A frame the controller took but could not transmit is reported here,
+     * one interval late, and undoes its stage before the next one is built. */
+    if (data->tx_failed) {
+      data->tx_failed = false;
+      robstride_retry_tx_stage(data, data->tx_stage_in_flight);
+    }
+
     count = robstride_build_tx(motor_dev, frames, now, &stage);
     k_spin_unlock(&data->lock, key);
 
     for (size_t f = 0; f < count; ++f) {
-      if (robstride_motor_send(motor_dev, &frames[f]) != 0) {
+      if (robstride_motor_send(motor_dev, &frames[f], stage) != 0) {
         queued = false;
       }
     }
@@ -979,7 +1026,7 @@ static int robstride_motor_disable(const struct device * dev)
   /* Stopping is the safety-critical direction, so it does not wait for the
    * next transmit interval. */
   robstride_frame_init(&frame, ROBSTRIDE_TYPE_STOP, bus_config->master_can_id, config->motor_id);
-  ret = robstride_motor_send(dev, &frame);
+  ret = robstride_motor_send(dev, &frame, ROBSTRIDE_TX_STAGE_STOP);
 
   if (ret != 0) {
     /* The work keeps re-sending, but the caller has to know the motor has not
@@ -1326,7 +1373,7 @@ static int robstride_send_simple(const struct device * dev, uint8_t type, uint8_
   robstride_frame_init(&frame, type, bus_config->master_can_id, config->motor_id);
   frame.data[0] = payload0;
 
-  return robstride_motor_send(dev, &frame);
+  return robstride_motor_send(dev, &frame, ROBSTRIDE_TX_STAGE_NONE);
 }
 
 int robstride_set_zero(const struct device * dev)
@@ -1379,7 +1426,7 @@ int robstride_set_parameter(const struct device * dev, uint16_t index, float val
     return ret;
   }
 
-  return robstride_motor_send(dev, &frame);
+  return robstride_motor_send(dev, &frame, ROBSTRIDE_TX_STAGE_NONE);
 }
 
 int robstride_get_parameter(const struct device * dev, uint16_t index, float * value)
@@ -1423,7 +1470,7 @@ int robstride_get_parameter(const struct device * dev, uint16_t index, float * v
   k_spin_unlock(&data->lock, key);
 
   robstride_build_get_param(&frame, bus_config->master_can_id, config->motor_id, index);
-  ret = robstride_motor_send(dev, &frame);
+  ret = robstride_motor_send(dev, &frame, ROBSTRIDE_TX_STAGE_NONE);
 
   if (ret == 0) {
     ret = k_sem_take(&data->param_sem, K_MSEC(CONFIG_MOTOR_ROBSTRIDE_PARAM_TIMEOUT_MS));

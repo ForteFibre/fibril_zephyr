@@ -28,9 +28,10 @@ extern "C" {
  * @ref robstride_get_feedback.
  *
  * @ref motor_disable sends the stop frame itself rather than waiting for the
- * next command interval, and returns the transmit error when it cannot: the
- * motor holds its last target until the stop reaches it. The driver keeps
- * re-sending that stop until it gets out.
+ * next command interval, and returns the error when the controller will not
+ * take it: the motor holds its last target until the stop reaches it. Getting
+ * the frame onto the wire is reported separately, so a stop that is accepted
+ * and then fails is re-sent by the driver rather than surfacing here.
  *
  * Selecting a target also selects the mode it belongs to. Switching mode makes
  * the driver stop the motor, write the new mode and enable it again, which
@@ -316,6 +317,7 @@ int robstride_set_parameter(const struct device * dev, uint16_t index, float val
  *                the motor from the call until it returns, so this is reported
  *                for the whole of that window and not only until the reply
  *                arrives.
+
  * @retval negative_errno The request could not be queued.
  */
 int robstride_get_parameter(const struct device * dev, uint16_t index, float * value);

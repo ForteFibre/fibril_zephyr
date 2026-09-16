@@ -54,6 +54,11 @@
 /* Long enough for the driver to work through every handshake stage. */
 #define HANDSHAKE_MS (CONFIG_MOTOR_ROBSTRIDE_TX_INTERVAL_MS * 8)
 
+/* Lower priority than the test thread, so answering the reader below does not
+ * hand the CPU over before the assertion that follows it runs. */
+#define READER_PRIORITY (CONFIG_ZTEST_THREAD_PRIORITY + 1)
+#define READER_STACK_SIZE 1024
+
 static const struct device * const test_can = DEVICE_DT_GET(DT_NODELABEL(test_can0));
 static const struct device * const motor0 = DEVICE_DT_GET(DT_NODELABEL(motor0));
 static const struct device * const motor1 = DEVICE_DT_GET(DT_NODELABEL(motor1));
@@ -70,6 +75,14 @@ static struct can_filter rx_filter;
 /* Makes can_send() refuse the way a controller with a full transmit queue
  * does, for the tests that check what the driver does with the refusal. */
 static atomic_t send_fails;
+
+/* Makes can_send() accept the frame and then report that it never reached the
+ * wire, the way a controller on a bus that nobody acknowledges does. */
+static atomic_t send_completes_with_error;
+
+/* Makes the controller take the frame and never report a completion at all,
+ * which is what a bus nobody acknowledges looks like until it goes bus-off. */
+static atomic_t send_swallows_completion;
 
 DEFINE_FFF_GLOBALS;
 
@@ -102,8 +115,8 @@ static int test_fake_can_send(
 
   captured_count++;
 
-  if (callback != NULL) {
-    callback(dev, 0, user_data);
+  if ((callback != NULL) && !atomic_get(&send_swallows_completion)) {
+    callback(dev, atomic_get(&send_completes_with_error) ? -EIO : 0, user_data);
   }
 
   return 0;
@@ -249,6 +262,8 @@ static void before_each(void * fixture)
   fake_can_add_rx_filter_fake.custom_fake = test_fake_can_add_rx_filter;
 
   atomic_set(&send_fails, 0);
+  atomic_set(&send_completes_with_error, 0);
+  atomic_set(&send_swallows_completion, 0);
   (void)motor_disable(motor0);
   (void)motor_disable(motor1);
   (void)motor_disable(motor2);
@@ -747,6 +762,64 @@ ZTEST(robstride_motor, test_disable_reports_a_stop_it_could_not_queue_and_sends_
     find_set_param(TEST_MOTOR0_ID, PARAM_IQ_REF), "a disabled motor must not be commanded");
 }
 
+static K_THREAD_STACK_DEFINE(sender_stack, READER_STACK_SIZE);
+static struct k_thread sender_thread;
+static int sender_result;
+
+static void sender_entry(void * a, void * b, void * c)
+{
+  ARG_UNUSED(a);
+  ARG_UNUSED(b);
+  ARG_UNUSED(c);
+
+  sender_result = robstride_set_zero(motor0);
+}
+
+/*
+ * Runs on its own thread so that a driver that waits for the completion fails
+ * the join instead of hanging the whole suite.
+ */
+ZTEST(robstride_motor, test_a_send_does_not_wait_for_the_frame_to_reach_the_wire)
+{
+  atomic_set(&send_swallows_completion, 1);
+  sender_result = -EINPROGRESS;
+
+  k_thread_create(
+    &sender_thread, sender_stack, READER_STACK_SIZE, sender_entry, NULL, NULL, NULL,
+    READER_PRIORITY, 0, K_NO_WAIT);
+
+  zassert_ok(
+    k_thread_join(&sender_thread, K_MSEC(200)),
+    "the send is still waiting for a completion the controller never reports");
+  zassert_ok(sender_result, "queueing succeeded, so the call must report success");
+}
+
+ZTEST(robstride_motor, test_a_stage_that_never_reached_the_wire_is_built_again)
+{
+  zassert_ok(robstride_set_current(motor0, 2.0F));
+
+  /* The controller takes every frame and then reports that none of them was
+   * transmitted, so the handshake must not walk forward on the queueing alone. */
+  atomic_set(&send_completes_with_error, 1);
+  zassert_ok(motor_enable(motor0));
+  k_msleep(HANDSHAKE_MS);
+  clear_captures();
+  k_msleep(HANDSHAKE_MS);
+
+  zassert_not_null(
+    find_frame(TEST_MOTOR0_ID, TYPE_STOP, 0), "the first stage must keep being retried");
+  zassert_is_null(
+    find_frame(TEST_MOTOR0_ID, TYPE_ENABLE, 0),
+    "no stage can be counted done while nothing reaches the wire");
+
+  atomic_set(&send_completes_with_error, 0);
+  clear_captures();
+  k_msleep(HANDSHAKE_MS * 2);
+
+  zassert_not_null(find_frame(TEST_MOTOR0_ID, TYPE_ENABLE, 0), "no enable once the bus recovered");
+  zassert_not_null(find_set_param(TEST_MOTOR0_ID, PARAM_IQ_REF), "no target once the bus recovered");
+}
+
 ZTEST(robstride_motor, test_a_handshake_stage_the_bus_refused_is_built_again)
 {
   zassert_ok(robstride_set_current(motor0, 2.0F));
@@ -817,11 +890,6 @@ ZTEST(robstride_motor, test_parameter_read_times_out_without_a_reply)
     robstride_get_parameter(motor0, PARAM_LIMIT_SPD, &value), -ETIMEDOUT,
     "a read nobody answers must time out");
 }
-
-/* Lower priority than the test thread, so answering the reader below does not
- * hand the CPU over before the assertion that follows it runs. */
-#define READER_PRIORITY (CONFIG_ZTEST_THREAD_PRIORITY + 1)
-#define READER_STACK_SIZE 1024
 
 static K_THREAD_STACK_DEFINE(reader_stack, READER_STACK_SIZE);
 static struct k_thread reader_thread;
