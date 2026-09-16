@@ -84,6 +84,34 @@ static atomic_t send_completes_with_error;
  * which is what a bus nobody acknowledges looks like until it goes bus-off. */
 static atomic_t send_swallows_completion;
 
+/* Holds completions back so a test can report them after later frames have
+ * already gone out, which is the only way to tell whether a failure is
+ * attributed to the stage it belonged to. */
+static atomic_t send_defers_completion;
+
+#define DEFERRED_MAX 16
+
+struct deferred_completion
+{
+  can_tx_callback_t callback;
+  const struct device * dev;
+  void * user_data;
+};
+
+static struct deferred_completion deferred[DEFERRED_MAX];
+static size_t deferred_count;
+
+static void release_deferred_completions(int error)
+{
+  const size_t count = MIN(deferred_count, (size_t)DEFERRED_MAX);
+
+  deferred_count = 0;
+
+  for (size_t i = 0; i < count; ++i) {
+    deferred[i].callback(deferred[i].dev, error, deferred[i].user_data);
+  }
+}
+
 DEFINE_FFF_GLOBALS;
 
 static int test_fake_can_add_rx_filter(
@@ -115,9 +143,25 @@ static int test_fake_can_send(
 
   captured_count++;
 
-  if ((callback != NULL) && !atomic_get(&send_swallows_completion)) {
-    callback(dev, atomic_get(&send_completes_with_error) ? -EIO : 0, user_data);
+  if ((callback == NULL) || atomic_get(&send_swallows_completion)) {
+    return 0;
   }
+
+  if (atomic_get(&send_defers_completion)) {
+    if (deferred_count < DEFERRED_MAX) {
+      deferred[deferred_count] = (struct deferred_completion){
+        .callback = callback,
+        .dev = dev,
+        .user_data = user_data,
+      };
+    }
+
+    deferred_count++;
+
+    return 0;
+  }
+
+  callback(dev, atomic_get(&send_completes_with_error) ? -EIO : 0, user_data);
 
   return 0;
 }
@@ -264,6 +308,8 @@ static void before_each(void * fixture)
   atomic_set(&send_fails, 0);
   atomic_set(&send_completes_with_error, 0);
   atomic_set(&send_swallows_completion, 0);
+  atomic_set(&send_defers_completion, 0);
+  deferred_count = 0;
   (void)motor_disable(motor0);
   (void)motor_disable(motor1);
   (void)motor_disable(motor2);
@@ -792,6 +838,32 @@ ZTEST(robstride_motor, test_a_send_does_not_wait_for_the_frame_to_reach_the_wire
     k_thread_join(&sender_thread, K_MSEC(200)),
     "the send is still waiting for a completion the controller never reports");
   zassert_ok(sender_result, "queueing succeeded, so the call must report success");
+}
+
+ZTEST(robstride_motor, test_a_late_failure_undoes_the_stage_it_belonged_to)
+{
+  zassert_ok(robstride_set_current(motor0, 1.0F));
+
+  /* Hold back the completions of the first stage only. */
+  atomic_set(&send_defers_completion, 1);
+  zassert_ok(motor_enable(motor0));
+  k_msleep(CONFIG_MOTOR_ROBSTRIDE_TX_INTERVAL_MS * 2);
+  atomic_set(&send_defers_completion, 0);
+
+  /* Let the later stages go out and complete normally, so the stage the
+   * driver is working on is no longer the one whose frames are outstanding. */
+  k_msleep(HANDSHAKE_MS);
+  clear_captures();
+
+  /* Only now does the controller admit the run mode never reached the wire. */
+  release_deferred_completions(-EIO);
+  k_msleep(HANDSHAKE_MS);
+
+  zassert_not_null(
+    find_set_param(TEST_MOTOR0_ID, PARAM_RUN_MODE),
+    "the failure has to undo the stage it belonged to, not the one in progress");
+  zassert_not_null(
+    find_frame(TEST_MOTOR0_ID, TYPE_STOP, 0), "the run mode is only accepted while stopped");
 }
 
 ZTEST(robstride_motor, test_a_stage_that_never_reached_the_wire_is_built_again)

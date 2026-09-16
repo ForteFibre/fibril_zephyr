@@ -135,6 +135,22 @@ enum robstride_tx_stage {
   ROBSTRIDE_TX_STAGE_COMMAND,
 };
 
+#define ROBSTRIDE_TX_STAGE_COUNT (ROBSTRIDE_TX_STAGE_COMMAND + 1)
+
+struct robstride_motor_data;
+
+/*
+ * Handed to can_send() as the completion context. One per motor and stage,
+ * filled once at init and never written again, because a completion may land
+ * several intervals after the frame was queued and has to name the stage it
+ * actually belonged to.
+ */
+struct robstride_tx_ctx
+{
+  struct robstride_motor_data * data;
+  enum robstride_tx_stage stage;
+};
+
 struct robstride_motor_data
 {
   struct k_spinlock lock;
@@ -162,14 +178,13 @@ struct robstride_motor_data
   /* A stop frame the immediate send could not queue, re-sent by the work. */
   bool stop_pending;
   /*
-   * Queueing a frame and getting it onto the wire are separate events, so the
-   * stage the controller is still working on is kept here and the completion
-   * callback records a failure against it. A completion that arrives after the
-   * next burst was built lands on the newer stage, which costs one redundant
-   * re-send and nothing else, because every stage is idempotent.
+   * Queueing a frame and getting it onto the wire are separate events, and
+   * frames from more than one stage can be outstanding at once, so a failed
+   * completion names its own stage here rather than whichever one was built
+   * most recently. Set from the completion callback, drained by the work.
    */
-  enum robstride_tx_stage tx_stage_in_flight;
-  bool tx_failed;
+  uint32_t tx_failed_stages;
+  struct robstride_tx_ctx tx_ctx[ROBSTRIDE_TX_STAGE_COUNT];
 
   /* What the motor reported. */
   bool has_last_position;
@@ -358,8 +373,8 @@ static const struct device * robstride_find_motor(
  */
 static void robstride_tx_done(const struct device * can_dev, int error, void * user_data)
 {
-  const struct device * motor_dev = user_data;
-  struct robstride_motor_data * data = motor_dev->data;
+  const struct robstride_tx_ctx * ctx = user_data;
+  struct robstride_motor_data * data = ctx->data;
   k_spinlock_key_t key;
 
   ARG_UNUSED(can_dev);
@@ -369,7 +384,7 @@ static void robstride_tx_done(const struct device * can_dev, int error, void * u
   }
 
   key = k_spin_lock(&data->lock);
-  data->tx_failed = true;
+  data->tx_failed_stages |= BIT(ctx->stage);
   k_spin_unlock(&data->lock, key);
 }
 
@@ -397,7 +412,6 @@ static int robstride_motor_send(
 
   key = k_spin_lock(&data->lock);
   can_bus = data->can_bus;
-  data->tx_stage_in_flight = stage;
   k_spin_unlock(&data->lock, key);
 
   for (size_t i = 0; i < bus_config->can_count; ++i) {
@@ -412,7 +426,7 @@ static int robstride_motor_send(
     attempted = true;
 
     const int sent =
-      can_send(bus_config->can_devs[i], frame, K_NO_WAIT, robstride_tx_done, (void *)motor_dev);
+      can_send(bus_config->can_devs[i], frame, K_NO_WAIT, robstride_tx_done, &data->tx_ctx[stage]);
 
     if (sent != 0) {
       /*
@@ -673,11 +687,18 @@ static void robstride_bus_tx_work_handler(struct k_work * work)
 
     key = k_spin_lock(&data->lock);
 
-    /* A frame the controller took but could not transmit is reported here,
-     * one interval late, and undoes its stage before the next one is built. */
-    if (data->tx_failed) {
-      data->tx_failed = false;
-      robstride_retry_tx_stage(data, data->tx_stage_in_flight);
+    /* Frames the controller took but could not transmit are reported here, an
+     * interval or more late, and each undoes its own stage before the next one
+     * is built. */
+    uint32_t failed = data->tx_failed_stages;
+
+    data->tx_failed_stages = 0U;
+
+    while (failed != 0U) {
+      const int bit = find_lsb_set(failed) - 1;
+
+      failed &= ~BIT(bit);
+      robstride_retry_tx_stage(data, (enum robstride_tx_stage)bit);
     }
 
     count = robstride_build_tx(motor_dev, frames, now, &stage);
@@ -1134,6 +1155,11 @@ static int robstride_motor_init(const struct device * dev)
   if (!device_is_ready(config->bus)) {
     LOG_ERR("Bus not ready for motor %u", (unsigned int)config->motor_id);
     return -ENODEV;
+  }
+
+  for (size_t i = 0; i < ARRAY_SIZE(data->tx_ctx); ++i) {
+    data->tx_ctx[i].data = data;
+    data->tx_ctx[i].stage = (enum robstride_tx_stage)i;
   }
 
   data->can_bus = ROBSTRIDE_CANBUS_UNKNOWN;
