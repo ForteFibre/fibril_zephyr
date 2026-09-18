@@ -38,6 +38,7 @@ config FIBRIL_NODE_ID
 	  time here. Replace this with the runtime read once lib/node_id/
 	  exists.
 
+rsource "robstride/Kconfig"
 rsource "solenoid/Kconfig"
 
 module = FIBRIL_CAN_NODE
