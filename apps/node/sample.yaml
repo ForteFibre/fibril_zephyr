@@ -35,3 +35,13 @@ tests:
     # entry into one -D, and CMake reads SNIPPET as a list.
     extra_args:
       - SNIPPET=rc26-mainair-usb;rc26-air
+
+  app.node.rc26_robstride:
+    tags:
+      - fibril_can
+      - can
+      - hub
+      - usb
+      - motor
+    extra_args:
+      - SNIPPET=rc26-mainair-usb;rc26-robstride
