@@ -101,9 +101,20 @@ struct tunable
   float motion_kd;
 };
 
-/* Raised by a service handler, consumed by the tick. */
+/*
+ * Raised on the poll thread — by a service handler, or by the runtime's
+ * parameter callback — and consumed by the tick.
+ *
+ * `enable` goes through here rather than being written straight into
+ * motor_state, so that the state the output decision reads is only ever
+ * touched by the tick. Reading it under the lock instead would not be
+ * enough: a disable landing between that read and the driver call would
+ * still be acted on one tick late, with the output turned on in between.
+ */
 struct requests
 {
+  bool enable;
+  bool enable_value;
   bool arm;
   bool clear_trip;
   bool clear_faults;
@@ -111,6 +122,9 @@ struct requests
   bool offset;
   bool offset_absolute;
   float offset_value;
+  /* Bits of the codegen's changed mask, accumulated until the tick reads the
+   * parameters they stand for. */
+  uint32_t params_changed;
 };
 
 struct motor_state
@@ -142,9 +156,9 @@ struct motor_state
 
 static struct motor_state states[ARRAY_SIZE(motors)];
 
-/* Guards what a service handler writes — the request block and `enabled` —
- * against the tick that consumes it. Held only around the handoff; every call
- * into the motor driver is made outside it.
+/* Guards the request block, which is the whole of what the poll thread
+ * writes. Everything else in motor_state belongs to the tick. Held only
+ * around the handoff; every call into the motor driver is made outside it.
  */
 static struct k_spinlock lock;
 
@@ -318,6 +332,18 @@ static void drain_requests(uint8_t inst, const struct robstride_feedback * fb, b
   req = s->req;
   s->req = (struct requests){0};
   k_spin_unlock(&lock, key);
+
+  if (req.params_changed != 0U) {
+    tunable_read(inst, &s->tune);
+
+    if ((req.params_changed & PARAM_MASK_GAINS) != 0U) {
+      apply_gains(inst);
+    }
+  }
+
+  if (req.enable) {
+    s->enabled = req.enable_value;
+  }
 
   if (req.clear_trip) {
     s->overtemp = false;
@@ -498,17 +524,21 @@ static void robstride_func_tick(void)
   }
 }
 
+/* Fires from fcan_poll, so it only records what changed; the tick is what
+ * re-reads the parameters and writes the gains, for the same reason the
+ * service handlers defer.
+ */
 void robstridemotor_on_params_changed(uint8_t inst, uint32_t changed_mask)
 {
+  k_spinlock_key_t key;
+
   if (inst >= (uint8_t)ARRAY_SIZE(motors)) {
     return;
   }
 
-  tunable_read(inst, &states[inst].tune);
-
-  if ((changed_mask & PARAM_MASK_GAINS) != 0U) {
-    apply_gains(inst);
-  }
+  key = k_spin_lock(&lock);
+  states[inst].req.params_changed |= changed_mask;
+  k_spin_unlock(&lock, key);
 }
 
 fcan_svc_status_t robstridemotor_enable(
@@ -525,7 +555,8 @@ fcan_svc_status_t robstridemotor_enable(
   }
 
   key = k_spin_lock(&lock);
-  states[inst].enabled = req->on;
+  states[inst].req.enable = true;
+  states[inst].req.enable_value = req->on;
   /* Enabling is also the way back from an overtemperature stop, and it counts
    * as traffic in its own right: a master that enables a joint and then says
    * nothing has still been heard from within the deadline. */
@@ -575,6 +606,22 @@ fcan_svc_status_t robstridemotor_reset_encoder(
   if (inst >= (uint8_t)ARRAY_SIZE(motors)) {
     resp->success = false;
     return FCAN_SVC_APP_ERROR;
+  }
+
+  /* Making the current position read as a given value needs a current
+   * position to subtract from. Refusing here rather than letting the tick
+   * drop the request is what keeps the reply honest; the snapshot never
+   * blocks, so it is safe to take on this thread. A motor that goes stale
+   * between here and the tick is still dropped there.
+   */
+  if (!req->offset) {
+    struct robstride_feedback fb;
+
+    if (robstride_get_feedback(motors[inst], &fb) != 0) {
+      LOG_WRN("motor %u: reset_encoder refused, no position yet", inst);
+      resp->success = false;
+      return FCAN_SVC_APP_ERROR;
+    }
   }
 
   key = k_spin_lock(&lock);
