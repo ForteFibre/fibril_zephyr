@@ -49,6 +49,12 @@ types:
       # Fallback gains for the operation-control frame, used when
       # motion_target carries NaN in kp or kd. Sending NaN is how a consumer
       # says "whatever this joint is tuned to" without knowing the number.
+      #
+      # These are motor-side, unlike every other quantity here: they reach
+      # the motor unscaled by gear_ratio, exactly as the ROS 2 original
+      # passes them. Dimensionally a joint-side gain would divide by the
+      # ratio squared, but matching the original is what lets a tuned value
+      # move between the two unchanged.
       motion/kp: { type: f32, default: 0.0, min: 0.0, max: 500.0 }
       motion/kd: { type: f32, default: 0.0, min: 0.0, max: 5.0 }
 
@@ -86,6 +92,10 @@ types:
       # keeps existing publishers working unchanged; a bus whose master lacks
       # that package still carries the topic, and the bridge skips the type
       # with a warning rather than failing to provision.
+      #
+      # position, velocity and torque_ff are joint-side and get scaled;
+      # kp and kd are motor-side and do not. See the motion/ params above for
+      # why the asymmetry is deliberate.
       motion_target:
         dir: m2s
         fields:

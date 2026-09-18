@@ -32,3 +32,10 @@ config FIBRIL_CAN_NODE_ROBSTRIDE_MAX
 	  8 matches MOTOR_ROBSTRIDE_MAX_MOTORS, the driver's own table size, so
 	  a board that fits under one does not trip over the other. Lowering it
 	  below the devicetree's length fails the BUILD_ASSERT in robstride.c.
+
+	  The two ceilings are deliberately separate rather than one deriving
+	  from the other: this one counts the actuators on the bus, while the
+	  driver's counts them per robstride,bus node, and a board may have more
+	  than one bus. Overshooting the driver's table makes registration fail
+	  at init with -ENOSPC, which this function reports as a failed
+	  device_is_ready() rather than as a motor that quietly never answers.

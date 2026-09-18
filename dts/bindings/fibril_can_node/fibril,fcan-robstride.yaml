@@ -47,14 +47,14 @@ properties:
       The instance namespace on the bus, which becomes the ROS name prefix.
       `{i}` expands to the instance index, so `joint{i}` gives joint0..jointN.
 
-      It is required unless CONFIG_FIBRIL_CAN_NODE_ROBSTRIDE_MAX is 1 — the
-      rule is keyed on that ceiling, not on how many actuators are wired, so
-      the default requires it even for a lone motor. The codegen rejects a
-      namespace that lacks it, so this is a build error, not a collision
-      discovered on the ROS graph.
+      The property itself is always required: a name that reaches the ROS
+      graph belongs to the robot, not to the binding.
 
-      Required rather than defaulted: a name that reaches the ROS graph
-      belongs to the robot, not to the binding.
+      The `{i}` inside it is what may be left out, and only when
+      CONFIG_FIBRIL_CAN_NODE_ROBSTRIDE_MAX is 1. The codegen keys that rule on
+      the ceiling rather than on how many actuators are wired, so the default
+      of 8 demands `{i}` even for a lone motor — and says so as a build error
+      rather than as a collision discovered on the ROS graph.
 
   motors:
     type: phandles
