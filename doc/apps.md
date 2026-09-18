@@ -36,7 +36,7 @@ west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
 | 層 | 決めるもの | 例 |
 | --- | --- | --- |
 | トランスポート | 基板がバスに出る経路 | `rc26-mainair-usb` |
-| デプロイ | ノード名、node_id、どの機能をどのピンに出すか | `rc26-air` |
+| デプロイ | ノード名、node_id、どの機能をどのピンに出すか | `rc26-air`、`rc26-robstride` |
 
 RC26 MainAir には必ず USB の CAN が載り、電磁弁やエンコーダは搭載の有無が変わる。
 経路を別の層に括り出しておくと、機能の増減がデプロイ snippet 1 つの中で閉じる。
@@ -58,6 +58,12 @@ snippets/rc26/air/
 ├── air.conf                           CONFIG_FIBRIL_NODE_SCHEMA と node_id
 ├── fibril_rc26_mainair_v01.overlay    機能ノードと配線の割り当て
 └── schema/air.yaml                    node と limits
+
+snippets/rc26/robstride/
+├── snippet.yml
+├── robstride.conf                     CONFIG_FIBRIL_NODE_SCHEMA と node_id
+├── fibril_rc26_mainair_v01.overlay    CAN1、robstride バス、アクチュエータ
+└── schema/robstride.yaml              node と limits
 ```
 
 `snippet.yml` の `boards:` キーは正規表現にする。
@@ -101,6 +107,20 @@ limits:
 
 ノード名の `{i}` は起動時の node_id で置換される。
 schema はロボット 1 台の役割を述べるもので、基板 1 枚を述べるものではない。
+
+## 実装済みの機能
+
+| ブロック型 | compatible | 駆動するもの |
+| --- | --- | --- |
+| `Solenoid` | `fibril,fcan-solenoid` | GPIO の電磁弁。Service で開閉し、状態を publish する |
+| `RobstrideMotor` | `fibril,fcan-robstride` | RobStride アクチュエータ。指令、feedback、診断、再ゼロ |
+
+`RobstrideMotor` は `robstride_actuator_bridge_ros2` が ROS グラフに出していたインタフェースをそのまま名乗る。
+モータを PC の SocketCAN から基板に移しても購読側は変わらない、というのがこの型の目的である。
+判断の理由と再現しない点は [ADR 0006](adr/0006-robstride-fcan-node-parity.md) にある。
+
+RobStride のバスは classic CAN なので、fibril_can が使うコントローラとは別のものを割り当てる（[doc/drivers/robstride.md](drivers/robstride.md)）。
+`fibril,fcan-robstride` は `motors` に `robstride,motor` のノードを並べるだけで、モータ自身の配線と上限は `robstride,bus` の側に残る。
 
 ## 機能を 1 つ足す
 
