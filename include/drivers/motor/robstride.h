@@ -303,9 +303,9 @@ int robstride_save_parameters(const struct device * dev);
  *
  * A motor that has tripped refuses to run until the latch is cleared, and
  * nothing the driver sends in the course of a handshake clears it. This is
- * the way back, and it is deliberately separate from @ref motor_disable: the
- * frame stops the output as a side effect, so it is not a way to acknowledge
- * a fault while the motor keeps driving.
+ * the way back. It is deliberately separate from @ref motor_disable, because
+ * the frame stops the output as a side effect, so it is not a way to
+ * acknowledge a fault while the motor keeps driving.
  *
  * Clearing does not repair the condition. A motor that is still too hot, or
  * still stalled, trips again on the next attempt to run.
