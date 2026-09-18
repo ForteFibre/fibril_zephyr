@@ -142,8 +142,9 @@ struct motor_state
 
 static struct motor_state states[ARRAY_SIZE(motors)];
 
-/* Guards the request fields above against the tick. Held only around the
- * handoff; every call into the motor driver is made outside it.
+/* Guards what a service handler writes — the request block and `enabled` —
+ * against the tick that consumes it. Held only around the handoff; every call
+ * into the motor driver is made outside it.
  */
 static struct k_spinlock lock;
 
@@ -208,12 +209,15 @@ static void set_output(uint8_t inst, bool on)
   ret = on ? motor_enable(motors[inst]) : motor_disable(motors[inst]);
 
   if (ret != 0) {
-    /* Leaving output_on unchanged is what makes the next tick try again,
-     * which matters most for the disable direction. */
     LOG_ERR("motor %u: %s failed (%d)", inst, on ? "enable" : "disable", ret);
-    return;
   }
 
+  /* Recorded as done even when the frame could not be queued. The driver
+   * drops its own enabled flag before it tries to send and re-sends the stop
+   * every interval, so retrying from here would add a second retry loop —
+   * and on a board whose motor supply is off, one that logs at the tick
+   * rate for as long as it stays off.
+   */
   s->output_on = on;
 }
 
