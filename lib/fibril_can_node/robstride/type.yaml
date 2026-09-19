@@ -1,0 +1,187 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# A RobStride actuator, as seen from the bus. Paired with robstride.c, which
+# implements the handlers this generates.
+#
+# The interface is the one robstride_actuator_bridge_ros2 puts on the ROS
+# graph, so a consumer written against that package keeps working when the
+# motor moves from a PC's SocketCAN onto a board on the fibril_can bus. That
+# is why the ROS types below come from packages this repository does not own:
+# matching them is the point.
+#
+# Not copied into a node schema. apps/node/CMakeLists.txt passes this file to
+# the codegen alongside the node schema, so a node schema only names
+# RobstrideMotor in its `instances:`.
+
+types:
+  RobstrideMotor:
+    # Everything here is what the machine is, not what the motor is: the
+    # actuator's own limits live in the devicetree, next to its CAN id and
+    # model, because they are fixed once it is bolted in. These are the
+    # values an operator retunes without reflashing.
+    #
+    # The declaration order is the bit order of the changed mask that
+    # robstridemotor_on_params_changed() receives. Appending is free;
+    # reordering silently moves every bit.
+    params:
+      # Load side to motor side. Commands are divided into the motor's own
+      # frame and feedback is multiplied back out, so everything on the bus
+      # speaks the joint's units and nothing downstream has to know the
+      # reduction.
+      gear_ratio: { type: f32, default: 1.0, min: 0.01, max: 1000.0 }
+      # Flips command and feedback together, so a motor mounted the other way
+      # round is corrected here rather than in every consumer.
+      invert: { type: bool, default: false }
+
+      # Software overtemperature trip. The motor has its own protection; this
+      # one exists because it can be set below it, per joint, for a gearbox
+      # or a belt that gives up before the winding does.
+      thermal/max_temp_c: { type: f32, default: 130.0, min: 0.0, max: 200.0 }
+
+      # Disable the output when no command has arrived for this long. The ROS
+      # 2 original has no equivalent: there, the link dying takes the process
+      # with it. Here the node outlives its master, so the deadline is
+      # explicit. 0 turns it off, which is only right for a motor whose last
+      # target is safe to hold indefinitely.
+      command_timeout_ms: { type: u32, default: 200, min: 0, max: 60000 }
+
+      # Fallback gains for the operation-control frame, used when
+      # motion_target carries NaN in kp or kd. Sending NaN is how a consumer
+      # says "whatever this joint is tuned to" without knowing the number.
+      #
+      # These are motor-side, unlike every other quantity here: they reach
+      # the motor unscaled by gear_ratio, exactly as the ROS 2 original
+      # passes them. Dimensionally a joint-side gain would divide by the
+      # ratio squared, but matching the original is what lets a tuned value
+      # move between the two unchanged.
+      motion/kp: { type: f32, default: 0.0, min: 0.0, max: 500.0 }
+      motion/kd: { type: f32, default: 0.0, min: 0.0, max: 5.0 }
+
+      # The motor's internal loops. Defaults are the factory values, the same
+      # ones the ROS 2 original writes, so a motor that has had its gains
+      # edited over USB comes back to a known state on the first boot of this
+      # node rather than behaving differently from its neighbour.
+      #
+      # One set, not one per run mode. The driver carries a single
+      # robstride_gains, and splitting them per mode here would mean
+      # rewriting gains on every mode switch — see doc/apps.md for what that
+      # costs.
+      gains/position_kp: { type: f32, default: 10.0, min: 0.0 }
+      gains/velocity_kp: { type: f32, default: 1.0, min: 0.0 }
+      gains/velocity_ki: { type: f32, default: 0.0, min: 0.0 }
+      gains/current_kp: { type: f32, default: 0.125, min: 0.0 }
+      gains/current_ki: { type: f32, default: 0.0158, min: 0.0 }
+
+    topics:
+      # The repository-wide actuator command. `type` selects the domain and
+      # picks the run mode with it, so a consumer switches a joint between
+      # position and torque without a second interface.
+      target:
+        dir: m2s
+        fields:
+          type: u8
+          value: f32
+        ros: { type: fibril_control_msgs/msg/Target }
+
+      # Position, velocity, gains and feed-forward torque in one frame — the
+      # motor's operation control mode, which `target` cannot express because
+      # it carries one number.
+      #
+      # The ROS type belongs to robstride_actuator_bridge_ros2. Naming it
+      # keeps existing publishers working unchanged; a bus whose master lacks
+      # that package still carries the topic, and the bridge skips the type
+      # with a warning rather than failing to provision.
+      #
+      # position, velocity and torque_ff are joint-side and get scaled;
+      # kp and kd are motor-side and do not. See the motion/ params above for
+      # why the asymmetry is deliberate.
+      motion_target:
+        dir: m2s
+        fields:
+          position: f32
+          velocity: f32
+          kp: f32
+          kd: f32
+          torque_ff: f32
+        ros: { type: fibril_robstride_adapter/msg/MotionTarget }
+
+      # 100 Hz, matching the ROS 2 original's default feedback rate. The
+      # driver's command interval decides how fresh this can be; asking for
+      # more than that republishes the same measurement.
+      #
+      # Feedback.msg also carries `current`, which is left out: the driver
+      # reports torque, not phase current, and the bridge fills a field the
+      # schema omits with zero. Publishing a fabricated zero under the name
+      # `current` would read as a measurement.
+      feedback:
+        dir: s2m
+        period_us: 10000
+        fields:
+          is_ready: bool
+          position: f32
+          velocity: f32
+          output: f32
+        ros: { type: fibril_control_msgs/msg/Feedback }
+
+      # What the diagnostics aggregator showed on the ROS 2 side, as a plain
+      # message. There is no stock ROS type for it: diagnostic_msgs carries
+      # its values as a string map, which a fixed-layout frame cannot fill,
+      # so the bridge publishes this under a generated type.
+      diagnostics:
+        dir: s2m
+        period_us: 500000
+        fields:
+          online: bool
+          stale: bool
+          enabled: bool
+          mode: u8
+          run_state: u8
+          error_code: u8
+          fault_bits: u32
+          warning_bits: u32
+          temperature: f32
+
+    services:
+      # Enabling also clears a latched software trip, which is what makes it
+      # the operator's way back from an overtemperature stop.
+      enable:
+        request: { on: bool }
+        response: { success: bool }
+        ros:
+          type: std_srvs/srv/SetBool
+          map: { on: data, success: success }
+
+      # Asks the motor to clear its own fault latch. SetBool rather than
+      # Trigger only because the ROS 2 original is; `on: false` is a no-op.
+      fault_clear:
+        request: { on: bool }
+        response: { success: bool }
+        ros:
+          type: std_srvs/srv/SetBool
+          map: { on: data, success: success }
+
+      # Moves where zero is in the reported position, without touching the
+      # motor's stored mechanical zero. `offset: true` sets the shift itself,
+      # `offset: false` picks the shift that makes the current position read
+      # as `value`.
+      #
+      # ResetEncoder.srv answers with nothing, and `success` has no field to
+      # land in on the ROS side — the caller gets the empty response the srv
+      # declares, which is the whole of the contract. It is here because the
+      # codegen emits an unwritten reply buffer for a truly empty response,
+      # which the -Werror build twister runs rejects.
+      reset_encoder:
+        request: { offset: bool, value: f32 }
+        response: { success: bool }
+        ros: { type: fibril_control_msgs/srv/ResetEncoder }
+
+      # Writes the motor's current parameters into its own non-volatile
+      # memory. Queues a frame; the motor does not acknowledge it, so the
+      # reply says the request went out, not that it landed.
+      save_parameters:
+        request: {}
+        response: { success: bool }
+        ros:
+          type: std_srvs/srv/Trigger
+          map: { success: success }

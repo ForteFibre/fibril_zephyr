@@ -1363,6 +1363,24 @@ int robstride_set_limits(const struct device * dev, const struct robstride_limit
   return 0;
 }
 
+int robstride_get_limits(const struct device * dev, struct robstride_limits * limits)
+{
+  struct robstride_motor_data * data;
+  k_spinlock_key_t key;
+
+  if (!robstride_is_motor(dev) || (limits == NULL)) {
+    return -EINVAL;
+  }
+
+  data = dev->data;
+
+  key = k_spin_lock(&data->lock);
+  *limits = data->limits;
+  k_spin_unlock(&data->lock, key);
+
+  return 0;
+}
+
 int robstride_set_gains(const struct device * dev, const struct robstride_gains * gains)
 {
   struct robstride_motor_data * data;
@@ -1430,6 +1448,17 @@ int robstride_set_zero(const struct device * dev)
 int robstride_save_parameters(const struct device * dev)
 {
   return robstride_send_simple(dev, ROBSTRIDE_TYPE_SAVE, 0x01U);
+}
+
+int robstride_clear_faults(const struct device * dev)
+{
+  /*
+   * The stop frame carries the clear in its first payload byte, so this also
+   * takes the output down. Nothing here touches the driver's own enabled
+   * flag: the motor leaving RUNNING is what restarts the handshake, and that
+   * is observed from the feedback rather than assumed at the call.
+   */
+  return robstride_send_simple(dev, ROBSTRIDE_TYPE_STOP, 0x01U);
 }
 
 int robstride_set_parameter(const struct device * dev, uint16_t index, float value)

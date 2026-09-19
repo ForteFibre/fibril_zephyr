@@ -246,6 +246,22 @@ int robstride_get_feedback(const struct device * dev, struct robstride_feedback 
 int robstride_set_limits(const struct device * dev, const struct robstride_limits * limits);
 
 /**
+ * @brief Read back the limits currently in force.
+ *
+ * These are what the devicetree asked for, or the model limit where it asked
+ * for nothing, narrowed by any later @ref robstride_set_limits. A control
+ * layer that wants to express a command as a fraction of full scale has no
+ * other way to learn the denominator: the model is not exposed, and the
+ * devicetree property is optional.
+ *
+ * @param dev RobStride motor device instance.
+ * @param limits Destination for the limits.
+ * @retval 0 Success.
+ * @retval -EINVAL @p dev is not a RobStride motor, or @p limits is NULL.
+ */
+int robstride_get_limits(const struct device * dev, struct robstride_limits * limits);
+
+/**
  * @brief Override the gains of the motor's internal loops.
  *
  * Once this has been called the gains are part of what the driver writes back
@@ -281,6 +297,25 @@ int robstride_set_zero(const struct device * dev);
  * @retval negative_errno The frame could not be queued.
  */
 int robstride_save_parameters(const struct device * dev);
+
+/**
+ * @brief Clear the motor's own fault latch.
+ *
+ * A motor that has tripped refuses to run until the latch is cleared, and
+ * nothing the driver sends in the course of a handshake clears it. This is
+ * the way back. It is deliberately separate from @ref motor_disable, because
+ * the frame stops the output as a side effect, so it is not a way to
+ * acknowledge a fault while the motor keeps driving.
+ *
+ * Clearing does not repair the condition. A motor that is still too hot, or
+ * still stalled, trips again on the next attempt to run.
+ *
+ * @param dev RobStride motor device instance.
+ * @retval 0 Success.
+ * @retval -EINVAL @p dev is not a RobStride motor.
+ * @retval negative_errno The frame could not be queued.
+ */
+int robstride_clear_faults(const struct device * dev);
 
 /**
  * @brief Write one motor parameter by index.

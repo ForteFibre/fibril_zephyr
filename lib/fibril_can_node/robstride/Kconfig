@@ -1,0 +1,41 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config FIBRIL_CAN_NODE_ROBSTRIDE
+	bool
+	default y
+	depends on DT_HAS_FIBRIL_FCAN_ROBSTRIDE_ENABLED
+	select MOTOR
+	select MOTOR_ROBSTRIDE
+	help
+	  Compiled whenever the devicetree describes the actuators, which is
+	  also what puts RobstrideMotor instances into the schema. Describing
+	  the wiring is the whole of adding this function to an image.
+
+	  The driver is selected rather than depended on, because the motor
+	  class is off unless something asks for it, and the `motors` phandles
+	  have nothing to resolve to without it. A node that names actuators no
+	  robstride,bus owns trips the unmet dependency here rather than
+	  failing later with an undefined device.
+
+config FIBRIL_CAN_NODE_ROBSTRIDE_MAX
+	int "RobstrideMotor instances to allocate for"
+	default 8
+	range 1 32
+	depends on FIBRIL_CAN_NODE_ROBSTRIDE
+	help
+	  The schema's max_count for RobstrideMotor: how many instances the
+	  generated code reserves state for. It is a ceiling, not a count. It
+	  never reaches the schema blob, so the bus and the ROS graph see only
+	  the actuators the devicetree actually names.
+
+	  8 matches MOTOR_ROBSTRIDE_MAX_MOTORS, the driver's own table size, so
+	  a board that fits under one does not trip over the other. Lowering it
+	  below the devicetree's length fails the BUILD_ASSERT in robstride.c.
+
+	  The two ceilings are deliberately separate rather than one deriving
+	  from the other: this one counts the actuators on the bus, while the
+	  driver's counts them per robstride,bus node, and a board may have more
+	  than one bus. Overshooting the driver's table makes registration fail
+	  at init with -ENOSPC, which this function reports as a failed
+	  device_is_ready() rather than as a motor that quietly never answers.
