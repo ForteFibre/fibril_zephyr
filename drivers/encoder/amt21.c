@@ -1006,13 +1006,13 @@ static void amt21_poll_thread(void * p1, void * p2, void * p3)
   const struct amt21_bus_config * config = bus_dev->config;
   struct amt21_bus_data * bus = bus_dev->data;
 
+  int64_t interval = (int64_t)k_us_to_ticks_ceil64(config->poll_interval_us);
+  int64_t next = k_uptime_ticks() + interval;
+
   ARG_UNUSED(p2);
   ARG_UNUSED(p3);
 
   while (true) {
-    int64_t start = k_uptime_ticks();
-    int64_t next = start + (int64_t)k_us_to_ticks_ceil64(config->poll_interval_us);
-
     /* The encoder list is filled in by the child devices as they initialise, so
      * a scan that starts early simply sees fewer encoders and picks up the rest
      * on the next pass.
@@ -1027,16 +1027,25 @@ static void amt21_poll_thread(void * p1, void * p2, void * p3)
 
     AMT21_BUS_STAT_INC(bus, scans);
 
-    if (k_uptime_ticks() >= next) {
-      /* Overran the interval. Skip rather than queue, so the bus never builds
-       * up a backlog of scans it can never catch up on.
+    int64_t now = k_uptime_ticks();
+
+    if (now >= next) {
+      /* Overran the interval. Drop the boundaries that went by rather than
+       * queueing them, so the bus never builds up a backlog of scans it can
+       * never catch up on. Restarting immediately instead would do the same to
+       * the backlog but would never let the thread sleep, which starves every
+       * lower priority thread for as long as the bus stays congested.
        */
-      AMT21_BUS_STAT_INC(bus, scans_skipped);
-      k_yield();
-      continue;
+      int64_t missed = ((now - next) / interval) + 1;
+
+#if AMT21_STATS_ENABLED
+      bus->stats.scans_skipped += (uint32_t)missed;
+#endif
+      next += missed * interval;
     }
 
     (void)k_sleep(K_TIMEOUT_ABS_TICKS(next));
+    next += interval;
   }
 }
 
