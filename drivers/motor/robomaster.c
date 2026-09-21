@@ -114,6 +114,20 @@ static void robomaster_transport_retry_start(const struct device * dev)
   }
 }
 
+/*
+ * Passed to can_send() only so that it does not wait. With no completion
+ * callback it blocks until the frame reaches the wire, which would park this
+ * work, and the whole system workqueue with it, on a bus nobody acknowledges.
+ * Nothing is done with the result because the next tick sends the same command
+ * again.
+ */
+static void robomaster_tx_done(const struct device * can_dev, int error, void * user_data)
+{
+  ARG_UNUSED(can_dev);
+  ARG_UNUSED(error);
+  ARG_UNUSED(user_data);
+}
+
 static void robomaster_transport_tx_work_handler(struct k_work * work)
 {
   struct robomaster_transport_data * transport =
@@ -158,8 +172,9 @@ static void robomaster_transport_tx_work_handler(struct k_work * work)
       }
 
       frame.id = (group == 0U) ? ROBOMASTER_TX_ID_GROUP0 : ROBOMASTER_TX_ID_GROUP1;
-      // Ignore return value since the transport will retry on the next timer tick if the bus is busy
-      (void)can_send(config->can_devs[can_bus], &frame, K_NO_WAIT, NULL, NULL);
+      /* The result covers queueing only, and a frame the controller would not
+       * take is replaced by the next tick's rather than re-sent from here. */
+      (void)can_send(config->can_devs[can_bus], &frame, K_NO_WAIT, robomaster_tx_done, NULL);
     }
   }
 }
