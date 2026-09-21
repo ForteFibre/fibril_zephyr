@@ -8,6 +8,10 @@
 
 #include <fibril_can/fcan.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @addtogroup fcan_transport
  *
@@ -64,5 +68,9 @@ int fcan_transport_attach(fcan_node_t * node);
 void fcan_transport_run(fcan_node_t * node, void (*tick)(void));
 
 /** @} */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* FCAN_TRANSPORT_TRANSPORT_H_ */
