@@ -176,6 +176,7 @@ struct amt21_encoder_config
   uint8_t node_addr;
   uint8_t resolution;
   bool multiturn;
+  bool poll_turns;
 };
 
 struct amt21_encoder_data
@@ -819,7 +820,12 @@ static void amt21_commit_success(
   if (have_turns) {
     data->feedback.valid_mask |= ENCODER_FEEDBACK_TURNS;
     data->feedback.turns = turns;
-  } else if (!config->multiturn) {
+  } else {
+    /* Zeroed rather than left alone: without poll-turns this sample carries no
+     * turns counter, and keeping the one from the last rebuild would sit frozen
+     * next to a moving position for anything that prints the field without
+     * checking valid_mask.
+     */
     data->feedback.turns = 0;
   }
   data->feedback.single_turn = single_turn;
@@ -946,11 +952,16 @@ static void amt21_poll_encoder(const struct device * bus_dev, const struct devic
     return;
   }
 
+  /* Only a rebuild has to fold the turns counter into an absolute count, so
+   * without poll-turns the second transaction is confined to that case.
+   */
+  const bool want_turns = plan.rebuilding || (config->multiturn && config->poll_turns);
+
   k_mutex_lock(&bus->lock, K_FOREVER);
 
   int ret = amt21_read_single_turn(bus_dev, enc_dev, plan.attempts, &single_turn);
 
-  if ((ret == 0) && config->multiturn) {
+  if ((ret == 0) && want_turns) {
     ret = amt21_transact_retry(
       bus_dev, enc_dev, (uint8_t)(config->node_addr | AMT21_CMD_TURNS), plan.attempts, &msg);
     if (ret == 0) {
@@ -1465,12 +1476,16 @@ DT_INST_FOREACH_STATUS_OKAY(AMT21_BUS_DEFINE)
     (DT_INST_REG_ADDR(inst) & 0x3U) == 0U,                                                \
     "AMT21 node address must be a multiple of four, the low two bits encode the command"); \
   BUILD_ASSERT(DT_INST_REG_ADDR(inst) <= 0xFCU, "AMT21 node address must fit in one byte"); \
+  BUILD_ASSERT(                                                                            \
+    !DT_INST_PROP(inst, poll_turns) || DT_INST_PROP(inst, multiturn),                      \
+    "poll-turns needs multiturn");                                                         \
   static struct amt21_encoder_data amt21_encoder_data_##inst;                              \
   static const struct amt21_encoder_config amt21_encoder_config_##inst = {                 \
     .bus = DEVICE_DT_GET(DT_INST_PARENT(inst)),                                            \
     .node_addr = DT_INST_REG_ADDR(inst),                                                   \
     .resolution = DT_INST_PROP(inst, resolution),                                          \
     .multiturn = DT_INST_PROP(inst, multiturn),                                            \
+    .poll_turns = DT_INST_PROP(inst, poll_turns),                                          \
   };                                                                                       \
   DEVICE_DT_INST_DEFINE(                                                                   \
     inst, amt21_encoder_init, NULL, &amt21_encoder_data_##inst,                            \

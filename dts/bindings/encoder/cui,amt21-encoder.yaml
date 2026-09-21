@@ -29,9 +29,29 @@ properties:
   multiturn:
     type: boolean
     description: |
-      Set this for multi-turn devices, which support reading a signed 14-bit
-      turns counter in addition to the single-turn position. The turns counter
-      is reset to zero by a power cycle and is not retained.
+      Set this for multi-turn devices, which answer a second command with a
+      signed 14-bit turns counter. The turns counter is reset to zero by a power
+      cycle and is not retained.
+
+      The driver reads it only when it rebuilds its accumulator, which is the
+      only time it is needed; see poll-turns to read it on every scan.
 
       Only single-turn devices can store a zero point, so encoder_set_zero()
       returns -ENOTSUP when this property is present.
+
+  poll-turns:
+    type: boolean
+    description: |
+      Read the turns counter on every scan rather than only when the
+      accumulator is rebuilt. Requires multiturn.
+
+      The accumulated position comes from the single-turn reading alone, so the
+      turns counter is not needed between rebuilds and reading it doubles what
+      this encoder costs the bus. Without this property
+      ENCODER_FEEDBACK_TURNS is set only on the sample that rebuilds the
+      accumulator, and encoder_feedback.turns reads zero on every other sample.
+      That sample lasts one scan, so waiting for the bit to appear is not
+      something a caller can usefully do.
+
+      Set it when the value the device itself reports is worth the bus time,
+      such as during bring-up with the shell.

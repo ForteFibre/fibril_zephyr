@@ -32,6 +32,7 @@
 #define ENC14 DEVICE_DT_GET(DT_NODELABEL(enc14))
 #define ENC12 DEVICE_DT_GET(DT_NODELABEL(enc12))
 #define ENC_MT DEVICE_DT_GET(DT_NODELABEL(enc_mt))
+#define ENC_MT_QUIET DEVICE_DT_GET(DT_NODELABEL(enc_mt_quiet))
 
 /* Second bus, on a board that echoes the transmitted command byte. */
 #define TEST_UART_ECHO DEVICE_DT_GET(DT_NODELABEL(test_uart_echo))
@@ -41,6 +42,7 @@
 #define ADDR14 0x54U
 #define ADDR12 0x58U
 #define ADDR_MT 0x5CU
+#define ADDR_MT_QUIET 0x64U
 #define ADDR_ECHO 0x60U
 
 #define CMD_POSITION 0x00U
@@ -92,7 +94,7 @@ struct emul_encoder {
 	uint8_t last_extended;
 };
 
-static struct emul_encoder emul[4];
+static struct emul_encoder emul[5];
 
 /** Command bytes seen on a bus, with the cycle count at which they arrived. */
 struct tx_record {
@@ -626,6 +628,47 @@ ZTEST(encoder_amt21, test_multiturn_rebuild_folds_in_a_negative_turns_counter)
 	zassert_equal(fb.turns, -1, "turns %d", fb.turns);
 	zassert_equal(fb.single_turn, 500U, "single turn %u", fb.single_turn);
 	zassert_equal(fb.position, -(1LL << 14) + 500, "position %" PRId64, fb.position);
+}
+
+ZTEST(encoder_amt21, test_a_rebuild_folds_in_turns_without_poll_turns)
+{
+	struct encoder_feedback fb;
+
+	emul[4].position14 = 4000U;
+	emul[4].turns14 = 2U;
+
+	zassert_ok(encoder_reset(ENC_MT_QUIET));
+	zassert_ok(wait_fresh(ENC_MT_QUIET, &fb), "did not rebuild after the reset");
+
+	/* The accumulated position is the only lasting trace of the turns counter:
+	 * the sample that carries TURNS is the one scan that rebuilt, which no
+	 * caller polling at a sane rate will ever observe.
+	 */
+	zassert_equal(fb.position, (2LL << 14) + 4000, "position %" PRId64, fb.position);
+
+	/* Reported as zero even though the rebuild just used 2, so that nothing
+	 * reads a frozen counter next to a moving position.
+	 */
+	zassert_true((fb.valid_mask & ENCODER_FEEDBACK_TURNS) == 0,
+		     "TURNS was reported valid on a sample that did not read it");
+	zassert_equal(fb.turns, 0, "a stale turns counter survived, %d", fb.turns);
+}
+
+ZTEST(encoder_amt21, test_turns_is_not_polled_between_rebuilds)
+{
+	struct encoder_feedback fb;
+
+	emul[4].position14 = 1111U;
+	emul[4].turns14 = 3U;
+	zassert_ok(wait_fresh(ENC_MT_QUIET, &fb));
+
+	emul[4].turns_commands = 0U;
+	emul[4].position_commands = 0U;
+	wait_scans(4);
+
+	zassert_equal(emul[4].turns_commands, 0U, "turns was read %u times",
+		      emul[4].turns_commands);
+	zassert_true(emul[4].position_commands > 0U, "the encoder stopped being polled");
 }
 
 ZTEST(encoder_amt21, test_going_offline_rebuilds_the_accumulator)
@@ -1348,6 +1391,8 @@ static void *suite_setup(void)
 	emul[3].uart = TEST_UART_ECHO;
 	emul[3].addr = ADDR_ECHO;
 	emul[3].echoes = true;
+	emul[4].uart = TEST_UART;
+	emul[4].addr = ADDR_MT_QUIET;
 
 	reset_emul();
 
@@ -1358,6 +1403,7 @@ static void *suite_setup(void)
 	zassert_true(device_is_ready(ENC14));
 	zassert_true(device_is_ready(ENC12));
 	zassert_true(device_is_ready(ENC_MT));
+	zassert_true(device_is_ready(ENC_MT_QUIET));
 	zassert_true(device_is_ready(TEST_BUS_ECHO));
 	zassert_true(device_is_ready(ENC_ECHO));
 
