@@ -12,6 +12,7 @@
 #include <zephyr/fff.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/ztest.h>
 
@@ -51,6 +52,10 @@ struct captured_tx {
 
 static struct captured_filter captured_filters[TEST_CAN_COUNT];
 static struct captured_tx captured_tx[TEST_CAN_COUNT];
+
+/* Makes the controller take the frame and never report a completion, which is
+ * what a bus nobody acknowledges looks like until it goes bus-off. */
+static atomic_t send_swallows_completion;
 
 DEFINE_FFF_GLOBALS;
 
@@ -101,7 +106,7 @@ static int test_fake_can_send(const struct device *dev, const struct can_frame *
 		captured_tx[idx].group1_count++;
 	}
 
-	if (callback != NULL) {
+	if ((callback != NULL) && (atomic_get(&send_swallows_completion) == 0)) {
 		callback(dev, 0, user_data);
 	}
 
@@ -131,6 +136,7 @@ static void reset_runtime_state(void)
 		memset(&captured_tx[i], 0, sizeof(captured_tx[i]));
 	}
 
+	atomic_set(&send_swallows_completion, 0);
 	fake_can_send_fake.custom_fake = test_fake_can_send;
 	fake_can_start_fake.custom_fake = test_fake_can_start;
 }
@@ -376,4 +382,25 @@ ZTEST(robomaster_motor, test_feedback_autodetects_can_bus_and_flushes_cached_out
 	wait_for_tx_flush();
 	zassert_true(captured_tx[1].group0_count > 0, "detected motor should transmit on can1");
 	expect_be16_slot(&captured_tx[1].group0_frame, 2, -222);
+}
+
+/*
+ * Frames only leave from the transmit work, so a send that waits for the wire
+ * shows up as the work never coming back for the next tick, taking the rest of
+ * the system workqueue with it. ztest runs a suite in test-name order, so this
+ * name is what keeps a regression here from failing every other test too.
+ */
+ZTEST(robomaster_motor, test_transmit_work_keeps_running_when_a_completion_never_arrives)
+{
+	inject_feedback(test_can_devs[0], 0x201, 10, 0, 0, 20);
+	zassert_ok(motor_enable(motor0));
+	wait_for_tx_flush();
+
+	reset_runtime_state();
+	atomic_set(&send_swallows_completion, 1);
+	k_msleep(10);
+
+	zassert_true(captured_tx[0].group0_count > 1,
+		     "the transmit work is still waiting for a completion the controller never "
+		     "reports");
 }
