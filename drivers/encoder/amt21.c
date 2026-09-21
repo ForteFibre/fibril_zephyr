@@ -117,6 +117,10 @@ struct amt21_bus_config
   uint32_t response_timeout_us;
   uint32_t inter_command_delay_us;
   uint32_t rx_quiet_period_us;
+  /* Rounded up from offline-poll-interval-us, because the blackout it feeds is
+   * kept in uptime milliseconds.
+   */
+  uint32_t offline_poll_interval_ms;
   uint8_t max_retries;
   uint8_t offline_threshold;
 };
@@ -172,6 +176,7 @@ struct amt21_encoder_config
   uint8_t node_addr;
   uint8_t resolution;
   bool multiturn;
+  bool poll_turns;
 };
 
 struct amt21_encoder_data
@@ -180,6 +185,9 @@ struct amt21_encoder_data
   struct encoder_feedback feedback;
   bool has_reading;
   uint32_t consecutive_errors;
+  /* Instant before which the poll thread leaves this encoder alone, either
+   * because it was reset or because it is not answering.
+   */
   int64_t blackout_until_ms;
 
   /* Only the single-turn reading feeds this. The turns counter is a separate
@@ -732,11 +740,11 @@ static int amt21_transact(
   return 0;
 }
 
-/** @brief Run a transaction, retrying up to the configured limit. */
+/** @brief Run a transaction, retrying until @p attempts are used up. */
 static int amt21_transact_retry(
-  const struct device * bus_dev, const struct device * enc_dev, uint8_t command, uint16_t * msg)
+  const struct device * bus_dev, const struct device * enc_dev, uint8_t command, uint8_t attempts,
+  uint16_t * msg)
 {
-  const struct amt21_bus_config * config = bus_dev->config;
   const struct amt21_encoder_config * enc_config = enc_dev->config;
   struct amt21_encoder_data * enc = enc_dev->data;
   enum amt21_error_cause cause = AMT21_ERROR_BUS;
@@ -744,7 +752,7 @@ static int amt21_transact_retry(
   size_t raw_len = 0;
   int ret = -EIO;
 
-  for (uint8_t attempt = 0; attempt <= config->max_retries; ++attempt) {
+  for (uint8_t attempt = 0; attempt < attempts; ++attempt) {
     amt21_stats_record_attempt(enc, attempt > 0U);
 
     ret = amt21_transact(bus_dev, command, msg, raw, &raw_len, &cause);
@@ -809,10 +817,19 @@ static void amt21_commit_success(
     data->feedback.valid_mask |= ENCODER_FEEDBACK_VELOCITY;
   }
 
-  if (have_turns) {
+  if (config->poll_turns && have_turns) {
     data->feedback.valid_mask |= ENCODER_FEEDBACK_TURNS;
     data->feedback.turns = turns;
-  } else if (!config->multiturn) {
+  } else {
+    /* A rebuild fetches the counter without poll-turns too, but reporting it on
+     * that one sample would offer a bit that is gone again within a scan and
+     * that no caller polling the feedback can observe. TURNS therefore means
+     * poll-turns and nothing else.
+     *
+     * Zeroed rather than left alone, so that anything printing the field
+     * without checking valid_mask does not show a frozen counter next to a
+     * moving position.
+     */
     data->feedback.turns = 0;
   }
   data->feedback.single_turn = single_turn;
@@ -851,6 +868,15 @@ static void amt21_commit_failure(const struct device * bus_dev, const struct dev
     encoder_accum_invalidate(&data->accum);
   }
 
+  if (!data->feedback.online) {
+    /* Stop spending a scan on an encoder that is not answering. A full retry
+     * sequence against silence takes long enough that one absent encoder pushes
+     * the scan past poll-interval-us and slows down every other encoder on the
+     * bus. This also covers an encoder that has never answered.
+     */
+    data->blackout_until_ms = k_uptime_get() + (int64_t)config->offline_poll_interval_ms;
+  }
+
   k_spin_unlock(&data->lock, key);
 }
 
@@ -858,26 +884,53 @@ static void amt21_commit_failure(const struct device * bus_dev, const struct dev
 /* Poll thread                                                                */
 /* -------------------------------------------------------------------------- */
 
-/** @brief Whether the next successful reading has to rebuild the accumulator. */
-static bool amt21_rebuild_pending(const struct device * enc_dev)
+/** @brief What one scan of an encoder has to do, decided before touching the bus. */
+struct amt21_poll_plan
 {
+  /** The encoder is inside a blackout and is not to be touched at all. */
+  bool skip;
+  /** The next successful reading has to rebuild the accumulator. Only a rebuild
+   *  has to reconcile the turns counter with the single-turn reading, so the
+   *  extra transactions that costs are confined to this case.
+   */
+  bool rebuilding;
+  /** Transactions a single reading may cost. */
+  uint8_t attempts;
+};
+
+/**
+ * @brief Decide the plan for one encoder.
+ *
+ * Every piece of state this reads lives under the same spinlock, so it is taken
+ * in one pass rather than once per question.
+ */
+static void amt21_plan_poll(
+  const struct device * bus_dev, const struct device * enc_dev, struct amt21_poll_plan * plan)
+{
+  const struct amt21_bus_config * config = bus_dev->config;
+  const struct amt21_encoder_config * enc_config = enc_dev->config;
   struct amt21_encoder_data * data = enc_dev->data;
   k_spinlock_key_t key = k_spin_lock(&data->lock);
-  bool pending = !encoder_accum_is_valid(&data->accum);
+
+  plan->skip = data->blackout_until_ms > k_uptime_get();
+  plan->rebuilding = enc_config->multiturn && !encoder_accum_is_valid(&data->accum);
+  /* Retries ride out a corrupted response. An encoder that is not answering has
+   * nothing to ride out, so it is probed with a single transaction.
+   */
+  plan->attempts = data->feedback.online ? (uint8_t)(config->max_retries + 1U) : 1U;
 
   k_spin_unlock(&data->lock, key);
-
-  return pending;
 }
 
 /** @brief Read the single-turn position of an encoder. */
 static int amt21_read_single_turn(
-  const struct device * bus_dev, const struct device * enc_dev, uint32_t * single_turn)
+  const struct device * bus_dev, const struct device * enc_dev, uint8_t attempts,
+  uint32_t * single_turn)
 {
   const struct amt21_encoder_config * config = enc_dev->config;
   uint16_t msg = 0U;
   int ret = amt21_transact_retry(
-    bus_dev, enc_dev, (uint8_t)(config->node_addr | AMT21_CMD_POSITION), &msg);
+    bus_dev, enc_dev, (uint8_t)(config->node_addr | AMT21_CMD_POSITION), attempts, &msg);
 
   if (ret == 0) {
     *single_turn = amt21_position_from_msg(msg, config->resolution);
@@ -889,38 +942,39 @@ static int amt21_read_single_turn(
 static void amt21_poll_encoder(const struct device * bus_dev, const struct device * enc_dev)
 {
   const struct amt21_encoder_config * config = enc_dev->config;
-  struct amt21_encoder_data * data = enc_dev->data;
   struct amt21_bus_data * bus = bus_dev->data;
+  struct amt21_poll_plan plan;
   uint16_t msg = 0U;
   uint32_t single_turn = 0U;
   int32_t turns = 0;
   bool have_turns = false;
   bool straddled_boundary = false;
 
-  if (data->blackout_until_ms > k_uptime_get()) {
+  amt21_plan_poll(bus_dev, enc_dev, &plan);
+
+  if (plan.skip) {
     return;
   }
 
-  /* The turns counter is only needed to rebuild the accumulator, and only a
-   * rebuild has to reconcile it with the single-turn reading, so the extra
-   * transactions below are confined to that case.
+  /* Only a rebuild has to fold the turns counter into an absolute count, so
+   * without poll-turns the second transaction is confined to that case.
    */
-  const bool rebuilding = config->multiturn && amt21_rebuild_pending(enc_dev);
+  const bool want_turns = plan.rebuilding || (config->multiturn && config->poll_turns);
 
   k_mutex_lock(&bus->lock, K_FOREVER);
 
-  int ret = amt21_read_single_turn(bus_dev, enc_dev, &single_turn);
+  int ret = amt21_read_single_turn(bus_dev, enc_dev, plan.attempts, &single_turn);
 
-  if ((ret == 0) && config->multiturn) {
+  if ((ret == 0) && want_turns) {
     ret = amt21_transact_retry(
-      bus_dev, enc_dev, (uint8_t)(config->node_addr | AMT21_CMD_TURNS), &msg);
+      bus_dev, enc_dev, (uint8_t)(config->node_addr | AMT21_CMD_TURNS), plan.attempts, &msg);
     if (ret == 0) {
       turns = amt21_turns_from_msg(msg);
       have_turns = true;
     }
   }
 
-  if ((ret == 0) && rebuilding) {
+  if ((ret == 0) && plan.rebuilding) {
     /* Position and turns are separate transactions with a gap between them. A
      * revolution boundary crossed inside that gap pairs a single-turn reading
      * with a turns counter from the other side of it, and the resulting
@@ -930,7 +984,7 @@ static void amt21_poll_encoder(const struct device * bus_dev, const struct devic
      */
     uint32_t after = 0U;
 
-    ret = amt21_read_single_turn(bus_dev, enc_dev, &after);
+    ret = amt21_read_single_turn(bus_dev, enc_dev, plan.attempts, &after);
     if (ret == 0) {
       int64_t delta = encoder_accum_wrap_delta(config->resolution, after, single_turn);
       int64_t unwrapped = (int64_t)single_turn + delta;
@@ -967,13 +1021,13 @@ static void amt21_poll_thread(void * p1, void * p2, void * p3)
   const struct amt21_bus_config * config = bus_dev->config;
   struct amt21_bus_data * bus = bus_dev->data;
 
+  int64_t interval = (int64_t)k_us_to_ticks_ceil64(config->poll_interval_us);
+  int64_t next = k_uptime_ticks() + interval;
+
   ARG_UNUSED(p2);
   ARG_UNUSED(p3);
 
   while (true) {
-    int64_t start = k_uptime_ticks();
-    int64_t next = start + (int64_t)k_us_to_ticks_ceil64(config->poll_interval_us);
-
     /* The encoder list is filled in by the child devices as they initialise, so
      * a scan that starts early simply sees fewer encoders and picks up the rest
      * on the next pass.
@@ -988,16 +1042,25 @@ static void amt21_poll_thread(void * p1, void * p2, void * p3)
 
     AMT21_BUS_STAT_INC(bus, scans);
 
-    if (k_uptime_ticks() >= next) {
-      /* Overran the interval. Skip rather than queue, so the bus never builds
-       * up a backlog of scans it can never catch up on.
+    int64_t now = k_uptime_ticks();
+
+    if (now >= next) {
+      /* Overran the interval. Drop the boundaries that went by rather than
+       * queueing them, so the bus never builds up a backlog of scans it can
+       * never catch up on. Restarting immediately instead would do the same to
+       * the backlog but would never let the thread sleep, which starves every
+       * lower priority thread for as long as the bus stays congested.
        */
-      AMT21_BUS_STAT_INC(bus, scans_skipped);
-      k_yield();
-      continue;
+      int64_t missed = ((now - next) / interval) + 1;
+
+#if AMT21_STATS_ENABLED
+      bus->stats.scans_skipped += (uint32_t)missed;
+#endif
+      next += missed * interval;
     }
 
     (void)k_sleep(K_TIMEOUT_ABS_TICKS(next));
+    next += interval;
   }
 }
 
@@ -1364,6 +1427,9 @@ static int amt21_encoder_init(const struct device * dev)
   BUILD_ASSERT(                                                                             \
     DT_INST_PROP(inst, response_timeout_us) > 0, "response-timeout-us must be positive");   \
   BUILD_ASSERT(                                                                             \
+    DT_INST_PROP(inst, offline_poll_interval_us) > 0,                                       \
+    "offline-poll-interval-us must be positive");                                           \
+  BUILD_ASSERT(                                                                             \
     DT_INST_CHILD_NUM_STATUS_OKAY(inst) > 0, "an AMT21 bus needs at least one encoder");    \
   BUILD_ASSERT(                                                                             \
     DT_INST_CHILD_NUM_STATUS_OKAY(inst) <= CONFIG_ENCODER_AMT21_MAX_ENCODERS,               \
@@ -1379,6 +1445,8 @@ static int amt21_encoder_init(const struct device * dev)
     .response_timeout_us = DT_INST_PROP(inst, response_timeout_us),                          \
     .inter_command_delay_us = DT_INST_PROP(inst, inter_command_delay_us),                   \
     .rx_quiet_period_us = DT_INST_PROP(inst, rx_quiet_period_us),                           \
+    .offline_poll_interval_ms =                                                             \
+      DIV_ROUND_UP(DT_INST_PROP(inst, offline_poll_interval_us), USEC_PER_MSEC),            \
     .max_retries = DT_INST_PROP(inst, max_retries),                                         \
     .offline_threshold = DT_INST_PROP(inst, offline_threshold),                             \
   };                                                                                        \
@@ -1412,12 +1480,16 @@ DT_INST_FOREACH_STATUS_OKAY(AMT21_BUS_DEFINE)
     (DT_INST_REG_ADDR(inst) & 0x3U) == 0U,                                                \
     "AMT21 node address must be a multiple of four, the low two bits encode the command"); \
   BUILD_ASSERT(DT_INST_REG_ADDR(inst) <= 0xFCU, "AMT21 node address must fit in one byte"); \
+  BUILD_ASSERT(                                                                            \
+    !DT_INST_PROP(inst, poll_turns) || DT_INST_PROP(inst, multiturn),                      \
+    "poll-turns needs multiturn");                                                         \
   static struct amt21_encoder_data amt21_encoder_data_##inst;                              \
   static const struct amt21_encoder_config amt21_encoder_config_##inst = {                 \
     .bus = DEVICE_DT_GET(DT_INST_PARENT(inst)),                                            \
     .node_addr = DT_INST_REG_ADDR(inst),                                                   \
     .resolution = DT_INST_PROP(inst, resolution),                                          \
     .multiturn = DT_INST_PROP(inst, multiturn),                                            \
+    .poll_turns = DT_INST_PROP(inst, poll_turns),                                          \
   };                                                                                       \
   DEVICE_DT_INST_DEFINE(                                                                   \
     inst, amt21_encoder_init, NULL, &amt21_encoder_data_##inst,                            \

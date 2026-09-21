@@ -32,6 +32,7 @@
 #define ENC14 DEVICE_DT_GET(DT_NODELABEL(enc14))
 #define ENC12 DEVICE_DT_GET(DT_NODELABEL(enc12))
 #define ENC_MT DEVICE_DT_GET(DT_NODELABEL(enc_mt))
+#define ENC_MT_QUIET DEVICE_DT_GET(DT_NODELABEL(enc_mt_quiet))
 
 /* Second bus, on a board that echoes the transmitted command byte. */
 #define TEST_UART_ECHO DEVICE_DT_GET(DT_NODELABEL(test_uart_echo))
@@ -41,6 +42,7 @@
 #define ADDR14 0x54U
 #define ADDR12 0x58U
 #define ADDR_MT 0x5CU
+#define ADDR_MT_QUIET 0x64U
 #define ADDR_ECHO 0x60U
 
 #define CMD_POSITION 0x00U
@@ -53,6 +55,12 @@
 #define INTER_COMMAND_DELAY_US DT_PROP(DT_NODELABEL(amt21_bus), inter_command_delay_us)
 #define OFFLINE_THRESHOLD DT_PROP(DT_NODELABEL(amt21_bus), offline_threshold)
 #define MAX_RETRIES DT_PROP(DT_NODELABEL(amt21_bus), max_retries)
+/* Rounded up the same way the driver rounds it, so that a value which is not a
+ * whole number of milliseconds does not make the expected probe count disagree
+ * with the interval the driver actually waits.
+ */
+#define OFFLINE_POLL_INTERVAL_MS \
+	DIV_ROUND_UP(DT_PROP(DT_NODELABEL(amt21_bus), offline_poll_interval_us), USEC_PER_MSEC)
 
 /** How the emulated encoder answers the next command. */
 enum emul_mode {
@@ -90,7 +98,7 @@ struct emul_encoder {
 	uint8_t last_extended;
 };
 
-static struct emul_encoder emul[4];
+static struct emul_encoder emul[5];
 
 /** Command bytes seen on a bus, with the cycle count at which they arrived. */
 struct tx_record {
@@ -626,6 +634,61 @@ ZTEST(encoder_amt21, test_multiturn_rebuild_folds_in_a_negative_turns_counter)
 	zassert_equal(fb.position, -(1LL << 14) + 500, "position %" PRId64, fb.position);
 }
 
+ZTEST(encoder_amt21, test_a_rebuild_folds_in_turns_without_poll_turns)
+{
+	struct encoder_feedback fb;
+
+	int ret = -ENODATA;
+
+	emul[4].position14 = 4000U;
+	emul[4].turns14 = 2U;
+
+	/* The reset drops has_reading, so the first reading that comes back is the
+	 * one that rebuilt. Polling far faster than poll-interval-us lands on that
+	 * sample itself; wait_fresh() would sleep past it and only ever see a later
+	 * one, which is exactly the sample the contract is not about.
+	 */
+	zassert_ok(encoder_reset(ENC_MT_QUIET));
+
+	for (int i = 0; i < 10000; ++i) {
+		ret = encoder_get_feedback(ENC_MT_QUIET, &fb);
+		if (ret == 0) {
+			break;
+		}
+		k_sleep(K_USEC(100));
+	}
+	zassert_ok(ret, "did not rebuild after the reset, got %d", ret);
+
+	/* The accumulated position is the only trace the counter leaves without
+	 * poll-turns, so it is what proves the rebuild read and used it.
+	 */
+	zassert_equal(fb.position, (2LL << 14) + 4000, "position %" PRId64, fb.position);
+
+	/* Reported as zero on the rebuilding sample itself, even though that sample
+	 * just used 2: TURNS follows poll-turns and nothing else.
+	 */
+	zassert_true((fb.valid_mask & ENCODER_FEEDBACK_TURNS) == 0,
+		     "TURNS was reported valid without poll-turns");
+	zassert_equal(fb.turns, 0, "turns was reported without poll-turns, %d", fb.turns);
+}
+
+ZTEST(encoder_amt21, test_turns_is_not_polled_between_rebuilds)
+{
+	struct encoder_feedback fb;
+
+	emul[4].position14 = 1111U;
+	emul[4].turns14 = 3U;
+	zassert_ok(wait_fresh(ENC_MT_QUIET, &fb));
+
+	emul[4].turns_commands = 0U;
+	emul[4].position_commands = 0U;
+	wait_scans(4);
+
+	zassert_equal(emul[4].turns_commands, 0U, "turns was read %u times",
+		      emul[4].turns_commands);
+	zassert_true(emul[4].position_commands > 0U, "the encoder stopped being polled");
+}
+
 ZTEST(encoder_amt21, test_going_offline_rebuilds_the_accumulator)
 {
 	struct encoder_feedback before;
@@ -799,6 +862,41 @@ ZTEST(encoder_amt21, test_silence_takes_encoder_offline_then_recovers)
 	zassert_equal(fb.single_turn, 4321U);
 	zassert_true(fb.online);
 	zassert_false(fb.stale);
+}
+
+ZTEST(encoder_amt21, test_offline_encoder_is_probed_sparsely_and_without_retries)
+{
+	struct encoder_feedback fb;
+	const uint32_t window_ms = 10U * OFFLINE_POLL_INTERVAL_MS;
+	int ret = 0;
+
+	emul[0].position14 = 123U;
+	zassert_ok(wait_fresh(ENC14, &fb));
+
+	emul[0].mode = EMUL_MODE_SILENT;
+
+	for (int i = 0; i < 200; ++i) {
+		ret = encoder_get_feedback(ENC14, &fb);
+		if (ret == -EIO) {
+			break;
+		}
+		k_sleep(K_MSEC(2));
+	}
+	zassert_equal(ret, -EIO, "expected -EIO once offline, got %d", ret);
+
+	emul[0].position_commands = 0U;
+	k_sleep(K_MSEC(window_ms));
+
+	uint32_t probes = emul[0].position_commands;
+
+	/* One command per offline interval, with a margin for where the window
+	 * falls relative to the probes. Polling every scan, or spending the retry
+	 * budget on each probe, lands an order of magnitude above this bound.
+	 */
+	zassert_true(probes > 0U, "an offline encoder is never probed again");
+	zassert_true(probes <= (window_ms / OFFLINE_POLL_INTERVAL_MS) + 2U,
+		     "%u commands in %u ms, expected about %u", probes, window_ms,
+		     window_ms / OFFLINE_POLL_INTERVAL_MS);
 }
 
 ZTEST(encoder_amt21, test_truncated_response_recovers)
@@ -1311,6 +1409,8 @@ static void *suite_setup(void)
 	emul[3].uart = TEST_UART_ECHO;
 	emul[3].addr = ADDR_ECHO;
 	emul[3].echoes = true;
+	emul[4].uart = TEST_UART;
+	emul[4].addr = ADDR_MT_QUIET;
 
 	reset_emul();
 
@@ -1321,6 +1421,7 @@ static void *suite_setup(void)
 	zassert_true(device_is_ready(ENC14));
 	zassert_true(device_is_ready(ENC12));
 	zassert_true(device_is_ready(ENC_MT));
+	zassert_true(device_is_ready(ENC_MT_QUIET));
 	zassert_true(device_is_ready(TEST_BUS_ECHO));
 	zassert_true(device_is_ready(ENC_ECHO));
 

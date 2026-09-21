@@ -16,6 +16,10 @@
 			rx-quiet-period-us = <20>;
 			max-retries = <2>;
 			offline-threshold = <3>;
+			/* Far below the binding default, so a test that leaves an
+			 * encoder silent does not hold up the next one.
+			 */
+			offline-poll-interval-us = <20000>;
 
 			enc14: encoder@54 {
 				compatible = "cui,amt21-encoder";
@@ -32,6 +36,20 @@
 			enc_mt: encoder@5c {
 				compatible = "cui,amt21-encoder";
 				reg = <0x5c>;
+				resolution = <14>;
+				multiturn;
+				/* So that the decoding tests can change the turns
+				 * counter without turning the shaft.
+				 */
+				poll-turns;
+			};
+
+			/* The default, where the turns counter is read only to
+			 * rebuild the accumulator.
+			 */
+			enc_mt_quiet: encoder@64 {
+				compatible = "cui,amt21-encoder";
+				reg = <0x64>;
 				resolution = <14>;
 				multiturn;
 			};
@@ -62,6 +80,10 @@
 			rx-quiet-period-us = <20>;
 			max-retries = <2>;
 			offline-threshold = <3>;
+			/* Far below the binding default, so a test that leaves an
+			 * encoder silent does not hold up the next one.
+			 */
+			offline-poll-interval-us = <20000>;
 			tx-echo;
 
 			enc_echo: encoder@60 {

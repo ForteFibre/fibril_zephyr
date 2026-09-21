@@ -89,6 +89,17 @@
         max-retries = <2>;
         offline-threshold = <3>;
 
+        /* 100 ms is long enough that an absent encoder costs the bus nothing
+         * worth measuring, and short enough that reconnecting one does not feel
+         * unresponsive.
+         */
+        offline-poll-interval-us = <100000>;
+
+        /* The turns counter is read only to rebuild the accumulator, which is
+         * all the accumulated position needs. Add poll-turns to either node to
+         * watch the device's own counter during bring-up, at the cost of
+         * doubling what that encoder takes from the bus.
+         */
         encoder_left: encoder@54 {
             compatible = "cui,amt21-encoder";
             reg = <0x54>;
