@@ -39,6 +39,7 @@
 | [0004](0004-robstride-control-api-layering.md) | RobStride の制御 API を汎用 motor クラスと機種固有ヘッダに分ける | Proposed |
 | [0005](0005-motor-position-64bit.md) | motor_feedback.position を 64 bit の積算カウントにする | Proposed |
 | [0006](0006-robstride-fcan-node-parity.md) | RobStride を fibril_can のブロック型として載せ、ROS 2 実装のインタフェースに合わせる | Proposed |
+| [0007](0007-cpp-node-implementation.md) | fibril_can スレーブを C++17 で書き、codegen の C++ ラッパを使う | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -50,4 +51,5 @@
 0004-robstride-control-api-layering
 0005-motor-position-64bit
 0006-robstride-fcan-node-parity
+0007-cpp-node-implementation
 ```

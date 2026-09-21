@@ -73,6 +73,10 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 `apps/` と `lib/fibril_can_node/` と `snippets/` の関係は [アプリケーションと機能](apps.md) にある。
 どの機能を載せるかは snippet の overlay が置く `fibril,fcan-*` ノードが決め、アプリケーションはブロック型の名前を持たない。
 
+`apps/node/` と `lib/fibril_can_node/` だけが C++17 で、codegen にも `LANGUAGE CXX` を渡している。
+`drivers/`、`lib/fcan_transport/`、`app/`、`samples/`、`tests/` は C のままである。
+理由と、C++ 標準ライブラリに要求が付く点は [ADR 0007](adr/0007-cpp-node-implementation.md) にある。
+
 ## ドライバ
 
 | クラス | 実装 | ドキュメント |
