@@ -53,6 +53,8 @@
 #define INTER_COMMAND_DELAY_US DT_PROP(DT_NODELABEL(amt21_bus), inter_command_delay_us)
 #define OFFLINE_THRESHOLD DT_PROP(DT_NODELABEL(amt21_bus), offline_threshold)
 #define MAX_RETRIES DT_PROP(DT_NODELABEL(amt21_bus), max_retries)
+#define OFFLINE_POLL_INTERVAL_MS \
+	(DT_PROP(DT_NODELABEL(amt21_bus), offline_poll_interval_us) / 1000U)
 
 /** How the emulated encoder answers the next command. */
 enum emul_mode {
@@ -799,6 +801,41 @@ ZTEST(encoder_amt21, test_silence_takes_encoder_offline_then_recovers)
 	zassert_equal(fb.single_turn, 4321U);
 	zassert_true(fb.online);
 	zassert_false(fb.stale);
+}
+
+ZTEST(encoder_amt21, test_offline_encoder_is_probed_sparsely_and_without_retries)
+{
+	struct encoder_feedback fb;
+	const uint32_t window_ms = 10U * OFFLINE_POLL_INTERVAL_MS;
+	int ret = 0;
+
+	emul[0].position14 = 123U;
+	zassert_ok(wait_fresh(ENC14, &fb));
+
+	emul[0].mode = EMUL_MODE_SILENT;
+
+	for (int i = 0; i < 200; ++i) {
+		ret = encoder_get_feedback(ENC14, &fb);
+		if (ret == -EIO) {
+			break;
+		}
+		k_sleep(K_MSEC(2));
+	}
+	zassert_equal(ret, -EIO, "expected -EIO once offline, got %d", ret);
+
+	emul[0].position_commands = 0U;
+	k_sleep(K_MSEC(window_ms));
+
+	uint32_t probes = emul[0].position_commands;
+
+	/* One command per offline interval, with a margin for where the window
+	 * falls relative to the probes. Polling every scan, or spending the retry
+	 * budget on each probe, lands an order of magnitude above this bound.
+	 */
+	zassert_true(probes > 0U, "an offline encoder is never probed again");
+	zassert_true(probes <= (window_ms / OFFLINE_POLL_INTERVAL_MS) + 2U,
+		     "%u commands in %u ms, expected about %u", probes, window_ms,
+		     window_ms / OFFLINE_POLL_INTERVAL_MS);
 }
 
 ZTEST(encoder_amt21, test_truncated_response_recovers)

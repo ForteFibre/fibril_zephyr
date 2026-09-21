@@ -105,6 +105,22 @@ properties:
       reported as stale, so a single dropped response does not disturb a
       control loop.
 
+  offline-poll-interval-us:
+    type: int
+    default: 100000
+    description: |
+      Interval at which an encoder that is not answering is probed, instead of
+      once per poll-interval-us. The probe is a single transaction: the retries
+      exist to ride out a corrupted response, and there is nothing to ride out
+      while the device is absent.
+
+      An encoder that never answers costs a full retry sequence on every scan
+      otherwise, which is long enough to push the whole bus past
+      poll-interval-us and slow down the encoders that do answer.
+
+      This is also the upper bound on how long it takes to notice that an
+      encoder has come back. It is rounded up to a whole millisecond.
+
   tx-echo:
     type: boolean
     description: |

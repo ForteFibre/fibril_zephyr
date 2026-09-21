@@ -16,6 +16,10 @@
 			rx-quiet-period-us = <20>;
 			max-retries = <2>;
 			offline-threshold = <3>;
+			/* Far below the binding default, so a test that leaves an
+			 * encoder silent does not hold up the next one.
+			 */
+			offline-poll-interval-us = <20000>;
 
 			enc14: encoder@54 {
 				compatible = "cui,amt21-encoder";
@@ -62,6 +66,10 @@
 			rx-quiet-period-us = <20>;
 			max-retries = <2>;
 			offline-threshold = <3>;
+			/* Far below the binding default, so a test that leaves an
+			 * encoder silent does not hold up the next one.
+			 */
+			offline-poll-interval-us = <20000>;
 			tx-echo;
 
 			enc_echo: encoder@60 {

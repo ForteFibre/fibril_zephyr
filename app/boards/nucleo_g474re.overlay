@@ -89,6 +89,12 @@
         max-retries = <2>;
         offline-threshold = <3>;
 
+        /* 100 ms is long enough that an absent encoder costs the bus nothing
+         * worth measuring, and short enough that reconnecting one does not feel
+         * unresponsive.
+         */
+        offline-poll-interval-us = <100000>;
+
         encoder_left: encoder@54 {
             compatible = "cui,amt21-encoder";
             reg = <0x54>;
