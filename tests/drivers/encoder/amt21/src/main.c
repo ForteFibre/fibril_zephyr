@@ -55,8 +55,12 @@
 #define INTER_COMMAND_DELAY_US DT_PROP(DT_NODELABEL(amt21_bus), inter_command_delay_us)
 #define OFFLINE_THRESHOLD DT_PROP(DT_NODELABEL(amt21_bus), offline_threshold)
 #define MAX_RETRIES DT_PROP(DT_NODELABEL(amt21_bus), max_retries)
+/* Rounded up the same way the driver rounds it, so that a value which is not a
+ * whole number of milliseconds does not make the expected probe count disagree
+ * with the interval the driver actually waits.
+ */
 #define OFFLINE_POLL_INTERVAL_MS \
-	(DT_PROP(DT_NODELABEL(amt21_bus), offline_poll_interval_us) / 1000U)
+	DIV_ROUND_UP(DT_PROP(DT_NODELABEL(amt21_bus), offline_poll_interval_us), USEC_PER_MSEC)
 
 /** How the emulated encoder answers the next command. */
 enum emul_mode {
