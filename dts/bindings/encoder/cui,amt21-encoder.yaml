@@ -47,11 +47,13 @@ properties:
 
       The accumulated position comes from the single-turn reading alone, so the
       turns counter is not needed between rebuilds and reading it doubles what
-      this encoder costs the bus. Without this property
-      ENCODER_FEEDBACK_TURNS is set only on the sample that rebuilds the
-      accumulator, and encoder_feedback.turns reads zero on every other sample.
-      That sample lasts one scan, so waiting for the bit to appear is not
-      something a caller can usefully do.
+      this encoder costs the bus.
+
+      ENCODER_FEEDBACK_TURNS means exactly this property: without it the bit is
+      never set and encoder_feedback.turns always reads zero, including on the
+      scan that rebuilds the accumulator and does fetch the counter. That one
+      sample is gone again within a scan, so reporting it would offer a bit no
+      caller can observe.
 
       Set it when the value the device itself reports is worth the bus time,
       such as during bring-up with the shell.

@@ -817,14 +817,18 @@ static void amt21_commit_success(
     data->feedback.valid_mask |= ENCODER_FEEDBACK_VELOCITY;
   }
 
-  if (have_turns) {
+  if (config->poll_turns && have_turns) {
     data->feedback.valid_mask |= ENCODER_FEEDBACK_TURNS;
     data->feedback.turns = turns;
   } else {
-    /* Zeroed rather than left alone: without poll-turns this sample carries no
-     * turns counter, and keeping the one from the last rebuild would sit frozen
-     * next to a moving position for anything that prints the field without
-     * checking valid_mask.
+    /* A rebuild fetches the counter without poll-turns too, but reporting it on
+     * that one sample would offer a bit that is gone again within a scan and
+     * that no caller polling the feedback can observe. TURNS therefore means
+     * poll-turns and nothing else.
+     *
+     * Zeroed rather than left alone, so that anything printing the field
+     * without checking valid_mask does not show a frozen counter next to a
+     * moving position.
      */
     data->feedback.turns = 0;
   }

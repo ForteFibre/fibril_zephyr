@@ -634,24 +634,38 @@ ZTEST(encoder_amt21, test_a_rebuild_folds_in_turns_without_poll_turns)
 {
 	struct encoder_feedback fb;
 
+	int ret = -ENODATA;
+
 	emul[4].position14 = 4000U;
 	emul[4].turns14 = 2U;
 
+	/* The reset drops has_reading, so the first reading that comes back is the
+	 * one that rebuilt. Polling far faster than poll-interval-us lands on that
+	 * sample itself; wait_fresh() would sleep past it and only ever see a later
+	 * one, which is exactly the sample the contract is not about.
+	 */
 	zassert_ok(encoder_reset(ENC_MT_QUIET));
-	zassert_ok(wait_fresh(ENC_MT_QUIET, &fb), "did not rebuild after the reset");
 
-	/* The accumulated position is the only lasting trace of the turns counter:
-	 * the sample that carries TURNS is the one scan that rebuilt, which no
-	 * caller polling at a sane rate will ever observe.
+	for (int i = 0; i < 10000; ++i) {
+		ret = encoder_get_feedback(ENC_MT_QUIET, &fb);
+		if (ret == 0) {
+			break;
+		}
+		k_sleep(K_USEC(100));
+	}
+	zassert_ok(ret, "did not rebuild after the reset, got %d", ret);
+
+	/* The accumulated position is the only trace the counter leaves without
+	 * poll-turns, so it is what proves the rebuild read and used it.
 	 */
 	zassert_equal(fb.position, (2LL << 14) + 4000, "position %" PRId64, fb.position);
 
-	/* Reported as zero even though the rebuild just used 2, so that nothing
-	 * reads a frozen counter next to a moving position.
+	/* Reported as zero on the rebuilding sample itself, even though that sample
+	 * just used 2: TURNS follows poll-turns and nothing else.
 	 */
 	zassert_true((fb.valid_mask & ENCODER_FEEDBACK_TURNS) == 0,
-		     "TURNS was reported valid on a sample that did not read it");
-	zassert_equal(fb.turns, 0, "a stale turns counter survived, %d", fb.turns);
+		     "TURNS was reported valid without poll-turns");
+	zassert_equal(fb.turns, 0, "turns was reported without poll-turns, %d", fb.turns);
 }
 
 ZTEST(encoder_amt21, test_turns_is_not_polled_between_rebuilds)
