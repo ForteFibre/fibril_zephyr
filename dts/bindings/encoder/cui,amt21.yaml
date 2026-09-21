@@ -118,8 +118,11 @@ properties:
       otherwise, which is long enough to push the whole bus past
       poll-interval-us and slow down the encoders that do answer.
 
-      This is also the upper bound on how long it takes to notice that an
-      encoder has come back. It is rounded up to a whole millisecond.
+      This is how often a probe may be attempted, not how quickly a recovery is
+      noticed. An encoder that has come back waits for the interval to expire,
+      then for the scan that reaches it, and then for the probe itself to
+      succeed, so the delay is at least this long and has no upper bound. The
+      value is rounded up to a whole millisecond.
 
   tx-echo:
     type: boolean
