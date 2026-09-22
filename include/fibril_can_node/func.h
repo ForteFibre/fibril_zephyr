@@ -10,6 +10,10 @@
 
 #include <zephyr/sys/iterable_sections.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @brief One block type's implementation, as seen by the node application.
  * @ingroup fibril_can_node
@@ -66,5 +70,9 @@ struct fibril_fcan_func
     .name = #_ident,                                                           \
     __VA_ARGS__                                                                \
   }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* FIBRIL_CAN_NODE_FUNC_H_ */

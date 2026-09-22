@@ -15,7 +15,7 @@
 
 #define DT_DRV_COMPAT fibril_fcan_robstride
 
-#include <math.h>
+#include <cmath>
 
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
@@ -26,9 +26,18 @@
 
 #include <fibril_can_node/func.h>
 
-#include "schema_gen.h"
+#include "schema_gen.hpp"
 
 LOG_MODULE_REGISTER(fcan_robstride, CONFIG_FIBRIL_CAN_NODE_LOG_LEVEL);
+
+using enable_req = fcan_gen::robstridemotor::enable_req;
+using enable_resp = fcan_gen::robstridemotor::enable_resp;
+using fault_clear_req = fcan_gen::robstridemotor::fault_clear_req;
+using fault_clear_resp = fcan_gen::robstridemotor::fault_clear_resp;
+using reset_encoder_req = fcan_gen::robstridemotor::reset_encoder_req;
+using reset_encoder_resp = fcan_gen::robstridemotor::reset_encoder_resp;
+using save_parameters_req = fcan_gen::robstridemotor::save_parameters_req;
+using save_parameters_resp = fcan_gen::robstridemotor::save_parameters_resp;
 
 /* One node names every actuator this board exposes, and the list below reads
  * instance 0 only. A second enabled node would build and then be invisible
@@ -48,7 +57,7 @@ static const struct device * const motors[] = {
  * CMake cannot read a phandle list. An extra actuator would otherwise be
  * silently unreachable from the bus.
  */
-BUILD_ASSERT(ARRAY_SIZE(motors) <= FCAN_ROBSTRIDEMOTOR_MAX_COUNT,
+BUILD_ASSERT(ARRAY_SIZE(motors) <= fcan_gen::robstridemotor::max_count,
              "more motors wired than CONFIG_FIBRIL_CAN_NODE_ROBSTRIDE_MAX");
 
 /* fibril_control_msgs/msg/Target's constants. The message carries the output
@@ -62,8 +71,8 @@ enum target_type {
   TARGET_TRAJECTORY = 4,
 };
 
-/* Bit positions of the mask robstridemotor_on_params_changed() receives. The
- * codegen assigns them in the declaration order of `params:` in type.yaml, so
+/* Bit positions of the mask the params-changed handler receives. The codegen
+ * assigns them in the declaration order of `params:` in type.yaml, so
  * reordering there moves every bit here without breaking the build.
  */
 enum param_bit {
@@ -184,22 +193,25 @@ static float torque_to_load(const struct tunable * t, float motor)
 
 static void tunable_read(uint8_t inst, struct tunable * out)
 {
-  out->gear_ratio = robstridemotor_param_gear_ratio(inst);
-  out->sign = robstridemotor_param_invert(inst) ? -1.0F : 1.0F;
-  out->max_temp_c = robstridemotor_param_thermal__max_temp_c(inst);
-  out->command_timeout_ms = robstridemotor_param_command_timeout_ms(inst);
-  out->motion_kp = robstridemotor_param_motion__kp(inst);
-  out->motion_kd = robstridemotor_param_motion__kd(inst);
+  const fcan_gen::robstridemotor m(inst);
+
+  out->gear_ratio = m.param_gear_ratio();
+  out->sign = m.param_invert() ? -1.0F : 1.0F;
+  out->max_temp_c = m.param_thermal__max_temp_c();
+  out->command_timeout_ms = m.param_command_timeout_ms();
+  out->motion_kp = m.param_motion__kp();
+  out->motion_kd = m.param_motion__kd();
 }
 
 static void apply_gains(uint8_t inst)
 {
+  const fcan_gen::robstridemotor m(inst);
   const struct robstride_gains gains = {
-    .position_kp = robstridemotor_param_gains__position_kp(inst),
-    .velocity_kp = robstridemotor_param_gains__velocity_kp(inst),
-    .velocity_ki = robstridemotor_param_gains__velocity_ki(inst),
-    .current_kp = robstridemotor_param_gains__current_kp(inst),
-    .current_ki = robstridemotor_param_gains__current_ki(inst),
+    .position_kp = m.param_gains__position_kp(),
+    .velocity_kp = m.param_gains__velocity_kp(),
+    .velocity_ki = m.param_gains__velocity_ki(),
+    .current_kp = m.param_gains__current_kp(),
+    .current_ki = m.param_gains__current_ki(),
   };
 
   (void)robstride_set_gains(motors[inst], &gains);
@@ -253,28 +265,28 @@ static void refresh_output(uint8_t inst, int64_t now)
   set_output(inst, s->enabled && !s->overtemp && fresh);
 }
 
-static void apply_target(uint8_t inst, const robstridemotor_target_t * cmd, int64_t now)
+static void apply_target(uint8_t inst, const fcan_gen::robstridemotor::target & cmd, int64_t now)
 {
   struct motor_state * s = &states[inst];
   const struct tunable * t = &s->tune;
   const struct device * dev = motors[inst];
 
-  switch (cmd->type) {
+  switch (cmd.type) {
     case TARGET_POSITION:
-      (void)robstride_set_position_csp(dev, to_motor(t, cmd->value) - s->position_offset);
+      (void)robstride_set_position_csp(dev, to_motor(t, cmd.value) - s->position_offset);
       break;
     case TARGET_TRAJECTORY:
-      (void)robstride_set_position(dev, to_motor(t, cmd->value) - s->position_offset);
+      (void)robstride_set_position(dev, to_motor(t, cmd.value) - s->position_offset);
       break;
     case TARGET_VELOCITY:
-      (void)robstride_set_velocity(dev, to_motor(t, cmd->value));
+      (void)robstride_set_velocity(dev, to_motor(t, cmd.value));
       break;
     case TARGET_TORQUE: {
       /* Operation control with both gains at zero is a pure torque command,
        * which keeps the newton metre the master sent a newton metre all the
        * way to the motor. */
       const struct robstride_motion_target target = {
-        .torque = torque_to_motor(t, cmd->value),
+        .torque = torque_to_motor(t, cmd.value),
       };
 
       (void)robstride_set_motion_target(dev, &target);
@@ -290,11 +302,11 @@ static void apply_target(uint8_t inst, const robstridemotor_target_t * cmd, int6
         return;
       }
 
-      (void)robstride_set_current(dev, cmd->value * limits.current * t->sign);
+      (void)robstride_set_current(dev, cmd.value * limits.current * t->sign);
       break;
     }
     default:
-      LOG_WRN("motor %u: unknown target type %u", inst, cmd->type);
+      LOG_WRN("motor %u: unknown target type %u", inst, cmd.type);
       return;
   }
 
@@ -302,18 +314,18 @@ static void apply_target(uint8_t inst, const robstridemotor_target_t * cmd, int6
 }
 
 static void apply_motion_target(
-  uint8_t inst, const robstridemotor_motion_target_t * cmd, int64_t now)
+  uint8_t inst, const fcan_gen::robstridemotor::motion_target & cmd, int64_t now)
 {
   struct motor_state * s = &states[inst];
   const struct tunable * t = &s->tune;
   const struct robstride_motion_target target = {
-    .position = to_motor(t, cmd->position) - s->position_offset,
-    .velocity = to_motor(t, cmd->velocity),
+    .position = to_motor(t, cmd.position) - s->position_offset,
+    .velocity = to_motor(t, cmd.velocity),
     /* NaN is how a consumer that does not hold this joint's gains asks for
      * whatever it is tuned to. */
-    .kp = isnan(cmd->kp) ? t->motion_kp : cmd->kp,
-    .kd = isnan(cmd->kd) ? t->motion_kd : cmd->kd,
-    .torque = torque_to_motor(t, cmd->torque_ff),
+    .kp = std::isnan(cmd.kp) ? t->motion_kp : cmd.kp,
+    .kd = std::isnan(cmd.kd) ? t->motion_kd : cmd.kd,
+    .torque = torque_to_motor(t, cmd.torque_ff),
   };
 
   (void)robstride_set_motion_target(motors[inst], &target);
@@ -330,7 +342,7 @@ static void drain_requests(uint8_t inst, const struct robstride_feedback * fb, b
 
   key = k_spin_lock(&lock);
   req = s->req;
-  s->req = (struct requests){0};
+  s->req = requests{};
   k_spin_unlock(&lock, key);
 
   if (req.params_changed != 0U) {
@@ -409,9 +421,9 @@ static void publish_feedback(uint8_t inst, const struct robstride_feedback * fb,
 {
   const struct motor_state * s = &states[inst];
   const struct tunable * t = &s->tune;
-  robstridemotor_feedback_t * out = robstridemotor_feedback_begin(inst);
+  auto pub = fcan_gen::robstridemotor(inst).publish_feedback();
 
-  if (out == NULL) {
+  if (!pub) {
     return;
   }
 
@@ -419,46 +431,136 @@ static void publish_feedback(uint8_t inst, const struct robstride_feedback * fb,
    * measurement, so that a consumer watching position sees the link drop
    * instead of a value frozen at whatever it was. */
   if (!measured) {
-    out->is_ready = false;
-    out->position = 0.0F;
-    out->velocity = 0.0F;
-    out->output = 0.0F;
-    robstridemotor_feedback_commit(inst);
+    pub->is_ready = false;
+    pub->position = 0.0F;
+    pub->velocity = 0.0F;
+    pub->output = 0.0F;
     return;
   }
 
-  out->is_ready = s->output_on && !s->overtemp &&
+  pub->is_ready = s->output_on && !s->overtemp &&
                   (fb->run_state == ROBSTRIDE_RUN_STATE_RUNNING) && (fb->error_code == 0U) &&
                   (fb->fault_bits == 0U);
-  out->position = to_load(t, fb->position + s->position_offset);
-  out->velocity = to_load(t, fb->velocity);
-  out->output = torque_to_load(t, fb->torque);
-
-  robstridemotor_feedback_commit(inst);
+  pub->position = to_load(t, fb->position + s->position_offset);
+  pub->velocity = to_load(t, fb->velocity);
+  pub->output = torque_to_load(t, fb->torque);
 }
 
 static void publish_diagnostics(uint8_t inst, const struct robstride_feedback * fb)
 {
   const struct motor_state * s = &states[inst];
-  robstridemotor_diagnostics_t * out = robstridemotor_diagnostics_begin(inst);
+  auto pub = fcan_gen::robstridemotor(inst).publish_diagnostics();
 
-  if (out == NULL) {
+  if (!pub) {
     return;
   }
 
   /* Unlike the feedback above, every field here stays readable when the motor
    * has gone quiet: they are what says why. */
-  out->online = fb->online;
-  out->stale = fb->stale;
-  out->enabled = s->output_on;
-  out->mode = (uint8_t)fb->mode;
-  out->run_state = (uint8_t)fb->run_state;
-  out->error_code = fb->error_code;
-  out->fault_bits = fb->fault_bits;
-  out->warning_bits = fb->warning_bits;
-  out->temperature = fb->temperature;
+  pub->online = fb->online;
+  pub->stale = fb->stale;
+  pub->enabled = s->output_on;
+  pub->mode = (uint8_t)fb->mode;
+  pub->run_state = (uint8_t)fb->run_state;
+  pub->error_code = fb->error_code;
+  pub->fault_bits = fb->fault_bits;
+  pub->warning_bits = fb->warning_bits;
+  pub->temperature = fb->temperature;
+}
 
-  robstridemotor_diagnostics_commit(inst);
+/* Fires from fcan_poll, so it only records what changed; the tick is what
+ * re-reads the parameters and writes the gains, for the same reason the
+ * service handlers defer.
+ */
+static void params_changed(uint8_t inst, uint32_t changed_mask)
+{
+  k_spinlock_key_t key = k_spin_lock(&lock);
+
+  states[inst].req.params_changed |= changed_mask;
+  k_spin_unlock(&lock, key);
+}
+
+static fcan_gen::svc_status enable_motor(uint8_t inst, const enable_req & req, enable_resp & resp)
+{
+  k_spinlock_key_t key = k_spin_lock(&lock);
+
+  states[inst].req.enable = true;
+  states[inst].req.enable_value = req.on;
+  /* Enabling is also the way back from an overtemperature stop, and it counts
+   * as traffic in its own right: a master that enables a joint and then says
+   * nothing has still been heard from within the deadline. */
+  states[inst].req.clear_trip = req.on;
+  states[inst].req.arm = req.on;
+  k_spin_unlock(&lock, key);
+
+  resp.success = true;
+
+  LOG_INF("motor %u -> %s", inst, req.on ? "enabled" : "disabled");
+
+  return FCAN_SVC_OK;
+}
+
+static fcan_gen::svc_status clear_faults(
+  uint8_t inst, const fault_clear_req & req, fault_clear_resp & resp)
+{
+  if (req.on) {
+    k_spinlock_key_t key = k_spin_lock(&lock);
+
+    states[inst].req.clear_faults = true;
+    k_spin_unlock(&lock, key);
+  }
+
+  resp.success = true;
+
+  return FCAN_SVC_OK;
+}
+
+static fcan_gen::svc_status reset_encoder(
+  uint8_t inst, const reset_encoder_req & req, reset_encoder_resp & resp)
+{
+  k_spinlock_key_t key;
+
+  /* Making the current position read as a given value needs a current
+   * position to subtract from. Refusing here rather than letting the tick
+   * drop the request is what keeps the reply honest; the snapshot never
+   * blocks, so it is safe to take on this thread. A motor that goes stale
+   * between here and the tick is still dropped there.
+   */
+  if (!req.offset) {
+    struct robstride_feedback fb;
+
+    if (robstride_get_feedback(motors[inst], &fb) != 0) {
+      LOG_WRN("motor %u: reset_encoder refused, no position yet", inst);
+      resp.success = false;
+      return FCAN_SVC_APP_ERROR;
+    }
+  }
+
+  key = k_spin_lock(&lock);
+  states[inst].req.offset_absolute = req.offset;
+  states[inst].req.offset_value = req.value;
+  states[inst].req.offset = true;
+  k_spin_unlock(&lock, key);
+
+  /* Reaches the wire but has nowhere to land: ResetEncoder.srv answers with
+   * nothing. See the note in type.yaml for why the field exists at all. */
+  resp.success = true;
+
+  return FCAN_SVC_OK;
+}
+
+static fcan_gen::svc_status save_parameters(uint8_t inst, save_parameters_resp & resp)
+{
+  k_spinlock_key_t key = k_spin_lock(&lock);
+
+  states[inst].req.save = true;
+  k_spin_unlock(&lock, key);
+
+  /* The motor does not acknowledge a save, so this says the request was taken,
+   * not that the parameters reached its memory. */
+  resp.success = true;
+
+  return FCAN_SVC_OK;
 }
 
 static int robstride_func_init(void)
@@ -473,9 +575,30 @@ static int robstride_func_init(void)
   return 0;
 }
 
+/* Handlers are registered per instance, so the bound index is the only thing
+ * a handler captures and an out-of-range call never reaches one — the runtime
+ * answers BAD_INDEX for a slot nobody claimed.
+ */
 static int robstride_func_start(void)
 {
   for (uint8_t i = 0; i < (uint8_t)ARRAY_SIZE(motors); i++) {
+    fcan_gen::robstridemotor m(i);
+
+    m.on_enable([i](const enable_req & req, enable_resp & resp, fcan_gen::call_handle) noexcept {
+      return enable_motor(i, req, resp);
+    });
+    m.on_fault_clear(
+      [i](const fault_clear_req & req, fault_clear_resp & resp, fcan_gen::call_handle) noexcept {
+        return clear_faults(i, req, resp);
+      });
+    m.on_reset_encoder(
+      [i](const reset_encoder_req & req, reset_encoder_resp & resp,
+          fcan_gen::call_handle) noexcept { return reset_encoder(i, req, resp); });
+    m.on_save_parameters(
+      [i](const save_parameters_req &, save_parameters_resp & resp,
+          fcan_gen::call_handle) noexcept { return save_parameters(i, resp); });
+    m.on_params_changed([i](uint32_t changed_mask) noexcept { params_changed(i, changed_mask); });
+
     tunable_read(i, &states[i].tune);
 
     /* Written unconditionally, so that a motor whose gains were edited over
@@ -497,10 +620,9 @@ static void robstride_func_tick(void)
   const int64_t now = k_uptime_get();
 
   for (uint8_t i = 0; i < (uint8_t)ARRAY_SIZE(motors); i++) {
+    const fcan_gen::robstridemotor m(i);
     struct robstride_feedback fb;
     const bool measured = robstride_get_feedback(motors[i], &fb) == 0;
-    robstridemotor_target_t target;
-    robstridemotor_motion_target_t motion;
 
     /* Order matters twice here. The requests come first so that an enable
      * arriving with a target is already in effect when the target lands. The
@@ -510,12 +632,12 @@ static void robstride_func_tick(void)
     drain_requests(i, &fb, measured, now);
     guard_temperature(i, &fb, measured);
 
-    if (robstridemotor_target_read(i, &target)) {
-      apply_target(i, &target, now);
+    if (const auto target = m.read_target()) {
+      apply_target(i, *target, now);
     }
 
-    if (robstridemotor_motion_target_read(i, &motion)) {
-      apply_motion_target(i, &motion, now);
+    if (const auto motion = m.read_motion_target()) {
+      apply_motion_target(i, *motion, now);
     }
 
     refresh_output(i, now);
@@ -524,147 +646,9 @@ static void robstride_func_tick(void)
   }
 }
 
-/* Fires from fcan_poll, so it only records what changed; the tick is what
- * re-reads the parameters and writes the gains, for the same reason the
- * service handlers defer.
- */
-void robstridemotor_on_params_changed(uint8_t inst, uint32_t changed_mask)
-{
-  k_spinlock_key_t key;
-
-  if (inst >= (uint8_t)ARRAY_SIZE(motors)) {
-    return;
-  }
-
-  key = k_spin_lock(&lock);
-  states[inst].req.params_changed |= changed_mask;
-  k_spin_unlock(&lock, key);
-}
-
-fcan_svc_status_t robstridemotor_enable(
-  uint8_t inst, const robstridemotor_enable_req_t * req, robstridemotor_enable_resp_t * resp,
-  fcan_call_handle_t h)
-{
-  k_spinlock_key_t key;
-
-  ARG_UNUSED(h);
-
-  if (inst >= (uint8_t)ARRAY_SIZE(motors)) {
-    resp->success = false;
-    return FCAN_SVC_APP_ERROR;
-  }
-
-  key = k_spin_lock(&lock);
-  states[inst].req.enable = true;
-  states[inst].req.enable_value = req->on;
-  /* Enabling is also the way back from an overtemperature stop, and it counts
-   * as traffic in its own right: a master that enables a joint and then says
-   * nothing has still been heard from within the deadline. */
-  states[inst].req.clear_trip = req->on;
-  states[inst].req.arm = req->on;
-  k_spin_unlock(&lock, key);
-
-  resp->success = true;
-
-  LOG_INF("motor %u -> %s", inst, req->on ? "enabled" : "disabled");
-
-  return FCAN_SVC_OK;
-}
-
-fcan_svc_status_t robstridemotor_fault_clear(
-  uint8_t inst, const robstridemotor_fault_clear_req_t * req,
-  robstridemotor_fault_clear_resp_t * resp, fcan_call_handle_t h)
-{
-  k_spinlock_key_t key;
-
-  ARG_UNUSED(h);
-
-  if (inst >= (uint8_t)ARRAY_SIZE(motors)) {
-    resp->success = false;
-    return FCAN_SVC_APP_ERROR;
-  }
-
-  if (req->on) {
-    key = k_spin_lock(&lock);
-    states[inst].req.clear_faults = true;
-    k_spin_unlock(&lock, key);
-  }
-
-  resp->success = true;
-
-  return FCAN_SVC_OK;
-}
-
-fcan_svc_status_t robstridemotor_reset_encoder(
-  uint8_t inst, const robstridemotor_reset_encoder_req_t * req,
-  robstridemotor_reset_encoder_resp_t * resp, fcan_call_handle_t h)
-{
-  k_spinlock_key_t key;
-
-  ARG_UNUSED(h);
-
-  if (inst >= (uint8_t)ARRAY_SIZE(motors)) {
-    resp->success = false;
-    return FCAN_SVC_APP_ERROR;
-  }
-
-  /* Making the current position read as a given value needs a current
-   * position to subtract from. Refusing here rather than letting the tick
-   * drop the request is what keeps the reply honest; the snapshot never
-   * blocks, so it is safe to take on this thread. A motor that goes stale
-   * between here and the tick is still dropped there.
-   */
-  if (!req->offset) {
-    struct robstride_feedback fb;
-
-    if (robstride_get_feedback(motors[inst], &fb) != 0) {
-      LOG_WRN("motor %u: reset_encoder refused, no position yet", inst);
-      resp->success = false;
-      return FCAN_SVC_APP_ERROR;
-    }
-  }
-
-  key = k_spin_lock(&lock);
-  states[inst].req.offset_absolute = req->offset;
-  states[inst].req.offset_value = req->value;
-  states[inst].req.offset = true;
-  k_spin_unlock(&lock, key);
-
-  /* Reaches the wire but has nowhere to land: ResetEncoder.srv answers with
-   * nothing. See the note in type.yaml for why the field exists at all. */
-  resp->success = true;
-
-  return FCAN_SVC_OK;
-}
-
-fcan_svc_status_t robstridemotor_save_parameters(
-  uint8_t inst, const robstridemotor_save_parameters_req_t * req,
-  robstridemotor_save_parameters_resp_t * resp, fcan_call_handle_t h)
-{
-  k_spinlock_key_t key;
-
-  ARG_UNUSED(req);
-  ARG_UNUSED(h);
-
-  if (inst >= (uint8_t)ARRAY_SIZE(motors)) {
-    resp->success = false;
-    return FCAN_SVC_APP_ERROR;
-  }
-
-  key = k_spin_lock(&lock);
-  states[inst].req.save = true;
-  k_spin_unlock(&lock, key);
-
-  /* The motor does not acknowledge a save, so this says the request was taken,
-   * not that the parameters reached its memory. */
-  resp->success = true;
-
-  return FCAN_SVC_OK;
-}
-
 FIBRIL_FCAN_FUNC_DEFINE(
   robstride,
-  .array = FCAN_ARRAY_ROBSTRIDEMOTOR,
+  .array = fcan_gen::robstridemotor::block_array_index,
   .count = (uint8_t)ARRAY_SIZE(motors),
   .init = robstride_func_init,
   .start = robstride_func_start,

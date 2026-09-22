@@ -127,10 +127,14 @@ RobStride のバスは classic CAN なので、fibril_can が使うコントロ�
 `lib/fibril_can_node/<type>/` に 4 つのファイルと、binding を 1 つ置く。
 アプリケーションには触らない。
 
+機能は C++17 で書く。
+codegen には `LANGUAGE CXX` を渡してあるので、生成物は `schema_gen.hpp` の
+`namespace fcan_gen` になる（[ADR 0007](adr/0007-cpp-node-implementation.md)）。
+
 | ファイル | 内容 |
 | --- | --- |
 | `type.yaml` | ブロック型の定義。バスから見た姿 |
-| `impl.c` | 生成されるハンドラの実装 |
+| `impl.cpp` | ハンドラと publish の実装 |
 | `Kconfig` | devicetree にノードがあるときだけ y になる真偽値と、`_MAX` |
 | `CMakeLists.txt` | ソースの登録、`type.yaml` の登録、`fibril_can_node_instances()` |
 | `dts/bindings/fibril_can_node/fibril,fcan-<type>.yaml` | ハードウェアの記述と `fcan-ns` |
@@ -138,7 +142,7 @@ RobStride のバスは classic CAN なので、fibril_can が使うコントロ�
 `CMakeLists.txt` はこの形になる。
 
 ```cmake
-zephyr_library_sources_ifdef(CONFIG_FIBRIL_CAN_NODE_SOLENOID solenoid.c)
+zephyr_library_sources_ifdef(CONFIG_FIBRIL_CAN_NODE_SOLENOID solenoid.cpp)
 
 set_property(GLOBAL APPEND PROPERTY fibril_can_node_type_schemas
              "${CMAKE_CURRENT_SOURCE_DIR}/type.yaml")
@@ -165,18 +169,21 @@ compatible を持つノードが 2 つ以上 okay なら、その場でビルド
 blob には現れず、バスと ROS グラフに出るのは実行時のインスタンス数だけである。
 6 と 16 で生成物を比べても、`schema_blob.c` は完全に一致し、変わるのは状態配列の長さ 1 行だけだった。
 
-余らせたコストは `sizeof(state)` × 余りバイトの `.bss` に収まる。
+余らせたコストは `.bss` に収まる。
+機能側の `sizeof(state)` × 余り個数に加えて、生成コードがハンドラを置く
+`std::function` のスロット（サービス 1 つと params-changed 1 つにつき
+32 bit ARM で 16 B）× 余り個数がかかる。
 一方、CMake の devicetree API は phandle 配列を読めない（`dt_prop` が扱うのは string、int、boolean、array、uint8-array、string-array、path）。
 配線の本数を CMake から数える手段がない以上、devicetree に本数を重複して書くより、Kconfig の上限で済ませるほうが行が減る。
 
-`impl.c` の `BUILD_ASSERT` が、配線が上限を超えたときに落とす。
+`impl.cpp` の `BUILD_ASSERT` が、配線が上限を超えたときに落とす。
 
-```c
+```cpp
 static const struct gpio_dt_spec valves[] = {
   DT_INST_FOREACH_PROP_ELEM_SEP(0, gpios, GPIO_DT_SPEC_GET_BY_IDX, (, ))
 };
 
-BUILD_ASSERT(ARRAY_SIZE(valves) <= FCAN_SOLENOID_MAX_COUNT,
+BUILD_ASSERT(ARRAY_SIZE(valves) <= fcan_gen::solenoid::max_count,
              "more gpios wired than CONFIG_FIBRIL_CAN_NODE_SOLENOID_MAX");
 ```
 
@@ -185,17 +192,49 @@ phandle 配列の並びがそのままバス上のインスタンス番号にな
 
 最後に自分を登録する。
 
-```c
+```cpp
 FIBRIL_FCAN_FUNC_DEFINE(
   solenoid,
-  .array = FCAN_ARRAY_SOLENOID,
+  .array = fcan_gen::solenoid::block_array_index,
   .count = (uint8_t)ARRAY_SIZE(valves),
   .init = solenoid_init,
   .start = solenoid_start);
 ```
 
-`init` はハードウェアを掴む（`fcan_init` の前）、`start` はバスに最初に触る（`fcan_register_all` の後）、`tick` は約 1 kHz で呼ばれる。
+`init` はハードウェアを掴む（`fcan_init` の前）、`start` はバスに最初に触る（`fcan_gen::register_all` の後）、`tick` は約 1 kHz で呼ばれる。
 どれも省略できる。
+
+### サービスハンドラは start で登録する
+
+C++ ラッパのサービスハンドラは実行時登録である。
+**登録し忘れてもリンクは通り、その呼び出しが BAD_INDEX で返る。**
+気付ける場所を 1 つにするため、登録は `start` に集める。
+
+```cpp
+static int solenoid_start(void)
+{
+  for (uint8_t i = 0; i < (uint8_t)ARRAY_SIZE(valves); i++) {
+    fcan_gen::solenoid(i).on_set(
+      [i](const set_req & req, set_resp & resp, fcan_gen::call_handle) noexcept {
+        return set_valve(i, req, resp);
+      });
+
+    publish_state(i);
+  }
+
+  return 0;
+}
+```
+
+`start` が登録の場所として正しいのは、`register_all` がディスパッチャを据えた後で、かつ `fcan_transport_attach` がノードをバスに開く前だからである。
+この窓の外で登録すると、ハンドラが載る前に要求が届きうる。
+
+**λ が捕捉してよいのはインスタンス番号までにする。**
+`std::function` はキャプチャが大きいとヒープを使う。
+状態はファイルスコープの配列に置き、λ は番号で引く。
+
+ハンドラをインスタンスごとに登録するので、インスタンス番号の範囲検査は要らない。
+誰も登録していないスロットはランタイムが BAD_INDEX で返す。
 
 ## 周期送信を持たせない
 
@@ -307,8 +346,13 @@ publish は安全側にある。トピックの commit は、commit する側と
 ## `instance_counts` の埋め方
 
 ブロック配列の並びは schema から導かれる。
-位置指定の初期化子は、並びが変わってもコンパイルが通ったまま、別のブロックに数を渡す。
-`FCAN_ARRAY_<TYPE>` を添字に使う。
+`apps/node/` では機能が `fcan_gen::<type>::block_array_index` を自分で申告し、アプリケーションがそれを添字に数を埋めるので、この配列を手で書く場所は残っていない。
+
+生成された `make_instance_counts` は使わない。
+全ブロック型を呼び出し側が名指しする `static_assert` を持つので、アプリケーションが機能の一覧を知ることになるためである（[ADR 0007](adr/0007-cpp-node-implementation.md)）。
+
+`samples/lib/fibril_can/` のサンプルは C ラッパのままで、自前の schema を持つ。
+そちらは位置指定の初期化子に `FCAN_ARRAY_<TYPE>` を使う形で書く。
 
 ```c
 static const uint8_t counts[FCAN_NUM_BLOCK_ARRAYS] = {
@@ -316,9 +360,6 @@ static const uint8_t counts[FCAN_NUM_BLOCK_ARRAYS] = {
   [FCAN_ARRAY_IMU] = 1U,
 };
 ```
-
-`apps/node/` では機能が自分の枠を埋めるので、この配列を手で書く場所は残っていない。
-`samples/lib/fibril_can/` のサンプルは自前の schema を持つので、こちらの形で書く。
 
 ## codegen の場所
 
