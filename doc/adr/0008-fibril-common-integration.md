@@ -76,11 +76,16 @@ virtual void print_debug_info(std::ostream & os) const = 0;
 
 **このデバッグ出力面が占めているのは 8492 B（実測）。** 剥がすと静的コンストラクタも消える。
 
-probe は正規表現で宣言と実装を削っただけなので、上流に出すなら形は別に決める必要がある。
+probe は正規表現で宣言と実装を削っただけなので、上流に出すときは形を決め直した。
+検討したのは次の 3 つで、(a) を採った。
 
-- (a) 純粋仮想と override を `#ifdef` で囲む — probe と同じ数字になる
+- (a) 純粋仮想と override を `#ifndef` で囲む — probe と同じ数字になる
 - (b) `print_debug_info` を仮想でなくし、出力先をコールバックで受ける
 - (c) 出力を持たない基底に分ける
+
+[fibril_common#68](https://github.com/ForteFibre/fibril_common/pull/68) が (a) である。
+`FIBRIL_NO_IOSTREAM` を定義したときだけ面が消える形なので、ROS 2 側のビルドは変わらない。
+実際の patch での実測も probe と同じ差（FLASH −8492 B、RAM −192 B、静的コンストラクタ 6 → 0）だった。
 
 ### `-Wdouble-promotion` は実害を指している
 
@@ -170,7 +175,7 @@ picolibc の malloc アリーナは既定が `CONFIG_COMMON_LIBC_MALLOC_ARENA_SI
 まだ決めていない。決めるには「最初にどの部品を載せたいか」が要る。
 
 - **PID や serde から始めるなら、止まるものは何も無い。** module のグルーを足せばその日から使える。
-- **軌道生成（`TrapezoidalController`）から始めるなら、iostream の 8492 B をどうするかを先に決める。** 受け入れるか、上流を直すか。
+- **軌道生成（`TrapezoidalController`）から始めるなら、iostream の 8492 B は [fibril_common#68](https://github.com/ForteFibre/fibril_common/pull/68) で外せる。** マージされれば、Zephyr 側の Kconfig から `FIBRIL_NO_IOSTREAM` を定義して使う。
 
 いずれにせよ module のグルーは共通で要る。形は fibril_can が先例になる。
 
@@ -194,7 +199,7 @@ fibril_common/zephyr/
 
 | 段 | 内容 |
 | --- | --- |
-| Phase 0 | fibril_common に `zephyr/` のグルーを足す PR。載せたい部品が iostream を引くなら、その扱いも同じ PR で決める |
+| Phase 0 | fibril_common に `zephyr/` のグルーを足す PR。iostream の扱いは [#68](https://github.com/ForteFibre/fibril_common/pull/68) で先に出してある |
 | Phase 1 | `west.yml` にプロジェクトを足し、最初の利用者（`lib/fibril_can_node/<type>/` の 1 つ）で使う |
 
 `-Wdouble-promotion` の修正と `SteadyClock` の扱いは、Zephyr で使うかどうかに関わらず上流に返す価値がある。
