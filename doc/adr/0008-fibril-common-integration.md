@@ -77,15 +77,15 @@ virtual void print_debug_info(std::ostream & os) const = 0;
 **このデバッグ出力面が占めているのは 8492 B（実測）。** 剥がすと静的コンストラクタも消える。
 
 probe は正規表現で宣言と実装を削っただけなので、上流に出すときは形を決め直した。
-検討したのは次の 3 つで、(a) を採った。
+[fibril_common#68](https://github.com/ForteFibre/fibril_common/pull/68) がそれで、マクロは `FIBRIL_NO_HEAVY_DEBUG` である。
+定義しなければ従来どおりなので、ROS 2 側のビルドは変わらない。
 
-- (a) 純粋仮想と override を `#ifndef` で囲む — probe と同じ数字になる
-- (b) `print_debug_info` を仮想でなくし、出力先をコールバックで受ける
-- (c) 出力を持たない基底に分ける
+**消すのは各派生の override だけで、基底の宣言は仮想関数のまま同じ位置に残す。**
+probe のように宣言ごと消すと `ControllerBase` の vtable が 9 スロットから 8 スロットに縮み、定義した翻訳単位と定義していない翻訳単位が混ざったときに存在しないスロットを呼ぶ。
+実際、その形で 2 つの翻訳単位を別々にコンパイルしてリンクすると segfault した。
+基底に何もしない本体を置いて席を残すと、レイアウトが同一になり、混在しても出力が空になるだけで済む。
 
-[fibril_common#68](https://github.com/ForteFibre/fibril_common/pull/68) が (a) である。
-`FIBRIL_NO_IOSTREAM` を定義したときだけ面が消える形なので、ROS 2 側のビルドは変わらない。
-実際の patch での実測も probe と同じ差（FLASH −8492 B、RAM −192 B、静的コンストラクタ 6 → 0）だった。
+席を残すぶん probe より 24 B 大きく、実測は FLASH −8468 B、RAM −192 B、静的コンストラクタ 6 → 0 である。
 
 ### `-Wdouble-promotion` は実害を指している
 
@@ -167,17 +167,18 @@ picolibc の malloc アリーナは既定が `CONFIG_COMMON_LIBC_MALLOC_ARENA_SI
 | `data/circular_buffer` | — | — | — | Mutex 型を渡せば使える |
 | `utils/callback_handle`、`controller/controller_manager` | あり | — | — | アリーナを切れば使える |
 | `controller/limit_profile` | あり | — | — | アリーナを切れば使える |
-| `controller/uniform_speed_controller`、`composite_controller`、`reverse_controller`、`trapezoidal_controller` | あり | あり | あり | 上流の変更が要る |
-| `navigation/pure_pursuit_tracker` | あり | あり | あり | 上流の変更が要る |
+| `controller/uniform_speed_controller`、`composite_controller`、`reverse_controller`、`trapezoidal_controller` | あり | あり | あり | iostream は [#68](https://github.com/ForteFibre/fibril_common/pull/68) で外せる |
+| `navigation/pure_pursuit_tracker` | あり | あり | あり | iostream は [#68](https://github.com/ForteFibre/fibril_common/pull/68) で外せる。`double` は残る |
 
 ## Decision
 
 まだ決めていない。決めるには「最初にどの部品を載せたいか」が要る。
 
 - **PID や serde から始めるなら、止まるものは何も無い。** module のグルーを足せばその日から使える。
-- **軌道生成（`TrapezoidalController`）から始めるなら、iostream の 8492 B は [fibril_common#68](https://github.com/ForteFibre/fibril_common/pull/68) で外せる。** マージされれば、Zephyr 側の Kconfig から `FIBRIL_NO_IOSTREAM` を定義して使う。
+- **軌道生成（`TrapezoidalController`）から始めるなら、iostream の 8468 B は [fibril_common#68](https://github.com/ForteFibre/fibril_common/pull/68) で外せる。** [#69](https://github.com/ForteFibre/fibril_common/pull/69) の `CONFIG_FIBRIL_COMMON_NO_HEAVY_DEBUG` が既定で立つので、こちらで指定することはない。
 
-いずれにせよ module のグルーは共通で要る。形は fibril_can が先例になる。
+いずれにせよ module のグルーは共通で要る。
+[fibril_common#69](https://github.com/ForteFibre/fibril_common/pull/69) がそれで、形は fibril_can が先例になっている。
 
 ```text
 fibril_common/zephyr/
@@ -199,7 +200,7 @@ fibril_common/zephyr/
 
 | 段 | 内容 |
 | --- | --- |
-| Phase 0 | fibril_common に `zephyr/` のグルーを足す PR。iostream の扱いは [#68](https://github.com/ForteFibre/fibril_common/pull/68) で先に出してある |
+| Phase 0 | fibril_common 側。[#68](https://github.com/ForteFibre/fibril_common/pull/68)（`FIBRIL_NO_HEAVY_DEBUG`）と [#69](https://github.com/ForteFibre/fibril_common/pull/69)（`zephyr/` のグルー）で出してある |
 | Phase 1 | `west.yml` にプロジェクトを足し、最初の利用者（`lib/fibril_can_node/<type>/` の 1 つ）で使う |
 
 `-Wdouble-promotion` の修正と `SteadyClock` の扱いは、Zephyr で使うかどうかに関わらず上流に返す価値がある。
