@@ -30,7 +30,10 @@ namespace motor_control
 
 enum class Mode : uint8_t { DUTY, SPEED, POSITION, SPEED_POSITION };
 
-/** One encoder reading, in the units of struct encoder_feedback. */
+/**
+ * @brief One encoder reading, in the units of struct encoder_feedback.
+ * @ingroup motor_control
+ */
 struct EncoderSample
 {
   /** False while the encoder is offline or stale. */
@@ -41,6 +44,10 @@ struct EncoderSample
   float velocity;
 };
 
+/**
+ * @brief Control state of one motor, advanced once per tick by update().
+ * @ingroup motor_control
+ */
 class MotorControl
 {
 public:
