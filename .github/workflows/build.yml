@@ -31,7 +31,9 @@ jobs:
           client-id: ${{ vars.FIBRIL_CI_APP_CLIENT_ID }}
           private-key: ${{ secrets.FIBRIL_CI_APP_PRIVATE_KEY }}
           owner: ForteFibre
-          repositories: fibril_can
+          repositories: |
+            fibril_can
+            fibril_common
           # Least-privilege: west update only needs to clone the module. The
           # matching GitHub App installation must expose Contents: read.
           permission-contents: read

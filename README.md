@@ -41,7 +41,7 @@ cd fibril_zephyr_ws
 west update
 ```
 
-`west update` は private リポジトリである `fibril_can` を clone する。
+`west update` は private リポジトリである `fibril_can` と `fibril_common` を clone する。
 先に GitHub の認証を通しておく（`gh auth login` の後に `gh auth setup-git` を実行するか、SSH 鍵を登録して `insteadOf` を張る）。
 
 ## コーディングエージェントを開く場所
