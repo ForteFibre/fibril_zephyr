@@ -36,6 +36,9 @@ fibril_common は ROS 2 のノードが使っているものと同じ制御器�
 `CONFIG_FIBRIL_COMMON` が立つまで何もビルドしないので、載せているだけではイメージに現れない。
 取り込みの調査結果と部品ごとの状態は [ADR 0008](adr/0008-fibril-common-integration.md) にある。
 
+fibril_common の revision は、タグではなくコミットで固定してある（現在は `8f336f4`）。Zephyr module の入口（fibril_common#69）と `-Wdouble-promotion` の修正（fibril_common#74）を含むタグが、まだ無いためである。
+これより前の版では、`CONFIG_FIBRIL_COMMON` を立てたビルドが twister の `-Werror` で止まる。
+
 fibril_can の revision はブランチではなくタグで固定してある（現在は v0.3.1）。
 codegen が決めるブロック配列の並びはワイヤの契約の一部で、`main` を追いかけていると `fcan_config_t::instance_counts` の割り当てが黙って変わる。
 上げるときは意図して上げ、必要な移行を同じ変更に含める。
