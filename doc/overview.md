@@ -70,7 +70,7 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 | `drivers/` | out-of-tree ドライバの実装 |
 | `dts/bindings/` | 上記ドライバと機能の devicetree binding |
 | `include/` | 公開ヘッダ。ドライバクラスの API はここが正本 |
-| `lib/` | out-of-tree ライブラリ。`lib/fibril_can_node/` にブロック型の実装、`lib/fcan_transport/` にバスへの繋ぎ方 |
+| `lib/` | out-of-tree ライブラリ。`lib/fibril_can_node/` にブロック型の実装、`lib/fcan_transport/` にバスへの繋ぎ方、`lib/motor_control/` にモータ 1 台ぶんの制御のコア |
 | `samples/` | ドライバ単体および fibril_can と組み合わせたサンプル |
 | `tests/` | Twister から走る ztest |
 | `scripts/` | west の拡張コマンドと runner |
@@ -79,8 +79,9 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 `apps/` と `lib/fibril_can_node/` と `snippets/` の関係は [アプリケーションと機能](apps.md) にある。
 どの機能を載せるかは snippet の overlay が置く `fibril,fcan-*` ノードが決め、アプリケーションはブロック型の名前を持たない。
 
-`apps/node/` と `lib/fibril_can_node/` だけが C++17 で、codegen にも `LANGUAGE CXX` を渡している。
-`drivers/`、`lib/fcan_transport/`、`app/`、`samples/`、`tests/` は C のままである。
+`apps/node/` と `lib/fibril_can_node/` は C++17 で、codegen にも `LANGUAGE CXX` を渡している。
+`lib/motor_control/` も C++17 である。fibril_common の制御器（テンプレート）を使うためで、codegen とは関係しない。
+`drivers/`、`lib/fcan_transport/`、`app/`、`samples/`、`tests/` は C のままである（`tests/lib/motor_control/` だけは、試す対象に合わせて C++ で書く）。
 理由と、C++ 標準ライブラリに要求が付く点は [ADR 0007](adr/0007-cpp-node-implementation.md) にある。
 
 ## ドライバ

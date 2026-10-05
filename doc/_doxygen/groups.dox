@@ -33,5 +33,8 @@
  * @defgroup fcan_transport fibril_can node transport
  * @brief How a node's frames reach the bus
  *
+ * @defgroup motor_control Motor control core
+ * @brief Duty, speed and position control of one motor, once per tick
+ *
  * @}
  */
