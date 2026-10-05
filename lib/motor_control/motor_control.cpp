@@ -29,12 +29,8 @@ void MotorControl::reset_all()
     pid->reset();
     pid->kp(0.0f).ki(0.0f).kd(0.0f).max(1.0f).i_saturation(1.0f).target(0.0f);
   }
-  /* AccelerationLimit has no reset: with acc_max 0 the next update() passes
-   * the target straight through, which discards the old output.
-   */
   _duty_limiter.acc_max(0.0f);
-  _duty_limiter.target(0.0f);
-  _duty_limiter.update(tick_s);
+  drop_duty_limiter();
 
   _velocity_ff = 0.0f;
   _velocity_ff_ticks = 0;
@@ -50,16 +46,25 @@ void MotorControl::reset_all()
 
 float MotorControl::update(const EncoderSample & encoder)
 {
-  const float speed = _encoder_gain * encoder.velocity;
-  _position = _encoder_gain * static_cast<float>(encoder.position);
-  _speed_filtered =
-    _speed_filter_coefficient * speed + (1.0f - _speed_filter_coefficient) * _speed_filtered;
+  /* An invalid sample carries no measurement: keep the last position and
+   * leave the filter where it was, so a closed loop resumed later does not
+   * start from a speed pulled towards zero.
+   */
+  if (encoder.valid) {
+    const float speed = _encoder_gain * encoder.velocity;
+    _position = _encoder_gain * static_cast<float>(encoder.position);
+    _speed_filtered =
+      _speed_filter_coefficient * speed + (1.0f - _speed_filter_coefficient) * _speed_filtered;
+  }
 
   /* Leaves the mode at DUTY, as CanMotorMbed does: the host has to send its
-   * setpoint again once the encoder is back.
+   * setpoint again once the encoder is back. Unlike CanMotorMbed the output
+   * stops at once rather than ramping down at the slew limit, since nothing
+   * closes the loop during the ramp.
    */
   if (!encoder.valid && _mode != Mode::DUTY) {
     set_duty(0.0f);
+    drop_duty_limiter();
   }
 
   switch (_mode) {
@@ -102,6 +107,18 @@ float MotorControl::update(const EncoderSample & encoder)
   return _duty;
 }
 
+void MotorControl::drop_duty_limiter()
+{
+  /* AccelerationLimit has no reset: with acc_max 0 an update() passes the
+   * target straight through, which discards the old output.
+   */
+  const float limit = _duty_limiter.acc_max();
+  _duty_limiter.acc_max(0.0f);
+  _duty_limiter.target(0.0f);
+  _duty_limiter.update(tick_s);
+  _duty_limiter.acc_max(limit);
+}
+
 float MotorControl::speed_position_duty(float speed)
 {
   _position_controller.update(_position);
@@ -128,7 +145,8 @@ float MotorControl::speed_position_duty(float speed)
 
 void MotorControl::watch_stall(float duty, const EncoderSample & encoder)
 {
-  if (_stall_timeout_ticks == 0) {
+  /* Without a valid sample there is no telling whether it moves. */
+  if (_stall_timeout_ticks == 0 || !encoder.valid) {
     return;
   }
   const bool driving = std::fabs(duty) > stall_duty_threshold;

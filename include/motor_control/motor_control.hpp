@@ -107,6 +107,7 @@ public:
   float duty() const { return _duty; }
 
 private:
+  void drop_duty_limiter();
   float speed_position_duty(float speed);
   void watch_stall(float duty, const EncoderSample & encoder);
 
