@@ -12,24 +12,17 @@
  * file.
  */
 
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/random/random.h>
 
-#include <fibril_can/fcan.h>
-#include <fibril_can/fcan_protocol.h>
-
 #include <fcan_transport/transport.h>
 #include <fibril_can_node/func.h>
 
-#include "schema_gen.h"
-
-/* The C emitter puts these in schema_blob.c but does not declare them. */
-extern const uint8_t fcan_schema_blob[];
-extern const size_t fcan_schema_blob_len;
-extern const uint64_t fcan_schema_hash;
+#include "schema_gen.hpp"
 
 LOG_MODULE_REGISTER(fibril_node, CONFIG_APP_LOG_LEVEL);
 
@@ -50,7 +43,7 @@ static void * heap_alloc(size_t size, size_t align, void * ctx)
 static void run_ticks(void)
 {
   STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
-    if (f->tick != NULL) {
+    if (f->tick != nullptr) {
       f->tick();
     }
   }
@@ -58,14 +51,19 @@ static void run_ticks(void)
 
 int main(void)
 {
-  /* Indexed by the codegen's FCAN_ARRAY_*, so a function fills its own slot
-   * whatever order the schema puts the block arrays in.
+  /* Indexed by fcan_gen::<type>::block_array_index, so a function fills its
+   * own slot whatever order the schema puts the block arrays in.
+   *
+   * Static because config_user documents that the pointer has to outlive the
+   * node, and fcan_transport_run() does return on a backend whose frames a
+   * driver thread drives. The runtime copies the counts today, so an
+   * automatic would work; one byte of .bss is cheaper than depending on that.
    */
-  uint8_t counts[FCAN_NUM_BLOCK_ARRAYS] = {0};
+  static uint8_t counts[fcan_gen::num_block_arrays];
   bool any_tick = false;
 
   STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
-    int ret = (f->init != NULL) ? f->init() : 0;
+    int ret = (f->init != nullptr) ? f->init() : 0;
 
     if (ret != 0) {
       LOG_ERR("%s: init failed (%d)", f->name, ret);
@@ -73,7 +71,7 @@ int main(void)
     }
 
     counts[f->array] = f->count;
-    any_tick = any_tick || (f->tick != NULL);
+    any_tick = any_tick || (f->tick != nullptr);
     LOG_INF("%s: %u instance(s) on block array %u", f->name, f->count, f->array);
   }
 
@@ -87,52 +85,47 @@ int main(void)
    * so the node cannot be a static array. 8-byte alignment satisfies the
    * seqlock and u64 hash fields the runtime keeps inside.
    */
-  fcan_node_t * node =
-    k_heap_aligned_alloc(&fcan_heap, 8, fcan_node_storage_size(), K_NO_WAIT);
+  auto * node = static_cast<fcan_node_t *>(
+    k_heap_aligned_alloc(&fcan_heap, 8, fcan_node_storage_size(), K_NO_WAIT));
 
-  if (node == NULL) {
+  if (node == nullptr) {
     LOG_ERR("fcan_heap OOM allocating node (%u bytes)", (unsigned)fcan_node_storage_size());
     return -ENOMEM;
   }
 
-  fcan_config_t cfg = {
-    /* Build-time for now. On a board with a DIP switch or a config ROM this
-     * is read at boot so that identical boards share one image.
-     */
-    .node_id = CONFIG_FIBRIL_NODE_ID,
-    .boot_id = sys_rand32_get(),
-    .schema_blob = fcan_schema_blob,
-    .schema_blob_len = (uint16_t)fcan_schema_blob_len,
-    .schema_hash = fcan_schema_hash,
-    .protocol_version = FCAN_PROTOCOL_VERSION,
-    .block_count = FCAN_NUM_BLOCK_ARRAYS,
-    .instance_counts = counts,
-    .limits =
-      {
-        .max_frames = FCAN_MAX_FRAMES,
-        .max_copy_entries = FCAN_MAX_COPY_ENTRIES,
-        .service_buffer = FCAN_SERVICE_BUFFER,
-        .service_reassembly = FCAN_SERVICE_REASSEMBLY,
-      },
-    .hal = fcan_transport_hal(),
-    .allocator = {.alloc = heap_alloc, .ctx = NULL},
-    .master_lost_us = MASTER_LOST_US,
-  };
-  fcan_apply_schema_capacities(&cfg.limits, counts);
+  fcan_gen::config_user user{};
+
+  /* Build-time for now. On a board with a DIP switch or a config ROM this is
+   * read at boot so that identical boards share one image.
+   */
+  user.node_id = CONFIG_FIBRIL_NODE_ID;
+  user.boot_id = sys_rand32_get();
+  user.instance_counts = counts;
+  user.hal = fcan_transport_hal();
+  user.allocator = {.alloc = heap_alloc, .ctx = nullptr};
+  user.master_lost_us = MASTER_LOST_US;
+
+  /* The schema-determined half of the config, and the capacities derived from
+   * the counts, come from the generated header.
+   */
+  fcan_config_t cfg = fcan_gen::make_config(user);
 
   if (fcan_init(node, &cfg) != FCAN_OK) {
     LOG_ERR("fcan_init failed (fault=%d)", (int)fcan_fault(node));
     return -EIO;
   }
   LOG_INF(
-    "fcan_init OK: node_id=0x%02x schema_hash=0x%016llx blob_len=%u", cfg.node_id,
+    "fcan_init OK: node_id=0x%02x schema_hash=0x%016llx blob_len=%u", user.node_id,
     (unsigned long long)fcan_schema_hash, (unsigned)fcan_schema_blob_len);
 
-  if (fcan_register_all(node) != FCAN_OK) {
-    LOG_ERR("fcan_register_all failed (fault=%d)", (int)fcan_fault(node));
+  /* Also what installs the service and parameter dispatchers the functions
+   * register their handlers into, so it has to run before any start hook.
+   */
+  if (fcan_gen::register_all(node) != FCAN_OK) {
+    LOG_ERR("register_all failed (fault=%d)", (int)fcan_fault(node));
     return -EIO;
   }
-  LOG_INF("fcan_register_all OK");
+  LOG_INF("register_all OK");
 
   /* Before attach, not after. Attaching is what lets frames reach the node —
    * behind a hub the driver thread starts polling it, and a gs_usb build
@@ -142,7 +135,7 @@ int main(void)
    * holds the request until the node is allowed to transmit.
    */
   STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
-    int ret = (f->start != NULL) ? f->start() : 0;
+    int ret = (f->start != nullptr) ? f->start() : 0;
 
     if (ret != 0) {
       LOG_ERR("%s: start failed (%d)", f->name, ret);
@@ -157,7 +150,7 @@ int main(void)
 
   LOG_INF("handing over to the transport (periodic ticks %s)", any_tick ? "on" : "off");
 
-  fcan_transport_run(node, any_tick ? run_ticks : NULL);
+  fcan_transport_run(node, any_tick ? run_ticks : nullptr);
 
   return 0;
 }

@@ -30,11 +30,9 @@ manifest:
       # application passes in fcan_config_t::instance_counts. Bump this
       # deliberately, together with any migration the release notes call for.
       #
-      # Currently the merge commit of fibril_can PR #56 on main. #55 brought
-      # the schema merging apps/node relies on (one node schema plus every
-      # block type this repository implements), #56 the codegen lookup and the
-      # generated-header visibility the build needs. Both are past v0.1.2, so
-      # there is no tag to point at yet.
-      revision: dedeacd8c35dee269be0c8da79e6e96af16d179a
+      # v0.3.1 carries the LANGUAGE argument on fcan_invoke_codegen (#59) that
+      # apps/node needs to be emitted as a C++ wrapper, on top of the schema
+      # merging (#55) and the codegen lookup (#56) the build already relied on.
+      revision: v0.3.1
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can

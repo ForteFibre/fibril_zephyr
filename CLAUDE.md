@@ -147,6 +147,16 @@ refactor(samples): hub_gs_usb_latency_probe main.c を整形
 - `enum` の定義と制御構文は、同じ行に `{` を置く
 - ポインタは `const struct device * dev` のように `*` の両側を空ける
 
+**`apps/node/` と `lib/fibril_can_node/` の C++ コード**
+
+C++17。`drivers/` と `include/` の C と同じ形を使う（半角スペース 2 つ、`struct` と関数定義は次の行に `{`、`const auto & x` のようにポインタと参照の両側を空ける）。
+
+- ハンドラは `start` で登録し、λ が捕捉するのはインスタンス番号までにする
+- 生成物（`fcan_gen::`）以外に例外と RTTI を持ち込まない
+- `FCAN_ARRAY_<TYPE>` ではなく `fcan_gen::<type>::block_array_index` を使う
+
+理由は [doc/adr/0007-cpp-node-implementation.md](doc/adr/0007-cpp-node-implementation.md) にある。
+
 **`samples/` の C コード**
 
 Zephyr 上流のスタイルに従う。

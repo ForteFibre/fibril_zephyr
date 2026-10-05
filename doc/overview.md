@@ -31,9 +31,10 @@ workspace のディレクトリに他のものが置かれていても、この 
 サンプルが参照する fibril_can はこのリポジトリの中ではなく `modules/lib/fibril_can` にある。
 private repository なので、`west update` を通すには先に GitHub の認証が必要である。
 
-fibril_can の revision はブランチではなくコミットで固定してある。
+fibril_can の revision はブランチではなくタグで固定してある（現在は v0.3.1）。
 codegen が決めるブロック配列の並びはワイヤの契約の一部で、`main` を追いかけていると `fcan_config_t::instance_counts` の割り当てが黙って変わる。
 上げるときは意図して上げ、必要な移行を同じ変更に含める。
+指したいものにタグが無いときだけコミットで固定する。
 
 ## Zephyr module としての入口
 
@@ -72,6 +73,10 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 
 `apps/` と `lib/fibril_can_node/` と `snippets/` の関係は [アプリケーションと機能](apps.md) にある。
 どの機能を載せるかは snippet の overlay が置く `fibril,fcan-*` ノードが決め、アプリケーションはブロック型の名前を持たない。
+
+`apps/node/` と `lib/fibril_can_node/` だけが C++17 で、codegen にも `LANGUAGE CXX` を渡している。
+`drivers/`、`lib/fcan_transport/`、`app/`、`samples/`、`tests/` は C のままである。
+理由と、C++ 標準ライブラリに要求が付く点は [ADR 0007](adr/0007-cpp-node-implementation.md) にある。
 
 ## ドライバ
 

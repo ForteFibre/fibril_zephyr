@@ -14,9 +14,12 @@
 
 #include <fibril_can_node/func.h>
 
-#include "schema_gen.h"
+#include "schema_gen.hpp"
 
 LOG_MODULE_REGISTER(fcan_solenoid, CONFIG_FIBRIL_CAN_NODE_LOG_LEVEL);
+
+using set_req = fcan_gen::solenoid::set_req;
+using set_resp = fcan_gen::solenoid::set_resp;
 
 /* One node describes every valve the board drives, and the list below reads
  * instance 0 only. A second enabled node would build and then be invisible
@@ -35,7 +38,7 @@ static const struct gpio_dt_spec valves[] = {
  * CMake cannot read a phandle-array. An extra valve would otherwise be
  * silently unreachable from the bus.
  */
-BUILD_ASSERT(ARRAY_SIZE(valves) <= FCAN_SOLENOID_MAX_COUNT,
+BUILD_ASSERT(ARRAY_SIZE(valves) <= fcan_gen::solenoid::max_count,
              "more gpios wired than CONFIG_FIBRIL_CAN_NODE_SOLENOID_MAX");
 
 /* Mirrors what was last driven. Read back from the GPIO would report the pin,
@@ -72,52 +75,24 @@ static int solenoid_init(void)
  */
 static void publish_state(uint8_t inst)
 {
-  solenoid_state_t * s = solenoid_state_begin(inst);
-
-  if (s == NULL) {
-    return;
+  if (auto pub = fcan_gen::solenoid(inst).publish_state()) {
+    pub->on = engaged[inst];
   }
-
-  s->on = engaged[inst];
-  solenoid_state_commit(inst);
 }
 
-/* Committing before the node reaches RUNNING is not a lost publish: the
- * runtime keeps the request and sends it on the first poll that is allowed
- * to transmit. So the master's first read is the real state of the valves,
- * not a default.
- */
-static int solenoid_start(void)
+static fcan_gen::svc_status set_valve(
+  uint8_t inst, const set_req & req, set_resp & resp)
 {
-  for (uint8_t i = 0; i < (uint8_t)ARRAY_SIZE(valves); i++) {
-    publish_state(i);
-  }
-
-  return 0;
-}
-
-/* Generated declaration in schema_gen.h; the link fails without it. */
-fcan_svc_status_t solenoid_set(
-  uint8_t inst, const solenoid_set_req_t * req, solenoid_set_resp_t * resp,
-  fcan_call_handle_t h)
-{
-  ARG_UNUSED(h);
-
-  if (inst >= (uint8_t)ARRAY_SIZE(valves)) {
-    resp->success = false;
-    return FCAN_SVC_APP_ERROR;
-  }
-
-  int ret = gpio_pin_set_dt(&valves[inst], req->on ? 1 : 0);
+  int ret = gpio_pin_set_dt(&valves[inst], req.on ? 1 : 0);
 
   if (ret != 0) {
-    LOG_ERR("valve %u: set %d failed (%d)", inst, (int)req->on, ret);
-    resp->success = false;
+    LOG_ERR("valve %u: set %d failed (%d)", inst, (int)req.on, ret);
+    resp.success = false;
     return FCAN_SVC_APP_ERROR;
   }
 
-  engaged[inst] = req->on;
-  resp->success = true;
+  engaged[inst] = req.on;
+  resp.success = true;
 
   /* Report before replying. The reply says the request was accepted; the
    * topic says what the output is now driving, and a master that watches
@@ -125,14 +100,37 @@ fcan_svc_status_t solenoid_set(
    */
   publish_state(inst);
 
-  LOG_INF("valve %u -> %s", inst, req->on ? "on" : "off");
+  LOG_INF("valve %u -> %s", inst, req.on ? "on" : "off");
 
   return FCAN_SVC_OK;
 }
 
+/* Handlers are registered per instance, so the bound index is the only thing
+ * a handler captures and an out-of-range call never reaches one — the runtime
+ * answers BAD_INDEX for a slot nobody claimed.
+ *
+ * Committing before the node reaches RUNNING is not a lost publish: the
+ * runtime keeps the request and sends it on the first poll that is allowed
+ * to transmit. So the master's first read is the real state of the valves,
+ * not a default.
+ */
+static int solenoid_start(void)
+{
+  for (uint8_t i = 0; i < (uint8_t)ARRAY_SIZE(valves); i++) {
+    fcan_gen::solenoid(i).on_set(
+      [i](const set_req & req, set_resp & resp, fcan_gen::call_handle) noexcept {
+        return set_valve(i, req, resp);
+      });
+
+    publish_state(i);
+  }
+
+  return 0;
+}
+
 FIBRIL_FCAN_FUNC_DEFINE(
   solenoid,
-  .array = FCAN_ARRAY_SOLENOID,
+  .array = fcan_gen::solenoid::block_array_index,
   .count = (uint8_t)ARRAY_SIZE(valves),
   .init = solenoid_init,
   .start = solenoid_start);

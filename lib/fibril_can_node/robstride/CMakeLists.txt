@@ -1,7 +1,7 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: Apache-2.0
 
-zephyr_library_sources_ifdef(CONFIG_FIBRIL_CAN_NODE_ROBSTRIDE robstride.c)
+zephyr_library_sources_ifdef(CONFIG_FIBRIL_CAN_NODE_ROBSTRIDE robstride.cpp)
 
 # The block type definition travels with its implementation: adding a topic
 # changes both files, and separating them invites changing only one.

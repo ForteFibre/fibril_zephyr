@@ -8,7 +8,9 @@
 cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
-project(fibril_node LANGUAGES C)
+# C stays alongside C++: the generated schema_blob.c and lib/fcan_transport/
+# are C whichever wrapper the application uses.
+project(fibril_node LANGUAGES C CXX)
 
 if(NOT ZEPHYR_FIBRIL_CAN_MODULE_DIR)
   message(FATAL_ERROR
@@ -57,7 +59,8 @@ endif()
 fcan_invoke_codegen(
   SCHEMA     "${NODE_SCHEMA}" ${FCAN_TYPE_SCHEMAS} ${FCAN_INSTANCE_SCHEMAS}
   OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/schema_gen"
-  BASE_NAME  schema_gen)
+  BASE_NAME  schema_gen
+  LANGUAGE   CXX)
 
 # Backing section for FIBRIL_FCAN_FUNC_DEFINE (include/fibril_can_node/func.h).
 # Both calls are needed and neither covers the other: the .ld fragment feeds
@@ -67,4 +70,4 @@ fcan_invoke_codegen(
 zephyr_linker_sources(DATA_SECTIONS sections-ram.ld)
 zephyr_iterable_section(NAME fibril_fcan_func GROUP DATA_REGION ${XIP_ALIGN_WITH_INPUT})
 
-target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE src/main.cpp)
