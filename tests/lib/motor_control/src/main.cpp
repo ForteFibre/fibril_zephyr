@@ -136,6 +136,29 @@ ZTEST(motor_control, test_invalid_encoder_drops_closed_loop_to_duty_zero)
   zassert_near(mc.update(at(0)), 0.0f);
 }
 
+ZTEST(motor_control, test_invalid_encoder_stops_a_slew_limited_output_at_once)
+{
+  MotorControl mc;
+  mc.duty_slew_limit(1.0f);
+  mc.speed_controller().kp(1.0f);
+  mc.set_speed(1.0f);
+  zassert_near(run(mc, at(0), 500), 0.5f);
+  zassert_near(mc.update(offline()), 0.0f);
+  /* the slew limit itself is kept */
+  mc.set_duty(1.0f);
+  zassert_near(mc.update(at(0)), 0.001f);
+}
+
+ZTEST(motor_control, test_invalid_sample_keeps_last_position_and_filtered_speed)
+{
+  MotorControl mc;
+  mc.speed_filter_coefficient(0.5f);
+  mc.update(at(40, 100.0f));
+  mc.update(offline());
+  zassert_near(mc.position(), 40.0f);
+  zassert_near(mc.speed(), 50.0f);
+}
+
 ZTEST(motor_control, test_invalid_encoder_leaves_open_loop_duty_alone)
 {
   MotorControl mc;
@@ -241,6 +264,15 @@ ZTEST(motor_control, test_stall_breaker_ignores_the_sign_of_the_gain)
   mc.stall_timeout_ticks(10);
   mc.set_duty(0.5f);
   run(mc, at(0, 100.0f), 50);
+  zassert_false(mc.stalled());
+}
+
+ZTEST(motor_control, test_stall_breaker_does_not_count_invalid_samples)
+{
+  MotorControl mc;
+  mc.stall_timeout_ticks(10);
+  mc.set_duty(0.5f);
+  zassert_near(run(mc, offline(), 50), 0.5f);
   zassert_false(mc.stalled());
 }
 
