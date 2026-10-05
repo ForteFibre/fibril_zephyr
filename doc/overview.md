@@ -20,16 +20,21 @@ Zephyr 本体はこのリポジトリの外に clone され、`west.yml` がそ�
 │   ├── hal/cmsis_6               Cortex-M ポートが要求する CMSIS
 │   ├── lib/cmsis-dsp             CMSIS-DSP
 │   ├── lib/fibril_can            CAN FD 通信フレームワーク（private repo）
+│   ├── lib/fibril_common         ROS 2 側と共通の C++ ライブラリ（private repo）
 │   └── third_party/cannectivity  gs_usb による USB-CAN ゲートウェイ
 └── fibril_zephyr/                このリポジトリ
 ```
 
-`west.yml` が直接宣言しているのは `zephyr`、`cannectivity`、`fibril_can` の 3 つだけである。
+`west.yml` が直接宣言しているのは `zephyr`、`cannectivity`、`fibril_can`、`fibril_common` の 4 つだけである。
 `modules/hal` と `modules/lib` 以下の残りは、`zephyr` プロジェクトの `import` に `name-allowlist` を与えて必要なものだけ取り込んでいる。
 workspace のディレクトリに他のものが置かれていても、この manifest が管理する対象ではない。
 
 サンプルが参照する fibril_can はこのリポジトリの中ではなく `modules/lib/fibril_can` にある。
 private repository なので、`west update` を通すには先に GitHub の認証が必要である。
+
+fibril_common は ROS 2 のノードが使っているものと同じ制御器とシリアライザを基板の上でも使うために載せてある。
+`CONFIG_FIBRIL_COMMON` が立つまで何もビルドしないので、載せているだけではイメージに現れない。
+取り込みの調査結果と部品ごとの状態は [ADR 0008](adr/0008-fibril-common-integration.md) にある。
 
 fibril_can の revision はブランチではなくタグで固定してある（現在は v0.3.1）。
 codegen が決めるブロック配列の並びはワイヤの契約の一部で、`main` を追いかけていると `fcan_config_t::instance_counts` の割り当てが黙って変わる。

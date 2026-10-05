@@ -36,3 +36,12 @@ manifest:
       revision: v0.3.1
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
+    - name: fibril_common
+      # ROS 2 側と共通の C++17 ライブラリ。CONFIG_FIBRIL_COMMON が立つまで
+      # 何もビルドしないので、載せているだけではイメージに現れない。
+      #
+      # タグではなくコミットなのは、Zephyr module の入口（fibril_common #69）
+      # を含むタグがまだ無いため。1.0.19 はそれより前を指している。
+      revision: ebf42f692e41ccafe6f5005768f85b363e5f639e
+      url: https://github.com/ForteFibre/fibril_common.git
+      path: modules/lib/fibril_common
