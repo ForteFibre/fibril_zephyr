@@ -1,0 +1,51 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * RoboMaster Mini V4 directly on the fibril_can bus through the external CAN
+ * port (FDCAN1, PD0/PD1).
+ *
+ * Only the transport. A deployment snippet adds the fibril,fcan-* nodes and
+ * must reference board labels only, never anything defined here, so that the
+ * two overlays can be applied in either order.
+ */
+
+/ {
+    chosen {
+        zephyr,canbus = &fdcan1;
+    };
+};
+
+/* 1 Mbps arbitration and 5 Mbps data, the rate the other fibril_can nodes in
+ * this repository use, and what the 80 MHz PLL_Q kernel clock divides cleanly
+ * (80 and 16 tq/bit); see the clock comment in the board's .dts.
+ *
+ * CanMotorMbed ran this port at 500k/4M (main) or 1M/4M (feat/fibril-can);
+ * neither is a fibril_can bus this node has to join, so the repository's rate
+ * wins until a robot's bus says otherwise.
+ */
+&fdcan1 {
+    status = "okay";
+    bitrate = <1000000>;
+    bitrate-data = <5000000>;
+};
+
+/* The external transceiver's STB is on PB11. CanMotorMbed held it low with a
+ * pull-down; nothing in the CAN driver touches the pin, so the hog takes it
+ * low before any device init runs.
+ */
+&gpiob {
+    can_stb_hog {
+        gpio-hog;
+        gpios = <11 GPIO_ACTIVE_HIGH>;
+        output-low;
+        line-name = "CAN_STB";
+    };
+};
+
+/* boot_id decides which node survives an id collision and jitters T_listen,
+ * so two boards powering up together must not draw the same value.
+ */
+&rng {
+    status = "okay";
+};

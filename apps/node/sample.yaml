@@ -19,13 +19,16 @@ common:
   #   FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps
   # twister's --extra-args=-DFCAN_CODEGEN=... does not.
   filter: CONFIG_FIBRIL_CAN
-  platform_allow:
-    - fibril_rc26_mainair_v01
-  integration_platforms:
-    - fibril_rc26_mainair_v01
+  # Each scenario names its own board: twister joins a list under `common`
+  # with the scenario's, so a board listed here would also be tried with
+  # every other board's snippets.
 
 tests:
   app.node.rc26_air:
+    platform_allow:
+      - fibril_rc26_mainair_v01
+    integration_platforms:
+      - fibril_rc26_mainair_v01
     tags:
       - fibril_can
       - can
@@ -37,6 +40,10 @@ tests:
       - SNIPPET=rc26-mainair-usb;rc26-air
 
   app.node.rc26_robstride:
+    platform_allow:
+      - fibril_rc26_mainair_v01
+    integration_platforms:
+      - fibril_rc26_mainair_v01
     tags:
       - fibril_can
       - can
@@ -45,3 +52,16 @@ tests:
       - motor
     extra_args:
       - SNIPPET=rc26-mainair-usb;rc26-robstride
+
+  app.node.miniv4_md:
+    platform_allow:
+      - fibril_robomaster_miniv4
+    integration_platforms:
+      - fibril_robomaster_miniv4
+    tags:
+      - fibril_can
+      - can
+      - motor
+      - encoder
+    extra_args:
+      - SNIPPET=miniv4-can;miniv4-md
