@@ -41,6 +41,7 @@
 | [0006](0006-robstride-fcan-node-parity.md) | RobStride を fibril_can のブロック型として載せ、ROS 2 実装のインタフェースに合わせる | Proposed |
 | [0007](0007-cpp-node-implementation.md) | fibril_can スレーブを C++17 で書き、codegen の C++ ラッパを使う | Proposed |
 | [0008](0008-fibril-common-integration.md) | fibril_common を Zephyr module として取り込む | Proposed |
+| [0009](0009-motor-control-core.md) | CanMotorMbed の制御のコアを、1 kHz 固定の tick で回る C++ ライブラリとして移す | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -54,4 +55,5 @@
 0006-robstride-fcan-node-parity
 0007-cpp-node-implementation
 0008-fibril-common-integration
+0009-motor-control-core
 ```

@@ -42,6 +42,9 @@ manifest:
       #
       # タグではなくコミットなのは、Zephyr module の入口（fibril_common #69）
       # を含むタグがまだ無いため。1.0.19 はそれより前を指している。
-      revision: ebf42f692e41ccafe6f5005768f85b363e5f639e
+      #
+      # #74 の -Wdouble-promotion の修正を含む。これより前の版では、
+      # CONFIG_FIBRIL_COMMON を立てたビルドが twister の -Werror で止まる。
+      revision: 8f336f4838694dc20b52f15b3385573e74af01c8
       url: https://github.com/ForteFibre/fibril_common.git
       path: modules/lib/fibril_common
