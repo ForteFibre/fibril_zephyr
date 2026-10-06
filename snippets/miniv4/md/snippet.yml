@@ -1,0 +1,18 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# A RoboMaster Mini V4 as the motor driver CanMotorMbed used to be: RoboMaster
+# motors closed around the board's quadrature encoders, exposed as MdMotor.
+# Layered on a transport snippet:
+#
+#   west build -b fibril_robomaster_miniv4 apps/node -S miniv4-can -S miniv4-md
+
+name: miniv4-md
+
+append:
+  EXTRA_CONF_FILE: md.conf
+
+boards:
+  /fibril_robomaster_miniv4.*/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: fibril_robomaster_miniv4.overlay

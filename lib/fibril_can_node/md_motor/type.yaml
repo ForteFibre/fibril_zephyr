@@ -1,0 +1,130 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# A motor closed around an encoder on the board, as seen from the bus. Paired
+# with md_motor.cpp, which implements the handlers this generates.
+#
+# The interface follows ros2_can_toolbox's can_md_controller, the ROS node
+# that drove CanMotorMbed, closely enough that its gain tables and message
+# types carry over: same Target/Feedback/ResetEncoder types, same parameter
+# names under motorN. It is not a drop-in replacement. The bridge puts the
+# parameters on its own node, the trajectory point needs all three arrays
+# filled, and the ADC calibration services are not here yet; doc/apps.md
+# lists the differences.
+
+types:
+  MdMotor:
+    # The declaration order is the bit order of the changed mask that
+    # on_params_changed() receives. Appending is free; reordering silently
+    # moves every bit.
+    #
+    # min and max reach the blob but the slave runtime does not enforce
+    # them, so md_motor.cpp does not rely on them to keep the output safe.
+    params:
+      # User units per encoder count. Position reads gain x counts and speed
+      # gain x counts/s, so the PID gains below see the same numbers they saw
+      # on CanMotorMbed.
+      encoder/gain: { type: f32, default: 1.0 }
+      # Flips command, feedback and the encoder together, so a motor mounted
+      # the other way round is corrected here rather than in every consumer.
+      # can_md_controller did the same on the host.
+      invert: { type: bool, default: false }
+
+      # Gains are per 1 ms tick, as on CanMotorMbed. `max` bounds the
+      # controller's output: duty for velocity, speed for a cascaded
+      # position loop.
+      velocity/kp: { type: f32, default: 0.0, min: 0.0 }
+      velocity/ki: { type: f32, default: 0.0, min: 0.0 }
+      velocity/kd: { type: f32, default: 0.0, min: 0.0 }
+      velocity/max: { type: f32, default: 1.0, min: 0.0 }
+      velocity/i_sat: { type: f32, default: 1.0, min: 0.0 }
+      # Weight of the newest speed sample. 1 disables the filter.
+      velocity/filter_coe: { type: f32, default: 0.9, min: 0.0, max: 1.0 }
+      position/kp: { type: f32, default: 0.0, min: 0.0 }
+      position/ki: { type: f32, default: 0.0, min: 0.0 }
+      position/kd: { type: f32, default: 0.0, min: 0.0 }
+      position/max: { type: f32, default: 1.0, min: 0.0 }
+      position/i_sat: { type: f32, default: 1.0, min: 0.0 }
+
+      # Feed-forward friction compensation in the cascaded position mode, in
+      # duty and duty per unit speed.
+      friction/coulomb: { type: f32, default: 0.0, min: 0.0 }
+      friction/viscous: { type: f32, default: 0.0, min: 0.0 }
+
+      # Whether a POSITION target runs the position loop into the velocity
+      # loop (true) or straight to duty (false). can_md_controller held this
+      # on the host and picked the command to send; here the node picks.
+      use_cascade_position: { type: bool, default: false }
+      # Duty per unit acceleration, applied to the trajectory point's
+      # acceleration as a duty feed-forward. Also host-side in
+      # can_md_controller.
+      accel_ff_gain: { type: f32, default: 0.0 }
+
+      # Duty slew limit in duty per second. 0 disables it.
+      duty/slew_rate: { type: f32, default: 0.0, min: 0.0 }
+      # How long the output may stay above the stall threshold with the
+      # encoder not moving before the output is cut. 0 disables the breaker.
+      # A trip holds until reset_safety or until this is set to 0 and back.
+      stall/timeout_ms: { type: u32, default: 0 }
+
+    topics:
+      # DUTY, VELOCITY and POSITION. TORQUE and TRAJECTORY are ignored with a
+      # warning, as can_md_controller did; use `trajectory` for the latter.
+      target:
+        dir: m2s
+        fields:
+          type: u8
+          value: f32
+        ros: { type: fibril_control_msgs/msg/Target }
+
+      # A cascaded position target with velocity and acceleration
+      # feed-forward. The feed-forward lapses 100 ms after the last point, so
+      # a trajectory has to keep streaming.
+      #
+      # The bridge drops a message whose arrays are shorter than declared
+      # here, so every point must fill positions, velocities and
+      # accelerations, unlike can_md_controller where the last two were
+      # optional.
+      trajectory:
+        dir: m2s
+        fields:
+          positions: { type: f32, len: 1 }
+          velocities: { type: f32, len: 1 }
+          accelerations: { type: f32, len: 1 }
+        ros: { type: trajectory_msgs/msg/JointTrajectoryPoint }
+
+      # 100 Hz, the rate a CanMotorMbed bulk feedback was usually set to.
+      # `current` is left out until the node measures it; the bridge fills an
+      # omitted field with zero.
+      feedback:
+        dir: s2m
+        period_us: 10000
+        fields:
+          is_ready: bool
+          velocity: f32
+          position: f32
+          output: f32
+        ros: { type: fibril_control_msgs/msg/Feedback }
+
+    services:
+      # `offset: false` makes the current position read as `value`;
+      # `offset: true` shifts it down by `value`. Either way the motor keeps
+      # whatever mode it was in, so a position target held across the reset
+      # now points somewhere else.
+      #
+      # `success` has no field to land in on the ROS side, ResetEncoder.srv
+      # answers with nothing. It is here because the codegen emits an
+      # unwritten reply buffer for a truly empty response, which the -Werror
+      # build twister runs rejects.
+      reset_encoder:
+        request: { offset: bool, value: f32 }
+        response: { success: bool }
+        ros: { type: fibril_control_msgs/srv/ResetEncoder }
+
+      # Clears a stall breaker trip.
+      reset_safety:
+        request: {}
+        response: { success: bool }
+        ros:
+          type: std_srvs/srv/Trigger
+          map: { success: success }

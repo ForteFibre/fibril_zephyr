@@ -42,6 +42,7 @@
 | [0007](0007-cpp-node-implementation.md) | fibril_can スレーブを C++17 で書き、codegen の C++ ラッパを使う | Proposed |
 | [0008](0008-fibril-common-integration.md) | fibril_common を Zephyr module として取り込む | Proposed |
 | [0009](0009-motor-control-core.md) | CanMotorMbed の制御のコアを、1 kHz 固定の tick で回る C++ ライブラリとして移す | Proposed |
+| [0010](0010-md-motor-block-type.md) | CanMotorMbed の後継を MdMotor ブロック型として載せ、can_md_controller に寄せる | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -56,4 +57,5 @@
 0007-cpp-node-implementation
 0008-fibril-common-integration
 0009-motor-control-core
+0010-md-motor-block-type
 ```

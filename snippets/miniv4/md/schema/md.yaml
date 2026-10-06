@@ -1,0 +1,21 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# Who a RoboMaster Mini V4 motor driver is on the bus.
+#
+# `{i}` in the node name is replaced with the node id at startup, so this file
+# describes a role rather than one board. There is no `types:` and no
+# `instances:`: the devicetree decides what the node runs.
+
+node: md_controller{i}
+protocol: 2
+
+options:
+  allocation: static
+
+limits:
+  max_frames: 32
+  max_copy_entries: 128
+  # Every MdMotor service fits a single frame.
+  service_buffer: 0
+  service_reassembly: 1

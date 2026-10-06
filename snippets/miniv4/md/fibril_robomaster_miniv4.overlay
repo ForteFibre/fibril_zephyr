@@ -1,0 +1,145 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * What a Mini V4 motor driver drives: RoboMaster motors on the two motor CAN
+ * buses, each closed around one of the board's quadrature encoder inputs.
+ * The transport snippet decides how the node reaches the fibril_can bus, so
+ * nothing here mentions that controller.
+ *
+ * Four motors, the shape of CanMotorMbed's robomaster_miniv4 build without
+ * ROBOMASTER_ENCODER: motor N pairs with encoder input ENCN. Using the
+ * RoboMaster's own rotor encoder instead needs an encoder-class shim that
+ * does not exist yet.
+ */
+
+/ {
+    fcan_md_motor: fcan-md-motor {
+        compatible = "fibril,fcan-md-motor";
+
+        /* Becomes motor0..motorN on the ROS side, the names
+         * can_md_controller used. */
+        fcan-ns = "motor{i}";
+
+        motors = <&rm_motor1>, <&rm_motor2>, <&rm_motor3>, <&rm_motor4>;
+        encoders = <&enc0>, <&enc1>, <&enc2>, <&enc3>;
+        status = "okay";
+    };
+
+    robomaster: robomaster {
+        compatible = "dji,robomaster";
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        /* Both motor buses, MOTCAN0 and MOTCAN1. The driver learns which bus
+         * a motor is on from its feedback, so the ids below are unique
+         * across the pair rather than per bus. */
+        cans = <&fdcan2 &fdcan3>;
+
+        /* RoboMaster ESCs report every 1 ms, so this is many missed frames
+         * before a motor reads as stale. */
+        feedback-timeout-ms = <100>;
+
+        /* C620 at its full command range. duty-full-scale on the md_motor
+         * node, not this limit, decides what a duty of 1.0 means. */
+        rm_motor1: motor@1 {
+            compatible = "dji,robomaster-motor";
+            reg = <1>;
+            model = "c620";
+            max-current = <16384>;
+        };
+
+        rm_motor2: motor@2 {
+            compatible = "dji,robomaster-motor";
+            reg = <2>;
+            model = "c620";
+            max-current = <16384>;
+        };
+
+        rm_motor3: motor@3 {
+            compatible = "dji,robomaster-motor";
+            reg = <3>;
+            model = "c620";
+            max-current = <16384>;
+        };
+
+        rm_motor4: motor@4 {
+            compatible = "dji,robomaster-motor";
+            reg = <4>;
+            model = "c620";
+            max-current = <16384>;
+        };
+    };
+};
+
+/* RoboMaster ESCs speak classic CAN at 1 Mbit/s, which is also what
+ * CanMotorMbed ran these buses at. No data phase: an FD frame must not reach
+ * a bus that cannot carry one.
+ */
+&fdcan2 {
+    status = "okay";
+    bitrate = <1000000>;
+};
+
+&fdcan3 {
+    status = "okay";
+    bitrate = <1000000>;
+};
+
+/* The encoder inputs, by the silkscreen names CanMotorMbed's PinNames.h
+ * gives them. Every prescaler is zero because the prescaler divides encoder
+ * counts as well. counts-per-revolution is informational and depends on the
+ * encoder fitted; 2048 is a placeholder until a robot names its encoders.
+ */
+&timers3 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc0: encoder0 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim3_ch1_pa6 &tim3_ch2_pa7>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+&timers4 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc2: encoder2 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim4_ch1_pd12 &tim4_ch2_pd13>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+/* PA0/PA1 could also be TIM5, which ENC1 needs. */
+&timers2 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc3: encoder3 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim2_ch1_pa0 &tim2_ch2_pa1>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+&timers5 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc1: encoder1 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim5_ch1_pb2 &tim5_ch2_pc12>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};

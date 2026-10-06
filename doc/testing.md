@@ -28,9 +28,17 @@ west twister -T apps --integration
 `app/sample.yaml` は `build_only: true` で、`integration_platforms` に `nucleo_g474re` を指定している。
 `app.default` と、`debug.conf` を重ねた `app.debug` の 2 通りをビルドする。
 
-`apps/node/sample.yaml` も `build_only: true` で、`integration_platforms` は `fibril_rc26_mainair_v01` である。
-焼く単位ごとに 1 シナリオで、トランスポート snippet とデプロイ snippet を重ねた組み合わせをビルドする。
-現状は `rc26-mainair-usb` と `rc26-air` を重ねた `app.node.rc26_air` の 1 通りである。
+`apps/node/sample.yaml` も `build_only: true` である。
+焼く単位ごとに 1 シナリオで、トランスポート snippet とデプロイ snippet を重ねた組み合わせを、そのボードでビルドする。
+
+| シナリオ | ボード | snippet |
+| --- | --- | --- |
+| `app.node.rc26_air` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-air` |
+| `app.node.rc26_robstride` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-robstride` |
+| `app.node.miniv4_md` | `fibril_robomaster_miniv4` | `miniv4-can`、`miniv4-md` |
+
+ボードはシナリオごとに `platform_allow` で書く。
+twister は `common` のリストをシナリオのリストに連結するので、`common` にボードを並べると、別のボードの snippet でもビルドを試みてしまう。
 
 `apps/` のビルドは `fcan_codegen` CLI を要求する。
 `ros-jazzy-fibril-can-codegen` を入れた環境では自動で見つかる。

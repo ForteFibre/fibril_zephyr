@@ -1,0 +1,20 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# How a RoboMaster Mini V4 reaches the bus, with nothing about what it does
+# there. A deployment snippet is layered on top of it:
+#
+#   west build -b fibril_robomaster_miniv4 apps/node -S miniv4-can -S miniv4-md
+#
+# The node sits straight on the external CAN port; the board has no USB CAN
+# role, so there is no hub.
+
+name: miniv4-can
+
+boards:
+  # A regex, not a bare name: the key is matched against
+  # "<board>/<qualifiers>", so an exact-match key never fires on a board that
+  # names its SoC.
+  /fibril_robomaster_miniv4.*/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: fibril_robomaster_miniv4.overlay
