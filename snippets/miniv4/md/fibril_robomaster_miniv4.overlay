@@ -8,10 +8,9 @@
  * nothing here mentions that controller.
  *
  * Four motors, the shape of CanMotorMbed's robomaster_miniv4 build without
- * ROBOMASTER_ENCODER. Motor N pairs with the Nth encoder input that sits on a
- * timer channel pair; ENC1 (PB2/PC12) does not, so it is skipped and ENC4
- * takes its place. Using the RoboMaster's own rotor encoder instead needs an
- * encoder-class shim that does not exist yet.
+ * ROBOMASTER_ENCODER: motor N pairs with encoder input ENCN. Using the
+ * RoboMaster's own rotor encoder instead needs an encoder-class shim that
+ * does not exist yet.
  */
 
 / {
@@ -23,7 +22,7 @@
         fcan-ns = "motor{i}";
 
         motors = <&rm_motor1>, <&rm_motor2>, <&rm_motor3>, <&rm_motor4>;
-        encoders = <&enc0>, <&enc2>, <&enc3>, <&enc4>;
+        encoders = <&enc0>, <&enc1>, <&enc2>, <&enc3>;
         status = "okay";
     };
 
@@ -118,6 +117,7 @@
     };
 };
 
+/* PA0/PA1 could also be TIM5, which ENC1 needs. */
 &timers2 {
     status = "okay";
     st,prescaler = <0>;
@@ -131,13 +131,13 @@
     };
 };
 
-&timers1 {
+&timers5 {
     status = "okay";
     st,prescaler = <0>;
 
-    enc4: encoder4 {
+    enc1: encoder1 {
         compatible = "fibril,stm32-qdec";
-        pinctrl-0 = <&tim1_ch1_pe9 &tim1_ch2_pe11>;
+        pinctrl-0 = <&tim5_ch1_pb2 &tim5_ch2_pc12>;
         pinctrl-names = "default";
         counts-per-revolution = <2048>;
         status = "okay";

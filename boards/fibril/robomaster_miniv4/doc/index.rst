@@ -67,6 +67,30 @@ Twister が認識する機能は ``gpio``、``uart``、``dma``、``can`` であ�
      - ``fdcan3``
      - RX=PA8、TX=PA15
      - 無効
+   * - エンコーダ入力 ENC0
+     - ``timers3`` CH1/CH2
+     - A=PA6、B=PA7
+     - 未定義
+   * - エンコーダ入力 ENC1
+     - ``timers5`` CH1/CH2
+     - A=PB2、B=PC12
+     - 未定義
+   * - エンコーダ入力 ENC2
+     - ``timers4`` CH1/CH2
+     - A=PD12、B=PD13
+     - 未定義
+   * - エンコーダ入力 ENC3
+     - ``timers2`` CH1/CH2（``timers5`` も可）
+     - A=PA0、B=PA1
+     - 未定義
+   * - エンコーダ入力 ENC4
+     - ``timers1`` CH1/CH2
+     - A=PE9、B=PE11
+     - 未定義
+   * - エンコーダ入力 ENC5
+     - ``timers8`` CH1/CH2（``timers3`` も可）
+     - A=PC6、B=PC7
+     - 未定義
    * - USB デバイス
      - ``usb`` （``zephyr_udc0``）
      - DM=PA11、DP=PA12
@@ -90,6 +114,11 @@ FDCAN と ``usart3``、``usb`` はピンとクロックだけを設定して無�
 使う側の overlay が ``status`` を ``"okay"`` にし、ボーレートやビットレート、DMA、子ノードを与える。
 
 RS485 の設定例は :doc:`/drivers/amt21`、モータ CAN の使い方は :doc:`/drivers/robomaster` を参照する。
+
+エンコーダ入力のピン名は CanMotorMbed の ``PinNames.h`` に合わせてある。
+ボードの devicetree はこれらのノードを持たず、使う側の overlay が timer の子に ``fibril,stm32-qdec`` のノードを置く（:doc:`/drivers/qdec_stm32`）。
+ENC0 と ENC5、ENC1 と ENC3 は、それぞれ同じ timer（``timers3``、``timers5``）にも載るので、両方を使うときは表の割り当てにする。
+``miniv4-md`` snippet は ENC0〜ENC3 を使う。
 
 ロータリスイッチは ``gpio-keys`` として記述しているが、入力イベント源として使うことは想定していない。
 ニブルとして読み、機体ごとの CAN ID やホスト名を導出する用途である。
