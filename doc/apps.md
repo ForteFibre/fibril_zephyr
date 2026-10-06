@@ -35,8 +35,8 @@ west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
 
 | 層 | 決めるもの | 例 |
 | --- | --- | --- |
-| トランスポート | 基板がバスに出る経路 | `rc26-mainair-usb` |
-| デプロイ | ノード名、node_id、どの機能をどのピンに出すか | `rc26-air`、`rc26-robstride` |
+| トランスポート | 基板がバスに出る経路 | `rc26-mainair-usb`、`miniv4-can` |
+| デプロイ | ノード名、node_id、どの機能をどのピンに出すか | `rc26-air`、`rc26-robstride`、`miniv4-md` |
 
 RC26 MainAir には必ず USB の CAN が載り、電磁弁やエンコーダは搭載の有無が変わる。
 経路を別の層に括り出しておくと、機能の増減がデプロイ snippet 1 つの中で閉じる。
@@ -64,6 +64,16 @@ snippets/rc26/robstride/
 ├── robstride.conf                     CONFIG_FIBRIL_NODE_SCHEMA と node_id
 ├── fibril_rc26_mainair_v01.overlay    CAN1、robstride バス、アクチュエータ
 └── schema/robstride.yaml              node と limits
+
+snippets/miniv4/can/
+├── snippet.yml
+└── fibril_robomaster_miniv4.overlay   FDCAN1 を zephyr,canbus に、STB、RNG
+
+snippets/miniv4/md/
+├── snippet.yml
+├── md.conf                            CONFIG_FIBRIL_NODE_SCHEMA と node_id
+├── fibril_robomaster_miniv4.overlay   RoboMaster バス、qdec、md_motor ノード
+└── schema/md.yaml                     node と limits
 ```
 
 `snippet.yml` の `boards:` キーは正規表現にする。
@@ -114,6 +124,7 @@ schema はロボット 1 台の役割を述べるもので、基板 1 枚を述�
 | --- | --- | --- |
 | `Solenoid` | `fibril,fcan-solenoid` | GPIO の電磁弁。Service で開閉し、状態を publish する |
 | `RobstrideMotor` | `fibril,fcan-robstride` | RobStride アクチュエータ。指令、feedback、診断、再ゼロ |
+| `MdMotor` | `fibril,fcan-md-motor` | エンコーダで閉ループにした電流指令のモータ。CanMotorMbed の後継 |
 
 `RobstrideMotor` は `robstride_actuator_bridge_ros2` が ROS グラフに出していたインタフェースをそのまま名乗る。
 モータを PC の SocketCAN から基板に移しても購読側は変わらない、というのがこの型の目的である。
@@ -121,6 +132,18 @@ schema はロボット 1 台の役割を述べるもので、基板 1 枚を述�
 
 RobStride のバスは classic CAN なので、fibril_can が使うコントローラとは別のものを割り当てる（[doc/drivers/robstride.md](drivers/robstride.md)）。
 `fibril,fcan-robstride` は `motors` に `robstride,motor` のノードを並べるだけで、モータ自身の配線と上限は `robstride,bus` の側に残る。
+
+`MdMotor` は CanMotorMbed がしていた速度と位置の制御を基板で回す（`lib/motor_control`、[ADR 0009](adr/0009-motor-control-core.md)）。
+`fibril,fcan-md-motor` は `motors` と `encoders` を同じ位置どうしで組にし、1 組を 1 インスタンスにする。
+ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッセージの型、topic と param の名前、ゲインの単位はそのまま使える。
+ただし次の点が違う。判断の理由は [ADR 0010](adr/0010-md-motor-block-type.md) にある。
+
+- param は bridge の node に `<node>.motorN.velocity.kp` の形で載る。`can_md_controller` は自分の node に `motorN.velocity.kp` を持っていた。
+- `trajectory`（`JointTrajectoryPoint`）は `positions`、`velocities`、`accelerations` をどれも 1 要素以上埋める。短い配列のメッセージは bridge が捨てる。
+- `invert`、`use_cascade_position`、`accel_ff_gain` は node 側の param になった。`can_md_controller` は host で処理していた。
+- `encoder.offset` の param は無い。`reset_encoder` を呼ぶ。
+- ADC のキャリブレーション（`sensor`、`trigger` など）と feedback の `current` はまだ無い。
+- 指令が途絶えたときに出力を止める仕組みはまだ無い。
 
 ## 機能を 1 つ足す
 
