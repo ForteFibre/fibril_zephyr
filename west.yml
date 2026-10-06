@@ -30,10 +30,13 @@ manifest:
       # application passes in fcan_config_t::instance_counts. Bump this
       # deliberately, together with any migration the release notes call for.
       #
-      # v0.3.1 carries the LANGUAGE argument on fcan_invoke_codegen (#59) that
-      # apps/node needs to be emitted as a C++ wrapper, on top of the schema
-      # merging (#55) and the codegen lookup (#56) the build already relied on.
-      revision: v0.3.1
+      # v0.3.2 adds read_<topic>(seq) (#61), which MdMotor uses to apply only
+      # the commands that newly arrived, on top of the LANGUAGE argument on
+      # fcan_invoke_codegen (#59), the schema merging (#55) and the codegen
+      # lookup (#56) the build already relied on. The codegen package must be
+      # at least this version too: an older fcan_codegen emits no
+      # read_<topic>(seq) and apps/node with MdMotor fails to compile.
+      revision: v0.3.2
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
     - name: fibril_common
