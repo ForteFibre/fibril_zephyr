@@ -122,8 +122,8 @@ static void apply_params(uint8_t inst)
   s->cascade = m.param_use_cascade_position();
 
   c.encoder_gain(s->encoder_gain);
-  /* The schema's min and max already bound this, so a refusal here means the
-   * two disagree. */
+  /* The runtime stores parameters without checking the schema's min and max,
+   * so this is the check that keeps the filter stable. */
   if (!c.speed_filter_coefficient(m.param_velocity__filter_coe())) {
     LOG_WRN("motor %u: velocity/filter_coe out of range, kept", inst);
   }
@@ -239,6 +239,11 @@ static void apply_target(uint8_t inst, const fcan_gen::mdmotor::target & cmd)
 {
   struct motor_state * s = &states[inst];
 
+  if (!std::isfinite(cmd.value)) {
+    LOG_WRN("motor %u: non-finite target ignored", inst);
+    return;
+  }
+
   switch (cmd.type) {
     case TARGET_DUTY:
       s->control.set_duty(cmd.value);
@@ -262,6 +267,12 @@ static void apply_target(uint8_t inst, const fcan_gen::mdmotor::target & cmd)
 static void apply_trajectory(uint8_t inst, const fcan_gen::mdmotor::trajectory & point)
 {
   struct motor_state * s = &states[inst];
+
+  if (!std::isfinite(point.positions[0]) || !std::isfinite(point.velocities[0]) ||
+      !std::isfinite(point.accelerations[0])) {
+    LOG_WRN("motor %u: non-finite trajectory point ignored", inst);
+    return;
+  }
 
   s->control.set_position_speed(point.positions[0]);
   s->control.set_velocity_ff(point.velocities[0]);
@@ -298,10 +309,25 @@ static void apply_commands(uint8_t inst)
   }
 }
 
+/*
+ * The commands are checked on the way in, but a parameter can still carry a
+ * NaN into the loops (the runtime stores parameters without checking the
+ * schema's min/max), and lround
+ * of a non-finite or out-of-range value is unspecified. Anything that is not
+ * a finite duty stops the motor rather than reaching the integer conversion.
+ */
 static void drive(uint8_t inst, float duty)
 {
-  const float raw = duty * states[inst].sign * duty_full_scale;
-  const int16_t output = (int16_t)CLAMP(std::lround(raw), INT16_MIN, INT16_MAX);
+  float raw = duty * states[inst].sign * duty_full_scale;
+
+  if (!std::isfinite(raw)) {
+    LOG_WRN_ONCE("motor %u: non-finite duty, output 0", inst);
+    raw = 0.0F;
+  }
+
+  raw = CLAMP(raw, (float)INT16_MIN, (float)INT16_MAX);
+
+  const int16_t output = (int16_t)std::lround(raw);
   const int ret = motor_set_output(motors[inst], MOTOR_OUTPUT_MODE_CURRENT, output);
 
   if (ret != 0) {

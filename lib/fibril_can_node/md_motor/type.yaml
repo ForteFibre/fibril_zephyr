@@ -17,6 +17,9 @@ types:
     # The declaration order is the bit order of the changed mask that
     # on_params_changed() receives. Appending is free; reordering silently
     # moves every bit.
+    #
+    # min and max reach the blob but the slave runtime does not enforce
+    # them, so md_motor.cpp does not rely on them to keep the output safe.
     params:
       # User units per encoder count. Position reads gain x counts and speed
       # gain x counts/s, so the PID gains below see the same numbers they saw
