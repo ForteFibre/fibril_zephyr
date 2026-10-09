@@ -56,7 +56,8 @@ MdMotor の速度のローパスで均す前提である。
 受け手は割り込み文脈で呼ばれうるので、ブロックしてはいけない。
 
 初期化の順序は devicetree の依存で決まる。
-encoder のノードが `motor` の phandle を持つので、同じ優先度でもモータが先に初期化される。
+encoder のノードが `motor` の phandle を持つので、同じ優先度でもモータが先に初期化される（Zephyr は同じ優先度の device を devicetree の序数の順に並べる。`Z_DEVICE_INIT_SUB_PRIO`）。
+`CONFIG_ENCODER_INIT_PRIORITY` を `CONFIG_MOTOR_INIT_PRIORITY` より小さくするとこの順序が崩れるので、`BUILD_ASSERT` で止める。
 モータの初期化は自分の data を 0 で埋めるので、順序が逆になると登録した受け手が消える。
 encoder 側は `device_is_ready()` でモータを確かめてから登録する。
 

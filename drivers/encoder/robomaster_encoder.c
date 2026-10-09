@@ -28,6 +28,14 @@
 
 LOG_MODULE_REGISTER(encoder_robomaster, CONFIG_ENCODER_LOG_LEVEL);
 
+/* The motor's init clears its data, listener included, so it has to run
+ * first. At equal priorities Zephyr orders devices by devicetree ordinal,
+ * and the motor phandle puts the motor earlier; a lower priority here would
+ * override that. */
+BUILD_ASSERT(
+  CONFIG_ENCODER_INIT_PRIORITY >= CONFIG_MOTOR_INIT_PRIORITY,
+  "the RoboMaster encoder must initialise after its motor");
+
 /* The ESC reports the rotor angle as 0..8191. */
 #define ROBOMASTER_ENCODER_BITS 13U
 
