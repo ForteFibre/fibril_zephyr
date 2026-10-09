@@ -29,14 +29,14 @@ config FIBRIL_NODE_ID
 	int "fibril_can node id"
 	range 0 126
 	default 16
+	depends on !FIBRIL_NODE_ID_SWITCH
 	help
 	  0x7F is the broadcast address and cannot be used.
 
-	  Interim: on a real board the id comes from a DIP switch or a config
-	  ROM, so that two identical boards can run one image. RC26 MainAir V01
-	  has no such input in its devicetree yet, so the id is fixed at build
-	  time here. Replace this with the runtime read once lib/node_id/
-	  exists.
+	  Only for a board without an id switch. Where the devicetree has a
+	  `fibril,node-id` chosen node, FIBRIL_NODE_ID_SWITCH reads the id at
+	  boot instead, so that two identical boards can run one image. RC26
+	  MainAir V01 has no such input, so its id is fixed at build time here.
 
 rsource "md_motor/Kconfig"
 rsource "robstride/Kconfig"

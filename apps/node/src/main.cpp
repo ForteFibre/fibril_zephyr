@@ -21,6 +21,7 @@
 
 #include <fcan_transport/transport.h>
 #include <fibril_can_node/func.h>
+#include <node_id/node_id.h>
 
 #include "schema_gen.hpp"
 
@@ -95,10 +96,15 @@ int main(void)
 
   fcan_gen::config_user user{};
 
-  /* Build-time for now. On a board with a DIP switch or a config ROM this is
-   * read at boot so that identical boards share one image.
-   */
+#if defined(CONFIG_FIBRIL_NODE_ID_SWITCH)
+  rc = node_id_read(&user.node_id);
+  if (rc != 0) {
+    LOG_ERR("could not read the node id switch (%d)", rc);
+    return rc;
+  }
+#else
   user.node_id = CONFIG_FIBRIL_NODE_ID;
+#endif
   user.boot_id = sys_rand32_get();
   user.instance_counts = counts;
   user.hal = fcan_transport_hal();

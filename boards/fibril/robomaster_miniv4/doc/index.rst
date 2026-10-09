@@ -104,7 +104,7 @@ Twister が認識する機能は ``gpio``、``uart``、``dma``、``can`` であ�
      - PF2（アクティブ Low）
      - 有効
    * - ロータリ ID スイッチ
-     - ``rot1`` / ``rot2`` / ``rot4`` / ``rot8``
+     - ``rotary_id`` の ROT1 / ROT2 / ROT4 / ROT8
      - PC0 / PC1 / PE3 / PE2（プルアップ、アクティブ Low）
      - 有効
 
@@ -118,10 +118,10 @@ RS485 の設定例は :doc:`/drivers/amt21`、モータ CAN の使い方は :doc
 エンコーダ入力のピン名は CanMotorMbed の ``PinNames.h`` に合わせてある。
 ボードの devicetree はこれらのノードを持たず、使う側の overlay が timer の子に ``fibril,stm32-qdec`` のノードを置く（:doc:`/drivers/qdec_stm32`）。
 ENC0 と ENC5、ENC1 と ENC3 は、それぞれ同じ timer（``timers3``、``timers5``）にも載るので、両方を使うときは表の割り当てにする。
-``miniv4-md`` snippet は ENC0〜ENC3 を使う。
+``miniv4-md-qdec4`` snippet は ENC0〜ENC3 を使う。
 
-ロータリスイッチは ``gpio-keys`` として記述しているが、入力イベント源として使うことは想定していない。
-ニブルとして読み、機体ごとの CAN ID やホスト名を導出する用途である。
+ロータリスイッチは ``fibril,id-switch``（``rotary_id``）として記述し、``chosen`` の ``fibril,node-id`` がこれを指す。
+ROT1 を最下位ビットとする 4 ビットの値として読み、fibril_can の node_id にそのまま使う（``lib/node_id``、:doc:`/apps` の「node_id を ID スイッチから読む」）。
 
 フラッシュのパーティション
 ==========================
