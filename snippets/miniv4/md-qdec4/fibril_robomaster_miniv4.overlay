@@ -8,9 +8,8 @@
  * nothing here mentions that controller.
  *
  * Four motors, the shape of CanMotorMbed's robomaster_miniv4 build without
- * ROBOMASTER_ENCODER: motor N pairs with encoder input ENCN. Using the
- * RoboMaster's own rotor encoder instead needs an encoder-class shim that
- * does not exist yet.
+ * ROBOMASTER_ENCODER: motor N pairs with encoder input ENCN. Closing around
+ * the RoboMaster's own rotor instead is miniv4-md-rotor8.
  */
 
 / {

@@ -53,7 +53,7 @@ tests:
     extra_args:
       - SNIPPET=rc26-mainair-usb;rc26-robstride
 
-  app.node.miniv4_md:
+  app.node.miniv4_md_qdec4:
     platform_allow:
       - fibril_robomaster_miniv4
     integration_platforms:
@@ -64,4 +64,17 @@ tests:
       - motor
       - encoder
     extra_args:
-      - SNIPPET=miniv4-can;miniv4-md
+      - SNIPPET=miniv4-can;miniv4-md-qdec4
+
+  app.node.miniv4_md_rotor8:
+    platform_allow:
+      - fibril_robomaster_miniv4
+    integration_platforms:
+      - fibril_robomaster_miniv4
+    tags:
+      - fibril_can
+      - can
+      - motor
+      - encoder
+    extra_args:
+      - SNIPPET=miniv4-can;miniv4-md-rotor8

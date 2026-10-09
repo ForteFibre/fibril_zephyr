@@ -35,7 +35,8 @@ west twister -T apps --integration
 | --- | --- | --- |
 | `app.node.rc26_air` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-air` |
 | `app.node.rc26_robstride` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-robstride` |
-| `app.node.miniv4_md` | `fibril_robomaster_miniv4` | `miniv4-can`、`miniv4-md` |
+| `app.node.miniv4_md_qdec4` | `fibril_robomaster_miniv4` | `miniv4-can`、`miniv4-md-qdec4` |
+| `app.node.miniv4_md_rotor8` | `fibril_robomaster_miniv4` | `miniv4-can`、`miniv4-md-rotor8` |
 
 ボードはシナリオごとに `platform_allow` で書く。
 twister は `common` のリストをシナリオのリストに連結するので、`common` にボードを並べると、別のボードの snippet でもビルドを試みてしまう。

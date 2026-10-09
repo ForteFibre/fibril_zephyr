@@ -4,7 +4,7 @@
 # How a RoboMaster Mini V4 reaches the bus, with nothing about what it does
 # there. A deployment snippet is layered on top of it:
 #
-#   west build -b fibril_robomaster_miniv4 apps/node -S miniv4-can -S miniv4-md
+#   west build -b fibril_robomaster_miniv4 apps/node -S miniv4-can -S miniv4-md-qdec4
 #
 # The node sits straight on the external CAN port; the board has no USB CAN
 # role, so there is no hub.
