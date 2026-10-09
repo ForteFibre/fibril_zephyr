@@ -1,6 +1,33 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: Apache-2.0
 
+menu "fibril_can node"
+
+config APP_WATCHDOG
+	bool "Reset the board when the function ticks stop"
+	default y
+	depends on WATCHDOG
+	depends on $(dt_alias_enabled,watchdog0)
+	help
+	  Start the watchdog0 device just before handing over to the transport
+	  and feed it from the function ticks. A control loop or a fcan_poll
+	  that stops running then resets the board instead of leaving the last
+	  output on the motors.
+
+	  An image with no tick has nothing to feed it from, so the watchdog
+	  stays off there and says so in the log.
+
+config APP_WATCHDOG_TIMEOUT_MS
+	int "Watchdog timeout in milliseconds"
+	default 1000
+	depends on APP_WATCHDOG
+	help
+	  1000 is what CanMotorMbed gave the IWDG. The ticks run every
+	  millisecond, so this only has to cover how long a tick may
+	  legitimately be held up.
+
+endmenu
+
 menu "Zephyr"
 source "Kconfig.zephyr"
 endmenu
