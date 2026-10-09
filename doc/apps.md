@@ -25,8 +25,8 @@ west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
 | 基板 | ペリフェラルの実体 | `boards/fibril/<board>/` |
 | 機能 | ブロック型とその実装 | `lib/fibril_can_node/<type>/` |
 | トランスポート | フレームがバスに届く経路 | `lib/fcan_transport/`（devicetree が選ぶ） |
-| 焼く単位 | 配線の割り当て、ノード名、node_id | `snippets/<大会>/<名前>/` |
-| 個体 | node_id | 実行時（当面は snippet の Kconfig） |
+| 焼く単位 | 配線の割り当て、ノード名 | `snippets/<大会>/<名前>/` |
+| 個体 | node_id | 基板の ID スイッチ（無い基板は snippet の Kconfig） |
 
 ## snippet を 2 層に重ねる
 
@@ -36,7 +36,7 @@ west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
 | 層 | 決めるもの | 例 |
 | --- | --- | --- |
 | トランスポート | 基板がバスに出る経路 | `rc26-mainair-usb`、`miniv4-can` |
-| デプロイ | ノード名、node_id、どの機能をどのピンに出すか | `rc26-air`、`rc26-robstride`、`miniv4-md` |
+| デプロイ | ノード名、どの機能をどのピンに出すか（ID スイッチの無い基板では node_id も） | `rc26-air`、`rc26-robstride`、`miniv4-md-qdec4` |
 
 RC26 MainAir には必ず USB の CAN が載り、電磁弁やエンコーダは搭載の有無が変わる。
 経路を別の層に括り出しておくと、機能の増減がデプロイ snippet 1 つの中で閉じる。
@@ -69,12 +69,22 @@ snippets/miniv4/can/
 ├── snippet.yml
 └── fibril_robomaster_miniv4.overlay   FDCAN1 を zephyr,canbus に、STB、RNG
 
-snippets/miniv4/md/
+snippets/miniv4/schema/md.yaml         miniv4-md-* が共有する node と limits
+
+snippets/miniv4/md-qdec4/
 ├── snippet.yml
-├── md.conf                            CONFIG_FIBRIL_NODE_SCHEMA と node_id
-├── fibril_robomaster_miniv4.overlay   RoboMaster バス、qdec、md_motor ノード
-└── schema/md.yaml                     node と limits
+├── md-qdec4.conf                      CONFIG_FIBRIL_NODE_SCHEMA と watchdog
+└── fibril_robomaster_miniv4.overlay   RoboMaster バス、qdec、md_motor ノード
+
+snippets/miniv4/md-rotor8/
+├── snippet.yml
+├── md-rotor8.conf                     CONFIG_FIBRIL_NODE_SCHEMA と watchdog
+└── fibril_robomaster_miniv4.overlay   RoboMaster バス、ロータのエンコーダ、md_motor ノード
 ```
+
+`miniv4-md-*` の名前の後半は、モータが閉ループに使うエンコーダを、モータの並び順に `<種類><台数>` で並べたものである。
+`qdec4` は基板の直交エンコーダ入力 4 本、`rotor8` は RoboMaster 8 台それぞれのロータ角（[robomaster_encoder](drivers/robomaster_encoder.md)）を使う。
+同じ基板でもモータとエンコーダの組み合わせは機体ごとに変わるので、組み合わせを増やすときは `miniv4-md-rotor4-qdec4` のように足していく。
 
 `snippet.yml` の `boards:` キーは正規表現にする。
 比較の対象が `<board>/<qualifiers>` なので、ボード名そのままの完全一致キーは、SoC 名を持つボードに当たらない。
@@ -118,6 +128,27 @@ limits:
 ノード名の `{i}` は起動時の node_id で置換される。
 schema はロボット 1 台の役割を述べるもので、基板 1 枚を述べるものではない。
 
+## node_id を ID スイッチから読む
+
+基板の devicetree が `chosen { fibril,node-id = ...; }` で `fibril,id-switch` のノードを指していれば、`CONFIG_FIBRIL_NODE_ID_SWITCH` が立ち、`apps/node` は起動時にそのスイッチを読んで node_id にする（`lib/node_id/`）。
+スイッチの値がそのまま node_id になる。
+ロータリスイッチ（4 bit）なら 0〜15 で、ノード名は `md_controller0`〜`md_controller15` になる。
+CanMotorMbed の fibril_can 版と同じ割り当てである。
+判断の理由は [ADR 0012](adr/0012-node-id-switch-and-watchdog.md) にある。
+
+ID スイッチの無い基板（RC26 MainAir）は、今までどおりデプロイ snippet の `CONFIG_FIBRIL_NODE_ID` で決める。
+スイッチを読む基板では、このシンボルは現れない。
+
+## watchdog を tick で叩く
+
+`CONFIG_WATCHDOG` を立て、ボードに `watchdog0` の alias があると、`CONFIG_APP_WATCHDOG` が立つ。
+`apps/node` は transport に処理を渡す直前に watchdog を `CONFIG_APP_WATCHDOG_TIMEOUT_MS`（既定 1000 ms）で起動し、機能の `tick` を回すたびに叩く。
+制御ループや `fcan_poll` が止まると、基板がリセットされ、モータに最後の出力が残らない。
+デバッガで止めている間は watchdog も止まる（`WDT_OPT_PAUSE_HALTED_BY_DBG`）。
+
+`tick` を持つ機能が無いイメージでは叩く場所が無いので、watchdog を起動せず、ログに残す。
+STM32 の IWDG は `wdt_setup` で初めて動き出すので、`CONFIG_WATCHDOG` を立てただけで勝手にリセットがかかることはない。
+
 ## 実装済みの機能
 
 | ブロック型 | compatible | 駆動するもの |
@@ -144,6 +175,9 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 - `encoder.offset` の param は無い。`reset_encoder` を呼ぶ。
 - ADC のキャリブレーション（`sensor`、`trigger` など）と feedback の `current` はまだ無い。
 - 指令が途絶えたときに出力を止める仕組みはまだ無い。
+
+`encoders` には、基板のエンコーダ入力（`fibril,stm32-qdec`、`cui,amt21-encoder`）のほか、RoboMaster のロータ角（`dji,robomaster-encoder`）を置ける。
+ロータ角のカウントは減速前の 8192 counts/rev なので、`encoder/gain` に減速比を含める。
 
 ## 機能を 1 つ足す
 
