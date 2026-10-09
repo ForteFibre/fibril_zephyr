@@ -4,6 +4,7 @@
  */
 
 #include <drivers/motor.h>
+#include <drivers/motor/robomaster.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/can.h>
@@ -69,7 +70,11 @@ struct robomaster_motor_data
   uint16_t last_orientation_raw;
   int16_t requested_current;
   struct motor_feedback feedback;
+  robomaster_rotor_callback_t rotor_callback;
+  void * rotor_user_data;
 };
+
+static const struct motor_driver_api robomaster_motor_api;
 
 static int robomaster_transport_find_can_bus(
   const struct robomaster_transport_config * config, const struct device * can_dev)
@@ -226,6 +231,8 @@ static void robomaster_rx_callback(
   int16_t velocity = (int16_t)sys_get_be16(&frame->data[2]);
   int16_t current = (int16_t)sys_get_be16(&frame->data[4]);
   uint8_t temperature = frame->data[6];
+  const uint32_t now_cycle = k_cycle_get_32();
+  const int64_t now_ms = k_uptime_get();
 
   k_spinlock_key_t key = k_spin_lock(&motor->lock);
 
@@ -235,6 +242,18 @@ static void robomaster_rx_callback(
   } else {
     motor->detected_can_bus = (uint8_t)can_bus;
   }
+
+  /* The same test robomaster_motor_get_feedback() applies, taken before this
+   * frame refreshes the timestamp. */
+  const struct robomaster_rotor_sample rotor = {
+    .orientation = orientation_raw,
+    .cycle = now_cycle,
+    .continuous = motor->has_last_orientation &&
+                  ((config->feedback_timeout_ms == 0U) ||
+                   ((now_ms - motor->feedback.timestamp_ms) <= config->feedback_timeout_ms)),
+  };
+  const robomaster_rotor_callback_t rotor_callback = motor->rotor_callback;
+  void * const rotor_user_data = motor->rotor_user_data;
 
   if (motor->has_last_orientation) {
     int32_t delta = (int32_t)orientation_raw - (int32_t)motor->last_orientation_raw;
@@ -259,8 +278,39 @@ static void robomaster_rx_callback(
   motor->feedback.temperature = temperature;
   motor->feedback.online = true;
   motor->feedback.stale = false;
-  motor->feedback.timestamp_ms = k_uptime_get();
+  motor->feedback.timestamp_ms = now_ms;
   k_spin_unlock(&motor->lock, key);
+
+  /* Outside the lock, so the listener can read this motor's feedback. */
+  if (rotor_callback != NULL) {
+    rotor_callback(motor_dev, &rotor, rotor_user_data);
+  }
+}
+
+int robomaster_motor_set_rotor_callback(
+  const struct device * motor, robomaster_rotor_callback_t callback, void * user_data)
+{
+  struct robomaster_motor_data * data;
+  k_spinlock_key_t key;
+  int ret = 0;
+
+  if ((motor == NULL) || (motor->api != &robomaster_motor_api)) {
+    return -EINVAL;
+  }
+
+  data = motor->data;
+  key = k_spin_lock(&data->lock);
+
+  if ((callback != NULL) && (data->rotor_callback != NULL)) {
+    ret = -EBUSY;
+  } else {
+    data->rotor_callback = callback;
+    data->rotor_user_data = user_data;
+  }
+
+  k_spin_unlock(&data->lock, key);
+
+  return ret;
 }
 
 static int robomaster_transport_init(const struct device * dev)
