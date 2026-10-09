@@ -143,7 +143,11 @@ ID スイッチの無い基板（RC26 MainAir）は、今までどおりデプ�
 
 `CONFIG_WATCHDOG` を立て、ボードに `watchdog0` の alias があると、`CONFIG_APP_WATCHDOG` が立つ。
 `apps/node` は transport に処理を渡す直前に watchdog を `CONFIG_APP_WATCHDOG_TIMEOUT_MS`（既定 1000 ms）で起動し、機能の `tick` を回すたびに叩く。
-制御ループや `fcan_poll` が止まると、基板がリセットされ、モータに最後の出力が残らない。
+`tick` が止まると、基板がリセットされ、モータに最後の出力が残らない。
+
+`fcan_poll` が止まったことを捉えるかは、トランスポートで変わる。
+直結では `tick` と `fcan_poll` が同じスレッドで回るので、どちらが止まっても watchdog は叩かれなくなる。
+hub 構成では `fcan_poll` が hub のドライバのスレッドで回るので（「tick の契約」）、`fcan_poll` だけが止まっても `tick` が watchdog を叩き続ける。
 デバッガで止めている間は watchdog も止まる（`WDT_OPT_PAUSE_HALTED_BY_DBG`）。
 
 `tick` を持つ機能が無いイメージでは叩く場所が無いので、watchdog を起動せず、ログに残す。
