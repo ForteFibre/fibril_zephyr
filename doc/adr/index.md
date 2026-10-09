@@ -43,6 +43,8 @@
 | [0008](0008-fibril-common-integration.md) | fibril_common を Zephyr module として取り込む | Proposed |
 | [0009](0009-motor-control-core.md) | CanMotorMbed の制御のコアを、1 kHz 固定の tick で回る C++ ライブラリとして移す | Proposed |
 | [0010](0010-md-motor-block-type.md) | CanMotorMbed の後継を MdMotor ブロック型として載せ、can_md_controller に寄せる | Proposed |
+| [0011](0011-robomaster-rotor-encoder.md) | RoboMaster のロータ角を、受信経路から通知を受ける encoder device として見せる | Proposed |
+| [0012](0012-node-id-switch-and-watchdog.md) | node_id を基板の ID スイッチの値そのままにし、watchdog を tick で叩く | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -58,4 +60,6 @@
 0008-fibril-common-integration
 0009-motor-control-core
 0010-md-motor-block-type
+0011-robomaster-rotor-encoder
+0012-node-id-switch-and-watchdog
 ```

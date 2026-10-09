@@ -1,0 +1,19 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# A RoboMaster Mini V4 driving eight RoboMaster motors, each closed around its
+# own rotor angle rather than an encoder on the board: CanMotorMbed's
+# robomaster_miniv4 build with ROBOMASTER_ENCODER. Layered on a transport
+# snippet:
+#
+#   west build -b fibril_robomaster_miniv4 apps/node -S miniv4-can -S miniv4-md-rotor8
+
+name: miniv4-md-rotor8
+
+append:
+  EXTRA_CONF_FILE: md-rotor8.conf
+
+boards:
+  /fibril_robomaster_miniv4.*/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: fibril_robomaster_miniv4.overlay

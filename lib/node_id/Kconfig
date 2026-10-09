@@ -1,0 +1,19 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+DT_CHOSEN_FIBRIL_NODE_ID := fibril,node-id
+
+config FIBRIL_NODE_ID_SWITCH
+	bool "Read the node id from the board's switch"
+	default y
+	depends on FIBRIL_CAN_NODE
+	depends on $(dt_chosen_enabled,$(DT_CHOSEN_FIBRIL_NODE_ID))
+	select GPIO
+	help
+	  Read the fibril_can node id at boot from the switch the board's
+	  `fibril,node-id` chosen node points at, instead of building it into
+	  the image. Identical boards then run one image and differ only in
+	  where their switch is set (ADR 0003).
+
+	  The switch's value is the node id as it stands, as CanMotorMbed's
+	  fibril_can build used it.

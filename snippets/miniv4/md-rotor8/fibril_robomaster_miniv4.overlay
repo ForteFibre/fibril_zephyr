@@ -1,0 +1,158 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * What a Mini V4 motor driver drives when the motors close around their own
+ * rotors: up to eight RoboMaster motors on the two motor CAN buses, each paired
+ * with the encoder its ESC reports. The transport snippet decides how the node
+ * reaches the fibril_can bus, so nothing here mentions that controller.
+ *
+ * The counts are rotor counts (8192 per rotor turn, before the gearbox), so
+ * encoder/gain on the ROS side has to carry the gear ratio. A motor that is
+ * not fitted only reads as an encoder without data, which keeps that motor's
+ * output at zero; the others are unaffected.
+ */
+
+/ {
+    fcan_md_motor: fcan-md-motor {
+        compatible = "fibril,fcan-md-motor";
+
+        /* Becomes motor0..motor7 on the ROS side, the names
+         * can_md_controller used. */
+        fcan-ns = "motor{i}";
+
+        motors = <&rm_motor1>, <&rm_motor2>, <&rm_motor3>, <&rm_motor4>,
+                 <&rm_motor5>, <&rm_motor6>, <&rm_motor7>, <&rm_motor8>;
+        encoders = <&rm_enc1>, <&rm_enc2>, <&rm_enc3>, <&rm_enc4>,
+                   <&rm_enc5>, <&rm_enc6>, <&rm_enc7>, <&rm_enc8>;
+        status = "okay";
+    };
+
+    robomaster: robomaster {
+        compatible = "dji,robomaster";
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        /* Both motor buses, MOTCAN0 and MOTCAN1. The driver learns which bus
+         * a motor is on from its feedback, so the ids below are unique
+         * across the pair rather than per bus. */
+        cans = <&fdcan2 &fdcan3>;
+
+        /* RoboMaster ESCs report every 1 ms, so this is many missed frames
+         * before a motor reads as stale. It is also the gap after which a
+         * rotor encoder starts its position over. */
+        feedback-timeout-ms = <100>;
+
+        /* C620 at its full command range. duty-full-scale on the md_motor
+         * node, not this limit, decides what a duty of 1.0 means. */
+        rm_motor1: motor@1 {
+            compatible = "dji,robomaster-motor";
+            reg = <1>;
+            model = "c620";
+            max-current = <16384>;
+        };
+
+        rm_motor2: motor@2 {
+            compatible = "dji,robomaster-motor";
+            reg = <2>;
+            model = "c620";
+            max-current = <16384>;
+        };
+
+        rm_motor3: motor@3 {
+            compatible = "dji,robomaster-motor";
+            reg = <3>;
+            model = "c620";
+            max-current = <16384>;
+        };
+
+        rm_motor4: motor@4 {
+            compatible = "dji,robomaster-motor";
+            reg = <4>;
+            model = "c620";
+            max-current = <16384>;
+        };
+
+        rm_motor5: motor@5 {
+            compatible = "dji,robomaster-motor";
+            reg = <5>;
+            model = "c620";
+            max-current = <16384>;
+        };
+
+        rm_motor6: motor@6 {
+            compatible = "dji,robomaster-motor";
+            reg = <6>;
+            model = "c620";
+            max-current = <16384>;
+        };
+
+        rm_motor7: motor@7 {
+            compatible = "dji,robomaster-motor";
+            reg = <7>;
+            model = "c620";
+            max-current = <16384>;
+        };
+
+        rm_motor8: motor@8 {
+            compatible = "dji,robomaster-motor";
+            reg = <8>;
+            model = "c620";
+            max-current = <16384>;
+        };
+    };
+
+    rm_enc1: robomaster-encoder-1 {
+        compatible = "dji,robomaster-encoder";
+        motor = <&rm_motor1>;
+    };
+
+    rm_enc2: robomaster-encoder-2 {
+        compatible = "dji,robomaster-encoder";
+        motor = <&rm_motor2>;
+    };
+
+    rm_enc3: robomaster-encoder-3 {
+        compatible = "dji,robomaster-encoder";
+        motor = <&rm_motor3>;
+    };
+
+    rm_enc4: robomaster-encoder-4 {
+        compatible = "dji,robomaster-encoder";
+        motor = <&rm_motor4>;
+    };
+
+    rm_enc5: robomaster-encoder-5 {
+        compatible = "dji,robomaster-encoder";
+        motor = <&rm_motor5>;
+    };
+
+    rm_enc6: robomaster-encoder-6 {
+        compatible = "dji,robomaster-encoder";
+        motor = <&rm_motor6>;
+    };
+
+    rm_enc7: robomaster-encoder-7 {
+        compatible = "dji,robomaster-encoder";
+        motor = <&rm_motor7>;
+    };
+
+    rm_enc8: robomaster-encoder-8 {
+        compatible = "dji,robomaster-encoder";
+        motor = <&rm_motor8>;
+    };
+};
+
+/* RoboMaster ESCs speak classic CAN at 1 Mbit/s, which is also what
+ * CanMotorMbed ran these buses at. No data phase: an FD frame must not reach
+ * a bus that cannot carry one.
+ */
+&fdcan2 {
+    status = "okay";
+    bitrate = <1000000>;
+};
+
+&fdcan3 {
+    status = "okay";
+    bitrate = <1000000>;
+};

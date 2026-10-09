@@ -15,12 +15,14 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/random/random.h>
 
 #include <fcan_transport/transport.h>
 #include <fibril_can_node/func.h>
+#include <node_id/node_id.h>
 
 #include "schema_gen.hpp"
 
@@ -40,6 +42,44 @@ static void * heap_alloc(size_t size, size_t align, void * ctx)
   return k_heap_aligned_alloc(&fcan_heap, align, size, K_NO_WAIT);
 }
 
+#if defined(CONFIG_APP_WATCHDOG)
+static const struct device * const watchdog = DEVICE_DT_GET(DT_ALIAS(watchdog0));
+static int watchdog_channel = -1;
+
+static int watchdog_start(void)
+{
+  struct wdt_timeout_cfg cfg{};
+
+  if (!device_is_ready(watchdog)) {
+    LOG_ERR("watchdog not ready");
+    return -ENODEV;
+  }
+
+  cfg.window.min = 0U;
+  cfg.window.max = CONFIG_APP_WATCHDOG_TIMEOUT_MS;
+  cfg.flags = WDT_FLAG_RESET_SOC;
+
+  const int channel = wdt_install_timeout(watchdog, &cfg);
+
+  if (channel < 0) {
+    LOG_ERR("watchdog timeout not accepted (%d)", channel);
+    return channel;
+  }
+
+  /* Paused under the debugger, or every breakpoint would reset the board. */
+  const int ret = wdt_setup(watchdog, WDT_OPT_PAUSE_HALTED_BY_DBG);
+
+  if (ret != 0) {
+    LOG_ERR("watchdog setup failed (%d)", ret);
+    return ret;
+  }
+
+  watchdog_channel = channel;
+
+  return 0;
+}
+#endif
+
 static void run_ticks(void)
 {
   STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
@@ -47,6 +87,12 @@ static void run_ticks(void)
       f->tick();
     }
   }
+
+#if defined(CONFIG_APP_WATCHDOG)
+  if (watchdog_channel >= 0) {
+    (void)wdt_feed(watchdog, watchdog_channel);
+  }
+#endif
 }
 
 int main(void)
@@ -95,10 +141,15 @@ int main(void)
 
   fcan_gen::config_user user{};
 
-  /* Build-time for now. On a board with a DIP switch or a config ROM this is
-   * read at boot so that identical boards share one image.
-   */
+#if defined(CONFIG_FIBRIL_NODE_ID_SWITCH)
+  rc = node_id_read(&user.node_id);
+  if (rc != 0) {
+    LOG_ERR("could not read the node id switch (%d)", rc);
+    return rc;
+  }
+#else
   user.node_id = CONFIG_FIBRIL_NODE_ID;
+#endif
   user.boot_id = sys_rand32_get();
   user.instance_counts = counts;
   user.hal = fcan_transport_hal();
@@ -147,6 +198,18 @@ int main(void)
   if (rc != 0) {
     return rc;
   }
+
+#if defined(CONFIG_APP_WATCHDOG)
+  /* Last, so that nothing before the first tick has to fit in the timeout. */
+  if (any_tick) {
+    rc = watchdog_start();
+    if (rc != 0) {
+      return rc;
+    }
+  } else {
+    LOG_WRN("no function ticks, so nothing feeds the watchdog; left off");
+  }
+#endif
 
   LOG_INF("handing over to the transport (periodic ticks %s)", any_tick ? "on" : "off");
 

@@ -20,6 +20,7 @@
 		zephyr,shell-uart = &usart3;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
+		fibril,node-id = &rotary_id;
 		zephyr,dtcm = &ccm0;
 	};
 
@@ -59,35 +60,17 @@
 
 	/* Four-position BCD rotary DIP switch (ROT1|ROT2|ROT4|ROT8, active low).
 	 * Read as a nibble to derive per-unit CAN IDs / hostnames, matching the
-	 * mbed target's Hardware() constructor. Not a gpio-keys input source.
+	 * mbed target's Hardware() constructor.
+	 * The switch is what tells identical boards apart, so it is also where the
+	 * fibril_can node id comes from (chosen fibril,node-id, lib/node_id).
 	 */
 	rotary_id: rotary_id {
-		compatible = "gpio-keys";
-		status = "okay";
-
-		rot1: rot1 {
-			label = "ROT1";
-			gpios = <&gpioe 14 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			zephyr,code = <INPUT_KEY_1>;
-		};
-
-		rot2: rot2 {
-			label = "ROT2";
-			gpios = <&gpioe 11 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			zephyr,code = <INPUT_KEY_2>;
-		};
-
-		rot4: rot4 {
-			label = "ROT4";
-			gpios = <&gpioe 13 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			zephyr,code = <INPUT_KEY_3>;
-		};
-
-		rot8: rot8 {
-			label = "ROT8";
-			gpios = <&gpioe 12 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			zephyr,code = <INPUT_KEY_4>;
-		};
+		compatible = "fibril,id-switch";
+		/* ROT1, ROT2, ROT4, ROT8: least significant bit first. */
+		gpios = <&gpioe 14 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>,
+			<&gpioe 11 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>,
+			<&gpioe 13 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>,
+			<&gpioe 12 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
 	};
 
 	aliases {

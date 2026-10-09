@@ -60,7 +60,7 @@ Twister が認識する機能は ``gpio``、``uart``、``dma``、``can`` であ�
      - PB4 / PD2 / PB3（アクティブ Low）
      - 有効
    * - ロータリ ID スイッチ
-     - ``rot1`` / ``rot2`` / ``rot4`` / ``rot8``
+     - ``rotary_id`` の ROT1 / ROT2 / ROT4 / ROT8
      - PC0 / PC1 / PC14 / PC13（プルアップ、アクティブ Low）
      - 有効
 
@@ -69,8 +69,8 @@ Twister が認識する機能は ``gpio``、``uart``、``dma``、``can`` であ�
 ROT4（PC14）と ROT8（PC13）は LSE 発振器の入力および SYS_WKUP2 と重なる。
 どちらも有効にしていないので、これらのピンは GPIO として使える。
 
-ロータリスイッチは ``gpio-keys`` として記述しているが、入力イベント源として使うことは想定していない。
-ニブルとして読み、機体ごとの CAN ID やホスト名を導出する用途である。
+ロータリスイッチは ``fibril,id-switch``（``rotary_id``）として記述し、``chosen`` の ``fibril,node-id`` がこれを指す。
+ROT1 を最下位ビットとする 4 ビットの値として読み、fibril_can の node_id にそのまま使う（``lib/node_id``、:doc:`/apps` の「node_id を ID スイッチから読む」）。
 
 devicetree に書かれていないペリフェラル
 =======================================

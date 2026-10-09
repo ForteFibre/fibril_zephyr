@@ -74,7 +74,8 @@ west flash
 | `rc26-air` | デプロイ | RC26 MainAir V01 | 6 系統の電磁弁を ROS Service で駆動する |
 | `rc26-robstride` | デプロイ | RC26 MainAir V01 | CAN1 の RobStride アクチュエータを ROS から駆動する |
 | `miniv4-can` | トランスポート | RoboMaster Mini V4 | 外部 CAN（FDCAN1）に直接つなぐ |
-| `miniv4-md` | デプロイ | RoboMaster Mini V4 | RoboMaster 4 台を qdec で閉ループ制御する（CanMotorMbed の後継） |
+| `miniv4-md-qdec4` | デプロイ | RoboMaster Mini V4 | RoboMaster 4 台を基板の qdec で閉ループ制御する（CanMotorMbed の後継） |
+| `miniv4-md-rotor8` | デプロイ | RoboMaster Mini V4 | RoboMaster 8 台をそれぞれのロータ角で閉ループ制御する（CanMotorMbed の `ROBOMASTER_ENCODER`） |
 
 ボード持ち込みの動作確認には `app/` を使う。fibril_can を使わない。
 
@@ -94,6 +95,7 @@ west build -b <ボード名> app -- -DEXTRA_CONF_FILE=debug.conf   # 診断用 K
 | クラス | 実装 | 文書 |
 | --- | --- | --- |
 | エンコーダ | AMT21x アブソリュートエンコーダ（RS485） | [doc/drivers/amt21.md](doc/drivers/amt21.md) |
+| エンコーダ | DJI RoboMaster のロータ角 | [doc/drivers/robomaster_encoder.md](doc/drivers/robomaster_encoder.md) |
 | モータ | DJI RoboMaster C610 / C620（CAN） | [doc/drivers/robomaster.md](doc/drivers/robomaster.md) |
 | モータ | RobStride アクチュエータ（CAN） | [doc/drivers/robstride.md](doc/drivers/robstride.md) |
 
