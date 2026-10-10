@@ -8,7 +8,9 @@
  *
  * Everything that touches a motor or an encoder happens in the tick. The
  * service and parameter handlers run on whichever thread drives fcan_poll,
- * so they raise a request and return; the tick consumes it.
+ * so they raise a request and return; the tick consumes it. The one deferred
+ * reply, calibrate_current_baseline's, is sent from the tick when the run
+ * ends (ADR 0013).
  */
 
 #define DT_DRV_COMPAT fibril_fcan_md_motor
@@ -24,7 +26,9 @@
 #include <drivers/encoder.h>
 #include <drivers/motor.h>
 #include <motor_control/motor_control.hpp>
+#include <motor_control/sensing.hpp>
 
+#include <fibril_can_node/adc_port.hpp>
 #include <fibril_can_node/func.h>
 
 #include "schema_gen.hpp"
@@ -35,6 +39,10 @@ using reset_encoder_req = fcan_gen::mdmotor::reset_encoder_req;
 using reset_encoder_resp = fcan_gen::mdmotor::reset_encoder_resp;
 using reset_safety_req = fcan_gen::mdmotor::reset_safety_req;
 using reset_safety_resp = fcan_gen::mdmotor::reset_safety_resp;
+using sensor_state_req = fcan_gen::mdmotor::sensor_state_req;
+using sensor_state_resp = fcan_gen::mdmotor::sensor_state_resp;
+using baseline_req = fcan_gen::mdmotor::calibrate_current_baseline_req;
+using baseline_resp = fcan_gen::mdmotor::calibrate_current_baseline_resp;
 
 BUILD_ASSERT(
   DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 1,
@@ -57,6 +65,22 @@ BUILD_ASSERT(ARRAY_SIZE(motors) <= fcan_gen::mdmotor::max_count,
 
 static constexpr float duty_full_scale = DT_INST_PROP(0, duty_full_scale);
 
+/* CanMotorMbed's RoboMaster read_current(). */
+static constexpr float current_full_scale = 1000.0F;
+
+/* `adc/port` naming the motor's own index. */
+static constexpr uint8_t adc_port_own = 255;
+
+/* The current baseline only averages while the motor holds still: DUTY 0, and
+ * slower than CanMotorMbed's 0.1 user units per 1 ms tick. */
+static constexpr float still_duty = 1e-3F;
+static constexpr float still_speed = 0.1F / motor_control::MotorControl::tick_s;
+
+/* What current/baseline_duration_s is clamped to. The upper bound keeps the
+ * deferred reply inside the bridge's service timeout. */
+static constexpr float baseline_min_s = 0.05F;
+static constexpr float baseline_max_s = 1.0F;
+
 /* fibril_control_msgs/msg/Target's constants. */
 enum target_type {
   TARGET_DUTY = 0,
@@ -76,6 +100,10 @@ struct requests
   bool reset_encoder_offset;
   float reset_encoder_value;
   bool reset_safety;
+  bool sensor_state;
+  bool sensor_state_on;
+  bool baseline;
+  fcan_gen::call_handle baseline_call;
   /* Any bit at all re-reads every parameter; there are few enough of them
    * that tracking which changed would cost more than reading them. */
   uint32_t params_changed;
@@ -92,6 +120,10 @@ struct motor_state
   float encoder_gain;
   float accel_ff_gain;
   bool cascade;
+  uint8_t adc_port;
+  float current_polarity;
+  float current_offset;
+  uint32_t baseline_ticks;
 
   /* Generations of the last command applied from each M2S topic. The topics
    * keep their last value, so only a change here says a new frame arrived. */
@@ -103,6 +135,19 @@ struct motor_state
   bool epoch_known;
 
   bool encoder_valid;
+
+  /* feedback.current, and whether the motor reported one this tick. */
+  float current;
+  bool current_valid;
+
+  motor_control::LevelWatch sensor;
+  uint32_t adc_generation;
+
+  motor_control::CurrentBaseline baseline;
+  fcan_gen::call_handle baseline_call;
+  /* Set by the handler, cleared by the tick once it has replied, so a second
+   * call cannot overwrite the handle of one still running. Under `lock`. */
+  bool baseline_busy;
 };
 
 static struct motor_state states[ARRAY_SIZE(motors)];
@@ -120,6 +165,18 @@ static void apply_params(uint8_t inst)
   s->encoder_gain = m.param_encoder__gain();
   s->accel_ff_gain = m.param_accel_ff_gain();
   s->cascade = m.param_use_cascade_position();
+  s->adc_port = m.param_adc__port();
+  s->current_polarity = (m.param_current__polarity() < 0.0F) ? -1.0F : 1.0F;
+  s->current_offset = m.param_current__offset();
+
+  /* The runtime does not enforce the schema's min and max. */
+  float baseline_s = m.param_current__baseline_duration_s();
+
+  if (!std::isfinite(baseline_s)) {
+    baseline_s = baseline_min_s;
+  }
+  baseline_s = CLAMP(baseline_s, baseline_min_s, baseline_max_s);
+  s->baseline_ticks = (uint32_t)std::lround(baseline_s / motor_control::MotorControl::tick_s);
 
   c.encoder_gain(s->encoder_gain);
   /* The runtime stores parameters without checking the schema's min and max,
@@ -233,6 +290,26 @@ static void drain_requests(uint8_t inst)
   if (req.reset_encoder) {
     reset_encoder_position(inst, req.reset_encoder_offset, req.reset_encoder_value);
   }
+
+  if (req.sensor_state) {
+    if (req.sensor_state_on) {
+      s->sensor.start();
+    } else {
+      s->sensor.stop();
+    }
+  }
+
+  if (req.baseline) {
+    s->baseline_call = req.baseline_call;
+    s->baseline.start(s->baseline_ticks);
+  }
+}
+
+static uint8_t watched_port(uint8_t inst)
+{
+  const uint8_t port = fcan_gen::mdmotor(inst).param_adc__port();
+
+  return (port == adc_port_own) ? inst : port;
 }
 
 static void apply_target(uint8_t inst, const fcan_gen::mdmotor::target & cmd)
@@ -350,6 +427,107 @@ static void publish_feedback(uint8_t inst)
   pub->velocity = s->control.speed();
   pub->position = s->control.position();
   pub->output = s->control.duty();
+  pub->current = s->current_valid ? s->current : 0.0F;
+}
+
+/*
+ * The current as feedback.current reports it, before `invert`: polarity and
+ * the manual offset applied, the measured baseline not yet. The baseline is
+ * averaged over this, so it is what remains after the manual offset.
+ */
+static bool sample_current(uint8_t inst, float & current)
+{
+  const struct motor_state * s = &states[inst];
+  struct motor_feedback fb;
+
+  if ((motor_get_feedback(motors[inst], &fb) != 0) ||
+      ((fb.valid_mask & MOTOR_FEEDBACK_CURRENT) == 0U) || !fb.online || fb.stale) {
+    return false;
+  }
+
+  current = s->current_polarity * (float)fb.current / current_full_scale - s->current_offset;
+
+  return true;
+}
+
+static void finish_baseline(uint8_t inst, bool success)
+{
+  struct motor_state * s = &states[inst];
+  const baseline_resp resp{success};
+  k_spinlock_key_t key;
+
+  if (success) {
+    LOG_INF("motor %u: current baseline %.4f", inst, (double)s->baseline.offset());
+  } else {
+    LOG_WRN("motor %u: current baseline aborted, the motor moved or lost its current", inst);
+  }
+
+  fcan_gen::mdmotor::calibrate_current_baseline_complete(
+    s->baseline_call, success ? FCAN_SVC_OK : FCAN_SVC_APP_ERROR, resp);
+
+  key = k_spin_lock(&lock);
+  s->baseline_busy = false;
+  k_spin_unlock(&lock, key);
+}
+
+static void update_current(uint8_t inst)
+{
+  struct motor_state * s = &states[inst];
+  float current = 0.0F;
+
+  s->current_valid = sample_current(inst, current);
+
+  if (s->baseline.running()) {
+    const bool still = s->encoder_valid && (s->control.mode() == motor_control::Mode::DUTY) &&
+                       (std::fabs(s->control.duty()) < still_duty) &&
+                       (std::fabs(s->control.speed()) < still_speed);
+
+    switch (s->baseline.update(still, s->current_valid, current)) {
+      case motor_control::CurrentBaseline::State::DONE:
+        finish_baseline(inst, true);
+        break;
+      case motor_control::CurrentBaseline::State::ABORTED:
+        finish_baseline(inst, false);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /* `invert` flips the current with the rest of the feedback, as
+   * can_md_controller did on the host. */
+  s->current = s->sign * (current - s->baseline.offset());
+}
+
+/* Runs once per AdcPort sampling, so a port is compared once per sample. */
+static void watch_sensor(uint8_t inst)
+{
+  struct motor_state * s = &states[inst];
+  const uint32_t generation = adc_port::generation();
+  float value;
+
+  if (generation == s->adc_generation) {
+    return;
+  }
+  s->adc_generation = generation;
+
+  const uint8_t port = watched_port(inst);
+
+  if (!s->sensor.active() || !adc_port::read(port, value)) {
+    return;
+  }
+
+  const auto event = s->sensor.update(value, adc_port::threshold(port));
+
+  if (event == motor_control::LevelWatch::Event::NONE) {
+    return;
+  }
+
+  if (auto pub = fcan_gen::mdmotor(inst).publish_sensor()) {
+    /* fibril_control_msgs/msg/SensorState's RISE and FALL. */
+    pub->direction = (event == motor_control::LevelWatch::Event::HIGH) ? 1U : 0U;
+    pub->edge_position = s->control.position();
+  }
 }
 
 static void params_changed(uint8_t inst, uint32_t changed_mask)
@@ -383,6 +561,50 @@ static fcan_gen::svc_status reset_encoder(
   resp.success = true;
 
   return FCAN_SVC_OK;
+}
+
+static fcan_gen::svc_status sensor_state(
+  uint8_t inst, const sensor_state_req & req, sensor_state_resp & resp)
+{
+  k_spinlock_key_t key;
+
+  /* Checked here so the reply says whether there is anything to watch. The
+   * port list is fixed at build time, so the answer cannot go stale. */
+  if (req.data && (watched_port(inst) >= adc_port::count())) {
+    LOG_WRN("motor %u: sensor_state refused, no AdcPort %u", inst, watched_port(inst));
+    resp.success = false;
+    return FCAN_SVC_APP_ERROR;
+  }
+
+  key = k_spin_lock(&lock);
+  states[inst].req.sensor_state = true;
+  states[inst].req.sensor_state_on = req.data;
+  k_spin_unlock(&lock, key);
+
+  resp.success = true;
+
+  return FCAN_SVC_OK;
+}
+
+/* Replied to from the tick, by finish_baseline(), once the run ends. */
+static fcan_gen::svc_status calibrate_current_baseline(
+  uint8_t inst, baseline_resp & resp, fcan_gen::call_handle call)
+{
+  struct motor_state * s = &states[inst];
+  k_spinlock_key_t key = k_spin_lock(&lock);
+
+  if (s->baseline_busy) {
+    k_spin_unlock(&lock, key);
+    resp.success = false;
+    return FCAN_SVC_BUSY;
+  }
+
+  s->baseline_busy = true;
+  s->req.baseline = true;
+  s->req.baseline_call = call;
+  k_spin_unlock(&lock, key);
+
+  return FCAN_SVC_ACCEPTED;
 }
 
 static fcan_gen::svc_status reset_safety(uint8_t inst, reset_safety_resp & resp)
@@ -425,6 +647,14 @@ static int md_motor_func_start(void)
       [i](const reset_safety_req &, reset_safety_resp & resp, fcan_gen::call_handle) noexcept {
         return reset_safety(i, resp);
       });
+    m.on_sensor_state(
+      [i](const sensor_state_req & req, sensor_state_resp & resp, fcan_gen::call_handle) noexcept {
+        return sensor_state(i, req, resp);
+      });
+    m.on_calibrate_current_baseline(
+      [i](const baseline_req &, baseline_resp & resp, fcan_gen::call_handle call) noexcept {
+        return calibrate_current_baseline(i, resp, call);
+      });
     m.on_params_changed([i](uint32_t changed_mask) noexcept { params_changed(i, changed_mask); });
 
     apply_params(i);
@@ -455,6 +685,8 @@ static void md_motor_func_tick(void)
     s->encoder_valid = sample.valid;
     apply_commands(i);
     drive(i, s->control.update(sample));
+    update_current(i);
+    watch_sensor(i);
     publish_feedback(i);
   }
 }
