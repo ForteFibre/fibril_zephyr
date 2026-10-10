@@ -210,8 +210,9 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 判断の理由は [ADR 0013](adr/0013-md-motor-calibration-and-current.md) にある。
 
 - `sensor_state` を true にすると、`adc/port` が指す `AdcPort` の値を 5 ms ごとに見る。|値| がしきい値をまたぐたびに、向き（RISE か FALL）とその時点の位置を `sensor` に出す。有効にした直後の最初のサンプルでも、そのときの向きを 1 回出す。位置は変えない。原点を合わせるなら、host が `edge_position` を見て `reset_encoder` を呼ぶ。
-- `adc/port` の既定（255）は、モータと同じ番号のポートを指す。
-- `feedback.current` は、モータが報告する電流の生の値を 1000 で割ったものである（CanMotorMbed の `read_current()`）。`current/polarity` の符号を掛け、`current/offset` と、最後に測ったベースラインを引き、最後に `invert` を掛ける。
+- `adc/port` の既定（255）は、モータと同じ番号のポートを指す。監視中に `adc/port` を変えると、新しいポートの最初のサンプルで、そのときの向きを 1 回出す（有効にした直後と同じ）。
+- エンコーダの値が無効な間は、ポートの値を見ない。その間にしきい値をまたいでいたら、エンコーダが戻った最初のサンプルで、そのときの位置を付けて出す。
+- `feedback.current` は、モータが報告する電流の生の値を 1000 で割ったものである（CanMotorMbed の `read_current()`）。`current/polarity` の符号を掛け、`current/offset` と、最後に測ったベースラインを引き、最後に `invert` を掛ける。結果が有限でなければ（`current/offset` が NaN など）、電流は無効とし、`feedback.current` は 0 にする。測っているベースラインは中止する。
 - `calibrate_current_baseline` は、`current/baseline_duration_s` の間、DUTY 0 で止まっているモータの電流を平均する。測り終えてから応答を返す（ACCEPTED の後に最終応答）。
 
 ## 機能を 1 つ足す

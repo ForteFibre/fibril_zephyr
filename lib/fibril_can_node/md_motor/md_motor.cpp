@@ -142,6 +142,8 @@ struct motor_state
 
   motor_control::LevelWatch sensor;
   uint32_t adc_generation;
+  /* The port `sensor` remembers a level for. */
+  uint8_t sensor_port;
 
   motor_control::CurrentBaseline baseline;
   fcan_gen::call_handle baseline_call;
@@ -268,6 +270,12 @@ static void reset_encoder_position(uint8_t inst, bool offset, float value)
   }
 }
 
+/* `port` is the adc/port parameter. */
+static uint8_t watched_port(uint8_t inst, uint8_t port)
+{
+  return (port == adc_port_own) ? inst : port;
+}
+
 static void drain_requests(uint8_t inst)
 {
   struct motor_state * s = &states[inst];
@@ -294,6 +302,7 @@ static void drain_requests(uint8_t inst)
   if (req.sensor_state) {
     if (req.sensor_state_on) {
       s->sensor.start();
+      s->sensor_port = watched_port(inst, s->adc_port);
     } else {
       s->sensor.stop();
     }
@@ -303,13 +312,6 @@ static void drain_requests(uint8_t inst)
     s->baseline_call = req.baseline_call;
     s->baseline.start(s->baseline_ticks);
   }
-}
-
-static uint8_t watched_port(uint8_t inst)
-{
-  const uint8_t port = fcan_gen::mdmotor(inst).param_adc__port();
-
-  return (port == adc_port_own) ? inst : port;
 }
 
 static void apply_target(uint8_t inst, const fcan_gen::mdmotor::target & cmd)
@@ -447,7 +449,8 @@ static bool sample_current(uint8_t inst, float & current)
 
   current = s->current_polarity * (float)fb.current / current_full_scale - s->current_offset;
 
-  return true;
+  /* current/offset is any f32 the host sends, NaN included. */
+  return std::isfinite(current);
 }
 
 static void finish_baseline(uint8_t inst, bool success)
@@ -511,9 +514,23 @@ static void watch_sensor(uint8_t inst)
   }
   s->adc_generation = generation;
 
-  const uint8_t port = watched_port(inst);
+  const uint8_t port = watched_port(inst, s->adc_port);
 
-  if (!s->sensor.active() || !adc_port::read(port, value)) {
+  if (!s->sensor.active()) {
+    return;
+  }
+
+  /* A level remembered for another port says nothing about this one, so start
+   * over: the next sample reports the new port's level, as sensor_state does. */
+  if (port != s->sensor_port) {
+    s->sensor.start();
+    s->sensor_port = port;
+  }
+
+  /* An edge is only worth its position. While the encoder is out the watcher
+   * keeps its level, so a crossing during the outage is reported on the first
+   * valid sample, with that sample's position. */
+  if (!s->encoder_valid || !adc_port::read(port, value)) {
     return;
   }
 
@@ -570,8 +587,10 @@ static fcan_gen::svc_status sensor_state(
 
   /* Checked here so the reply says whether there is anything to watch. The
    * port list is fixed at build time, so the answer cannot go stale. */
-  if (req.data && (watched_port(inst) >= adc_port::count())) {
-    LOG_WRN("motor %u: sensor_state refused, no AdcPort %u", inst, watched_port(inst));
+  const uint8_t port = watched_port(inst, fcan_gen::mdmotor(inst).param_adc__port());
+
+  if (req.data && (port >= adc_port::count())) {
+    LOG_WRN("motor %u: sensor_state refused, no AdcPort %u", inst, port);
     resp.success = false;
     return FCAN_SVC_APP_ERROR;
   }
