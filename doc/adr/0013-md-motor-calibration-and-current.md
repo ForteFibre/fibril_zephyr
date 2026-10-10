@@ -88,7 +88,7 @@ bridge の既定のタイムアウト（1.5 s）に収めるためである。
 
 ## Consequences
 
-- 最終応答は tick から送る。direct のトランスポートでは、tick は `fcan_poll` と同じスレッドで動く。hub のトランスポートでは別のスレッドになり、HAL の `send` を 2 つのスレッドから呼ぶことになる。miniv4 は direct なので問題にならないが、hub の基板で使う前に確かめる。
+- 最終応答は tick から送る。direct のトランスポートでは、tick は `fcan_poll` と同じスレッドで動くので問題ない。hub のトランスポートでは別のスレッドになり、hub スレッドと同時に `hal.send` を呼ぶことになる。miniv4 は direct なので影響しない。fibril_can v0.3.2 の `fcan_svc_complete` はその場で送るためで、ForteFibre/fibril_can#64 で直す（応答を預け、`fcan_poll` が送る）。その版に上げるまで、MdMotor を hub の基板に載せない。
 - ベースラインの時間を 1 s より長くするには、bridge の `service_timeout_ms` を延ばしたうえで、上限を変える。
 - ポートは、`fcan_poll` を回すスレッドではなく tick で読む。ADC は 5 ms ごとに数チャネルを順に読み、そのたびに tick を少しブロックする。
 - Mbed のように、ホストとの接続が切れたら監視を止める処理は無い。fibril_can の master の喪失は、ブロック型からは見えないためである（ADR 0010）。
