@@ -1,0 +1,8 @@
+&spi0 {
+	as5047p: as5047p@0 {
+		compatible = "ams,as5047p";
+		reg = <0>;
+		spi-max-frequency = <1000000>;
+		status = "okay";
+	};
+};
