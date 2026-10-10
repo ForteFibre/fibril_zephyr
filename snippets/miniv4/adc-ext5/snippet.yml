@@ -1,0 +1,19 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# MdMotor's calibration inputs from the board's five analog pins only, ports
+# 0..4 being ADC__0..ADC__4. Layers on any miniv4-md-* deployment:
+#
+#   west build -b fibril_robomaster_miniv4 apps/node \
+#     -S miniv4-can -S miniv4-md-qdec4 -S miniv4-adc-ext5
+#
+# The port numbers differ from CanMotorMbed's (8..12 there), so every motor
+# that watches one has to set adc/port; miniv4-adc-torque8-ext5 keeps
+# CanMotorMbed's numbering where all eight motors are wired.
+
+name: miniv4-adc-ext5
+
+boards:
+  /fibril_robomaster_miniv4.*/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: fibril_robomaster_miniv4.overlay

@@ -1,0 +1,42 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * CanMotorMbed's 13 miniv4 ports. The rm_motorN labels come from the
+ * deployment snippet, so this one has to be layered after a deployment that
+ * defines all eight.
+ */
+
+/ {
+    fcan_adc_port: fcan-adc-port {
+        compatible = "fibril,fcan-adc-port";
+
+        /* adc0..adc12, the names can_md_controller gave the thresholds. */
+        fcan-ns = "adc{i}";
+        status = "okay";
+
+        torque0 { motor = <&rm_motor1>; };
+        torque1 { motor = <&rm_motor2>; };
+        torque2 { motor = <&rm_motor3>; };
+        torque3 { motor = <&rm_motor4>; };
+        torque4 { motor = <&rm_motor5>; };
+        torque5 { motor = <&rm_motor6>; };
+        torque6 { motor = <&rm_motor7>; };
+        torque7 { motor = <&rm_motor8>; };
+
+        /* ADC__0..ADC__4: PC2, PC3, PA4, PA2, PA3. */
+        ext0 { io-channels = <&adc1 8>; };
+        ext1 { io-channels = <&adc1 9>; };
+        ext2 { io-channels = <&adc2 17>; };
+        ext3 { io-channels = <&adc1 3>; };
+        ext4 { io-channels = <&adc1 4>; };
+    };
+};
+
+&adc1 {
+    status = "okay";
+};
+
+&adc2 {
+    status = "okay";
+};

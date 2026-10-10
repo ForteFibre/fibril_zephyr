@@ -14,7 +14,10 @@ options:
   allocation: static
 
 limits:
-  max_frames: 32
+  # Eight motors carry 32 topics (target, trajectory, feedback, sensor) and
+  # 96 fields. A frame per topic would fill 32 slots exactly, so leave room
+  # for the master's frame planner.
+  max_frames: 48
   max_copy_entries: 128
   # Every MdMotor service fits a single frame.
   service_buffer: 0

@@ -78,3 +78,31 @@ tests:
       - encoder
     extra_args:
       - SNIPPET=miniv4-can;miniv4-md-rotor8
+
+  app.node.miniv4_md_rotor8_adc:
+    platform_allow:
+      - fibril_robomaster_miniv4
+    integration_platforms:
+      - fibril_robomaster_miniv4
+    tags:
+      - fibril_can
+      - can
+      - motor
+      - encoder
+      - adc
+    extra_args:
+      - SNIPPET=miniv4-can;miniv4-md-rotor8;miniv4-adc-torque8-ext5
+
+  app.node.miniv4_md_qdec4_adc:
+    platform_allow:
+      - fibril_robomaster_miniv4
+    integration_platforms:
+      - fibril_robomaster_miniv4
+    tags:
+      - fibril_can
+      - can
+      - motor
+      - encoder
+      - adc
+    extra_args:
+      - SNIPPET=miniv4-can;miniv4-md-qdec4;miniv4-adc-ext5
