@@ -9,8 +9,8 @@
  * Everything that touches a motor or an encoder happens in the tick. The
  * service and parameter handlers run on whichever thread drives fcan_poll,
  * so they raise a request and return; the tick consumes it. The one deferred
- * reply, calibrate_current_baseline's, is sent from the tick when the run
- * ends (ADR 0013).
+ * reply, calibrate_current_baseline's, is handed to the runtime from the tick
+ * when the run ends, and fcan_poll sends it (ADR 0013).
  */
 
 #define DT_DRV_COMPAT fibril_fcan_md_motor
@@ -147,6 +147,9 @@ struct motor_state
 
   motor_control::CurrentBaseline baseline;
   fcan_gen::call_handle baseline_call;
+  /* The run has ended but the runtime has not taken the reply yet. */
+  bool baseline_replying;
+  bool baseline_ok;
   /* Set by the handler, cleared by the tick once it has replied, so a second
    * call cannot overwrite the handle of one still running. Under `lock`. */
   bool baseline_busy;
@@ -453,11 +456,30 @@ static bool sample_current(uint8_t inst, float & current)
   return std::isfinite(current);
 }
 
+/* FCAN_E_BUSY means every staging slot still waits for fcan_poll, as when
+ * several motors finish in the same tick; the next tick tries again. */
+static void reply_baseline(uint8_t inst)
+{
+  struct motor_state * s = &states[inst];
+  const baseline_resp resp{s->baseline_ok};
+  k_spinlock_key_t key;
+
+  if (
+    fcan_gen::mdmotor::calibrate_current_baseline_complete(
+      s->baseline_call, s->baseline_ok ? FCAN_SVC_OK : FCAN_SVC_APP_ERROR, resp) == FCAN_E_BUSY) {
+    return;
+  }
+
+  s->baseline_replying = false;
+
+  key = k_spin_lock(&lock);
+  s->baseline_busy = false;
+  k_spin_unlock(&lock, key);
+}
+
 static void finish_baseline(uint8_t inst, bool success)
 {
   struct motor_state * s = &states[inst];
-  const baseline_resp resp{success};
-  k_spinlock_key_t key;
 
   if (success) {
     LOG_INF("motor %u: current baseline %.4f", inst, (double)s->baseline.offset());
@@ -465,12 +487,9 @@ static void finish_baseline(uint8_t inst, bool success)
     LOG_WRN("motor %u: current baseline aborted, the motor moved or lost its current", inst);
   }
 
-  fcan_gen::mdmotor::calibrate_current_baseline_complete(
-    s->baseline_call, success ? FCAN_SVC_OK : FCAN_SVC_APP_ERROR, resp);
-
-  key = k_spin_lock(&lock);
-  s->baseline_busy = false;
-  k_spin_unlock(&lock, key);
+  s->baseline_ok = success;
+  s->baseline_replying = true;
+  reply_baseline(inst);
 }
 
 static void update_current(uint8_t inst)
@@ -479,6 +498,10 @@ static void update_current(uint8_t inst)
   float current = 0.0F;
 
   s->current_valid = sample_current(inst, current);
+
+  if (s->baseline_replying) {
+    reply_baseline(inst);
+  }
 
   if (s->baseline.running()) {
     const bool still = s->encoder_valid && (s->control.mode() == motor_control::Mode::DUTY) &&
