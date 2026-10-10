@@ -76,6 +76,8 @@ west flash
 | `miniv4-can` | トランスポート | RoboMaster Mini V4 | 外部 CAN（FDCAN1）に直接つなぐ |
 | `miniv4-md-qdec4` | デプロイ | RoboMaster Mini V4 | RoboMaster 4 台を基板の qdec で閉ループ制御する（CanMotorMbed の後継） |
 | `miniv4-md-rotor8` | デプロイ | RoboMaster Mini V4 | RoboMaster 8 台をそれぞれのロータ角で閉ループ制御する（CanMotorMbed の `ROBOMASTER_ENCODER`） |
+| `miniv4-adc-torque8-ext5` | デプロイ | RoboMaster Mini V4 | キャリブレーションの入力を CanMotorMbed の並び（トルク 8、基板の ADC 5）で足す。`miniv4-md-rotor8` に重ねる |
+| `miniv4-adc-ext5` | デプロイ | RoboMaster Mini V4 | キャリブレーションの入力として基板の ADC 5 本を足す。どの `miniv4-md-*` にも重ねられる |
 
 ボード持ち込みの動作確認には `app/` を使う。fibril_can を使わない。
 

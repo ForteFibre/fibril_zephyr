@@ -38,6 +38,7 @@ config FIBRIL_NODE_ID
 	  boot instead, so that two identical boards can run one image. RC26
 	  MainAir V01 has no such input, so its id is fixed at build time here.
 
+rsource "adc_port/Kconfig"
 rsource "md_motor/Kconfig"
 rsource "robstride/Kconfig"
 rsource "solenoid/Kconfig"

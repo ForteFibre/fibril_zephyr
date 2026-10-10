@@ -5,6 +5,7 @@ zephyr_library()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/instance_schema.cmake)
 
+add_subdirectory(adc_port)
 add_subdirectory(md_motor)
 add_subdirectory(robstride)
 add_subdirectory(solenoid)

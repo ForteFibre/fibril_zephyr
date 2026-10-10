@@ -12,6 +12,7 @@
 /dts-v1/;
 #include <st/g4/stm32g474Xe.dtsi>
 #include <st/g4/stm32g474v(b-c-e)tx-pinctrl.dtsi>
+#include <zephyr/dt-bindings/adc/adc.h>
 
 / {
 	model = "Fibril RoboMaster Mini V4";
@@ -154,6 +155,79 @@
 		 <&rcc STM32_SRC_PLL_Q FDCAN_SEL(1)>;
 	pinctrl-0 = <&fdcan3_rx_pa8 &fdcan3_tx_pa15>;
 	pinctrl-names = "default";
+};
+
+/* The five analog inputs CanMotorMbed calls ADC__0..ADC__4: PC2, PC3, PA4,
+ * PA2, PA3. PA4 only reaches ADC2 and PA2/PA3 only ADC1, so both instances
+ * carry channels; PC2/PC3 go to ADC1 with the other two. Left disabled like
+ * the buses; an overlay that reads them flips status.
+ *
+ * SYNC clock (HCLK) / 4 = 40 MHz, under the G474's 60 MHz ADC clock limit.
+ * The channels run at the longest sampling time: the inputs
+ * are switches and sensors behind RC filters, read every 5 ms, so speed buys
+ * nothing and a high source impedance costs accuracy.
+ */
+&adc1 {
+	pinctrl-0 = <&adc1_in8_pc2 &adc1_in9_pc3 &adc1_in3_pa2 &adc1_in4_pa3>;
+	pinctrl-names = "default";
+	st,adc-clock-source = "SYNC";
+	st,adc-prescaler = <4>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* ADC__0 */
+	channel@8 {
+		reg = <8>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
+
+	/* ADC__1 */
+	channel@9 {
+		reg = <9>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
+
+	/* ADC__3 */
+	channel@3 {
+		reg = <3>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
+
+	/* ADC__4 */
+	channel@4 {
+		reg = <4>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
+};
+
+&adc2 {
+	pinctrl-0 = <&adc2_in17_pa4>;
+	pinctrl-names = "default";
+	st,adc-clock-source = "SYNC";
+	st,adc-prescaler = <4>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* ADC__2. Channel 17, so unit address 0x11. */
+	channel@11 {
+		reg = <17>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
 };
 
 zephyr_udc0: &usb {

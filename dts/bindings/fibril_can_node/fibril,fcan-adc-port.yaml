@@ -1,0 +1,69 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  The inputs MdMotor's calibration watches, exposed on the CAN bus as the
+  schema's AdcPort block type: one instance per child, holding that input's
+  threshold. This is CanMotorMbed's ADC port list.
+
+  This node is what puts AdcPort on the bus. The build reads it to emit the
+  schema's `instances:` entry, and md_motor reads the inputs through it.
+
+  Each child is one port, in bus-instance order, and reads one of two things:
+
+  - `io-channels`: an ADC channel, normalised to 0..1 of its full scale.
+  - `motor`: the current a motor-class device reports, divided by 10000, which
+    is how CanMotorMbed turned a RoboMaster's torque into a port. A port that
+    climbs above its threshold while the motor pushes against a stop is the
+    usual way to find an end without a switch.
+
+    fcan_adc_port: fcan-adc-port {
+        compatible = "fibril,fcan-adc-port";
+        fcan-ns = "adc{i}";
+
+        torque0 {
+            motor = <&rm_motor1>;
+        };
+
+        ext0 {
+            io-channels = <&adc1 8>;
+        };
+    };
+
+  The port number a motor's `adc/port` names is the child's position here, so
+  reordering the children re-points every motor. The order belongs to the
+  deployment snippet, not to the board.
+
+  This node carries no reg and there is no reason to have two of them.
+
+compatible: "fibril,fcan-adc-port"
+
+include: base.yaml
+
+properties:
+  fcan-ns:
+    type: string
+    required: true
+    description: |
+      The instance namespace on the bus, which becomes the ROS name prefix.
+      `{i}` expands to the instance index, so `adc{i}` gives adc0..adcN, the
+      names can_md_controller used for the thresholds.
+
+child-binding:
+  description: |
+    One port. Give exactly one of `io-channels` and `motor`; the build fails
+    on a child with neither or both.
+
+  properties:
+    io-channels:
+      type: phandle-array
+      description: |
+        The ADC channel to sample. The channel needs its own child node under
+        the ADC controller (zephyr,gain, zephyr,resolution and so on), which
+        the board's devicetree provides for the pins it brings out.
+
+    motor:
+      type: phandle
+      description: |
+        A motor-class device whose reported current is the input. Reads as no
+        sample while the motor is offline or its feedback is stale.

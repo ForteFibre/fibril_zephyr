@@ -9,8 +9,8 @@
 # types carry over: same Target/Feedback/ResetEncoder types, same parameter
 # names under motorN. It is not a drop-in replacement. The bridge puts the
 # parameters on its own node, the trajectory point needs all three arrays
-# filled, and the ADC calibration services are not here yet; doc/apps.md
-# lists the differences.
+# filled, and WaitSensorTrigger is left to the host; doc/apps.md lists the
+# differences.
 
 types:
   MdMotor:
@@ -67,6 +67,20 @@ types:
       # A trip holds until reset_safety or until this is set to 0 and back.
       stall/timeout_ms: { type: u32, default: 0 }
 
+      # The AdcPort this motor's calibration watches. 255 means the port with
+      # this motor's own index, CanMotorMbed's default mapping.
+      adc/port: { type: u8, default: 255 }
+
+      # feedback.current is the motor's raw current / 1000 (CanMotorMbed's
+      # read_current()), times the sign of `polarity`, minus `offset` and
+      # minus what the last calibrate_current_baseline measured.
+      current/polarity: { type: f32, default: 1.0 }
+      current/offset: { type: f32, default: 0.0 }
+      # How long calibrate_current_baseline averages. Clamped to 0.05..1 s so
+      # the reply lands inside the bridge's service timeout (1.5 s by
+      # default); CanMotorMbed allowed up to 5 s.
+      current/baseline_duration_s: { type: f32, default: 0.5, min: 0.05, max: 1.0 }
+
     topics:
       # DUTY, VELOCITY and POSITION. TORQUE and TRAJECTORY are ignored with a
       # warning, as can_md_controller did; use `trajectory` for the latter.
@@ -94,8 +108,7 @@ types:
         ros: { type: trajectory_msgs/msg/JointTrajectoryPoint }
 
       # 100 Hz, the rate a CanMotorMbed bulk feedback was usually set to.
-      # `current` is left out until the node measures it; the bridge fills an
-      # omitted field with zero.
+      # `current` reads 0 while the motor reports none.
       feedback:
         dir: s2m
         period_us: 10000
@@ -104,7 +117,20 @@ types:
           velocity: f32
           position: f32
           output: f32
+          current: f32
         ros: { type: fibril_control_msgs/msg/Feedback }
+
+      # A crossing of the watched AdcPort's threshold while sensor_state is
+      # on: RISE (1) or FALL (0), and the position at that tick. The first
+      # sample after sensor_state turns on is sent too, so the master learns
+      # the starting level. Nothing is sent while nothing crosses.
+      sensor:
+        dir: s2m
+        period_us: 0
+        fields:
+          direction: u8
+          edge_position: f32
+        ros: { type: fibril_control_msgs/msg/SensorState }
 
     services:
       # `offset: false` makes the current position read as `value`;
@@ -123,6 +149,26 @@ types:
 
       # Clears a stall breaker trip.
       reset_safety:
+        request: {}
+        response: { success: bool }
+        ros:
+          type: std_srvs/srv/Trigger
+          map: { success: success }
+
+      # Starts (true) or stops (false) watching `adc/port`. Refused when the
+      # port does not exist.
+      sensor_state:
+        request: { data: bool }
+        response: { success: bool }
+        ros:
+          type: std_srvs/srv/SetBool
+          map: { data: data, success: success }
+
+      # Averages the current over current/baseline_duration_s and takes the
+      # mean as the zero of feedback.current. The motor has to hold still in
+      # DUTY 0 for the whole run; the reply comes when the run ends and says
+      # whether it completed.
+      calibrate_current_baseline:
         request: {}
         response: { success: bool }
         ros:

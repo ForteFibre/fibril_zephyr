@@ -45,6 +45,7 @@
 | [0010](0010-md-motor-block-type.md) | CanMotorMbed の後継を MdMotor ブロック型として載せ、can_md_controller に寄せる | Proposed |
 | [0011](0011-robomaster-rotor-encoder.md) | RoboMaster のロータ角を、受信経路から通知を受ける encoder device として見せる | Proposed |
 | [0012](0012-node-id-switch-and-watchdog.md) | node_id を基板の ID スイッチの値そのままにし、watchdog を tick で叩く | Proposed |
+| [0013](0013-md-motor-calibration-and-current.md) | MdMotor の ADC キャリブレーションを AdcPort ブロック型で入れ替え可能にし、電流ベースラインは測り終えてから応答する | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -62,4 +63,5 @@
 0010-md-motor-block-type
 0011-robomaster-rotor-encoder
 0012-node-id-switch-and-watchdog
+0013-md-motor-calibration-and-current
 ```

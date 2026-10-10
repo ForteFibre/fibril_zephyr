@@ -80,11 +80,28 @@ snippets/miniv4/md-rotor8/
 ├── snippet.yml
 ├── md-rotor8.conf                     CONFIG_FIBRIL_NODE_SCHEMA と watchdog
 └── fibril_robomaster_miniv4.overlay   RoboMaster バス、ロータのエンコーダ、md_motor ノード
+
+snippets/miniv4/adc-torque8-ext5/
+├── snippet.yml
+└── fibril_robomaster_miniv4.overlay   adc_port ノード（トルク 8、基板の ADC 5）と ADC
+
+snippets/miniv4/adc-ext5/
+├── snippet.yml
+└── fibril_robomaster_miniv4.overlay   adc_port ノード（基板の ADC 5）と ADC
 ```
 
 `miniv4-md-*` の名前の後半は、モータが閉ループに使うエンコーダを、モータの並び順に `<種類><台数>` で並べたものである。
 `qdec4` は基板の直交エンコーダ入力 4 本、`rotor8` は RoboMaster 8 台それぞれのロータ角（[robomaster_encoder](drivers/robomaster_encoder.md)）を使う。
 同じ基板でもモータとエンコーダの組み合わせは機体ごとに変わるので、組み合わせを増やすときは `miniv4-md-rotor4-qdec4` のように足していく。
+
+`miniv4-adc-*` は、`MdMotor` のキャリブレーションが見る入力（`AdcPort`）を足すデプロイ snippet で、`miniv4-md-*` の後ろに重ねる。
+名前の後半は、入力をポートの並び順に `<種類><本数>` で並べたものである。
+`torque` は RoboMaster のトルク、`ext` は基板のアナログ入力 ADC__0〜ADC__4 を表す。
+
+- `miniv4-adc-torque8-ext5` は CanMotorMbed の miniv4 と同じ並び（0〜7 がモータ 1〜8 のトルク、8〜12 が ADC__0〜ADC__4）にする。モータ 8 台のラベルを参照するので、`miniv4-md-rotor8` と組む。
+- `miniv4-adc-ext5` は基板のアナログ入力だけを 0〜4 に置く。どの `miniv4-md-*` とも組めるが、ポート番号が CanMotorMbed と違うので、各モータの `adc/port` を設定する。
+
+入力の並びを変えるときは、`miniv4-md-*` と同じく、組み合わせごとに snippet を足す。
 
 `snippet.yml` の `boards:` キーは正規表現にする。
 比較の対象が `<board>/<qualifiers>` なので、ボード名そのままの完全一致キーは、SoC 名を持つボードに当たらない。
@@ -160,6 +177,7 @@ STM32 の IWDG は `wdt_setup` で初めて動き出すので、`CONFIG_WATCHDOG
 | `Solenoid` | `fibril,fcan-solenoid` | GPIO の電磁弁。Service で開閉し、状態を publish する |
 | `RobstrideMotor` | `fibril,fcan-robstride` | RobStride アクチュエータ。指令、feedback、診断、再ゼロ |
 | `MdMotor` | `fibril,fcan-md-motor` | エンコーダで閉ループにした電流指令のモータ。CanMotorMbed の後継 |
+| `AdcPort` | `fibril,fcan-adc-port` | `MdMotor` のキャリブレーションが見る入力。ADC のチャネルか、モータが報告する電流 |
 
 `RobstrideMotor` は `robstride_actuator_bridge_ros2` が ROS グラフに出していたインタフェースをそのまま名乗る。
 モータを PC の SocketCAN から基板に移しても購読側は変わらない、というのがこの型の目的である。
@@ -177,11 +195,25 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 - `trajectory`（`JointTrajectoryPoint`）は `positions`、`velocities`、`accelerations` をどれも 1 要素以上埋める。短い配列のメッセージは bridge が捨てる。
 - `invert`、`use_cascade_position`、`accel_ff_gain` は node 側の param になった。`can_md_controller` は host で処理していた。
 - `encoder.offset` の param は無い。`reset_encoder` を呼ぶ。
-- ADC のキャリブレーション（`sensor`、`trigger` など）と feedback の `current` はまだ無い。
+- `trigger` と `trigger_cancel`（`WaitSensorTrigger`）は無い。`sensor` を購読して host で待つ。
+- しきい値は `AdcPort` の `adcN/threshold` に、どのポートを見るかは `motorN/adc/port` に置く。`can_md_controller` の `adc{N}.threshold` は起動時だけ送る read only の param だったが、ここではいつでも変えられる。
+- `sensor` の `edge_position` には `invert` が掛かる。`can_md_controller` は掛けていなかった。
+- `calibrate_current_baseline` は測り終えてから応答し、静止していなかったら失敗を返す。測る時間は 0.05〜1 s（CanMotorMbed は 0.5〜5 s）。
 - 指令が途絶えたときに出力を止める仕組みはまだ無い。
 
 `encoders` には、基板のエンコーダ入力（`fibril,stm32-qdec`、`cui,amt21-encoder`）のほか、RoboMaster のロータ角（`dji,robomaster-encoder`）を置ける。
 ロータ角のカウントは減速前の 8192 counts/rev なので、`encoder/gain` に減速比を含める。
+
+### キャリブレーションと電流
+
+`MdMotor` は CanMotorMbed の ADC のキャリブレーションと電流ベースラインを持つ。
+判断の理由は [ADR 0013](adr/0013-md-motor-calibration-and-current.md) にある。
+
+- `sensor_state` を true にすると、`adc/port` が指す `AdcPort` の値を 5 ms ごとに見る。|値| がしきい値をまたぐたびに、向き（RISE か FALL）とその時点の位置を `sensor` に出す。有効にした直後の最初のサンプルでも、そのときの向きを 1 回出す。位置は変えない。原点を合わせるなら、host が `edge_position` を見て `reset_encoder` を呼ぶ。
+- `adc/port` の既定（255）は、モータと同じ番号のポートを指す。監視中に `adc/port` を変えると、新しいポートの最初のサンプルで、そのときの向きを 1 回出す（有効にした直後と同じ）。
+- エンコーダの値が無効な間は、ポートの値を見ない。その間にしきい値をまたいでいたら、エンコーダが戻った最初のサンプルで、そのときの位置を付けて出す。
+- `feedback.current` は、モータが報告する電流の生の値を 1000 で割ったものである（CanMotorMbed の `read_current()`）。`current/polarity` の符号を掛け、`current/offset` と、最後に測ったベースラインを引き、最後に `invert` を掛ける。結果が有限でなければ（`current/offset` が NaN など）、電流は無効とし、`feedback.current` は 0 にする。測っているベースラインは中止する。
+- `calibrate_current_baseline` は、`current/baseline_duration_s` の間、DUTY 0 で止まっているモータの電流を平均する。測り終えてから応答を返す（ACCEPTED の後に最終応答）。
 
 ## 機能を 1 つ足す
 

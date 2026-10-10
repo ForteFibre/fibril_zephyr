@@ -1,0 +1,29 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The board's five analog inputs as AdcPort 0..4.
+ */
+
+/ {
+    fcan_adc_port: fcan-adc-port {
+        compatible = "fibril,fcan-adc-port";
+        fcan-ns = "adc{i}";
+        status = "okay";
+
+        /* ADC__0..ADC__4: PC2, PC3, PA4, PA2, PA3. */
+        ext0 { io-channels = <&adc1 8>; };
+        ext1 { io-channels = <&adc1 9>; };
+        ext2 { io-channels = <&adc2 17>; };
+        ext3 { io-channels = <&adc1 3>; };
+        ext4 { io-channels = <&adc1 4>; };
+    };
+};
+
+&adc1 {
+    status = "okay";
+};
+
+&adc2 {
+    status = "okay";
+};
