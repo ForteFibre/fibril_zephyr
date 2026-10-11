@@ -59,10 +59,9 @@ overlay は `#include <fibril/...>` で取り込み、`fibril,fcan-*` のノー�
 | `dts/fibril/can-bitrate.h` | fibril_can のバス（1 M / 5 M）と、classic CAN のアクチュエータのバス（1 M）のビットレート |
 | `dts/fibril/robomaster-x8.dtsi` | RoboMaster の ESC 8 台（`rm_motor1..8`、C620）とロータ角（`rm_enc1..8`）。基板に依存しない。`cans` は基板の断片が書く |
 | `dts/fibril/robomaster_miniv4/robomaster.dtsi` | 上を FDCAN2 と FDCAN3 に載せ、両方を 1 Mbps で有効にする |
-| `dts/fibril/robomaster_miniv4/qdec.dtsi` | ENC0〜ENC5（`enc0..5`）。timer は基板の文書の表の割り当て |
+| `dts/fibril/robomaster_miniv4/qdec-enc0.dtsi`〜`qdec-enc5.dtsi` | 入力 1 本ずつ（`enc0`〜`enc5`）。timer は基板の文書の表の割り当てで、その timer を確保する |
+| `dts/fibril/robomaster_miniv4/qdec.dtsi` | 上の 6 本をすべて取り込む |
 | `dts/fibril/robomaster_miniv4/adc.dtsi` | ADC1 と ADC2 を有効にする（チャネルは基板の DTS が定義する） |
-| `dts/fibril/robomaster_miniv4/adc-ports-torque8.dtsi` | `fcan-adc-port` の子 8 つ（モータ 1〜8 のトルク）。ノードの中で include する |
-| `dts/fibril/robomaster_miniv4/adc-ports-ext5.dtsi` | `fcan-adc-port` の子 5 つ（ADC__0〜ADC__4）。ノードの中で include する |
 
 **未接続を許し、空回りのコストが小さいデバイスは、最大の構成で定義する。**
 たとえば ESC は 8 台とも定義する。
@@ -86,6 +85,32 @@ overlay は `#include <fibril/...>` で取り込み、`fibril,fcan-*` のノー�
 
 基板を足すときは、`dts/fibril/<board>/` に、その基板のコネクタに繋がるものの断片を置く。
 RoboMaster を載せるなら、`robomaster-x8.dtsi` を include して `&robomaster { cans = <...>; };` を書く。
+
+## 1 つしか持てないものは確保する
+
+snippet を重ねると、1 つの image に 1 つしか持てないものを 2 つの snippet が書くことがある。
+dtc は同じ名前のノードをマージしてプロパティを後勝ちにし、Kconfig の文字列も後勝ちになるので、どちらも黙って通る。
+これを止めるため、断片と overlay は、排他の資源をプリプロセッサのマクロで確保する。
+
+```c
+#ifdef FIBRIL_CLAIM_TIM3
+#error "TIM3 claimed twice; ENC0 is one claimant"
+#endif
+#define FIBRIL_CLAIM_TIM3 1
+```
+
+overlay はすべて 1 回のプリプロセッサの実行に並ぶので、`-S` をどの順に並べても、後から確保した側の `#error` でビルドが止まる。
+メッセージに出るのは後の側だけなので、もう一方は `FIBRIL_CLAIM_<名前>` を grep して探す。
+
+| 確保する名前 | 確保する側 |
+| --- | --- |
+| `NODE_ROLE` | `CONFIG_FIBRIL_NODE_SCHEMA` を決めるデプロイ snippet（`*-md-*`、`rc26-air`、`rc26-robstride`） |
+| `FCAN_MD_MOTOR`、`FCAN_ADC_PORT`、`FCAN_SOLENOID`、`FCAN_ROBSTRIDE` | その `fibril,fcan-*` のノードを書く snippet |
+| `TIM<n>` | qdec の入力の断片（`qdec-encN.dtsi`）。PWM などで timer を使う断片も確保する |
+| `FDCAN<n>` | CAN コントローラを使う断片と snippet（RoboMaster のバス、経路、RobStride） |
+
+確保は約束であり、強制ではない。
+排他の資源に触れる断片や snippet を足すときは、確保を書く。
 
 ## snippet の中身
 
@@ -123,13 +148,9 @@ snippets/miniv4/md-rotor8/
 ├── snippet.yml                        ../../common/md/md.conf も append する
 └── fibril_robomaster_miniv4.overlay   md_motor ノード（RoboMaster 1〜8 とロータ角）
 
-snippets/miniv4/adc-torque8-ext5/
+snippets/miniv4/adc/
 ├── snippet.yml
-└── fibril_robomaster_miniv4.overlay   adc_port ノード（トルク 8、基板の ADC 5）
-
-snippets/miniv4/adc-ext5/
-├── snippet.yml
-└── fibril_robomaster_miniv4.overlay   adc_port ノード（基板の ADC 5）
+└── fibril_robomaster_miniv4.overlay   adc_port ノード（基板で固定の 13 ポート）
 ```
 
 `miniv4-md-*` の名前の後半は、モータが閉ループに使うエンコーダを、モータの並び順に `<種類><台数>` で並べたものである。
@@ -137,14 +158,13 @@ snippets/miniv4/adc-ext5/
 同じ基板でもモータとエンコーダの組み合わせは機体ごとに変わるので、組み合わせを増やすときは `miniv4-md-rotor4-qdec4` のように足していく。
 ハードウェアは断片がすでに最大の構成で定義しているので、足す snippet の overlay には `fcan-md-motor` のノードだけを書く。
 
-`miniv4-adc-*` は、`MdMotor` のキャリブレーションが見る入力（`AdcPort`）を足すデプロイ snippet で、`miniv4-md-*` と重ねる。
-名前の後半は、入力をポートの並び順に `<種類><本数>` で並べたものである。
-`torque` は RoboMaster のトルク、`ext` は基板のアナログ入力 ADC__0〜ADC__4 を表す。
+`miniv4-adc` は、`MdMotor` のキャリブレーションが見る入力（`AdcPort`）を足すデプロイ snippet で、どの `miniv4-md-*` とも重ねられる。
+ポートは基板で固定の番号で、CanMotorMbed の miniv4 と同じく 0〜7 がモータ 1〜8 のトルク、8〜12 が ADC__0〜ADC__4 である。
+13 本とも常に定義するので、ほかにどの snippet を重ねても、ポート番号は同じ入力を指す。
+駆動しないモータのトルクのポートはサンプル無しとして読め、`adc/port` でそれを指すモータが無ければ判定されない。
 
-- `miniv4-adc-torque8-ext5` は CanMotorMbed の miniv4 と同じ並び（0〜7 がモータ 1〜8 のトルク、8〜12 が ADC__0〜ADC__4）にする。どの `miniv4-md-*` とも組める。駆動しないモータのトルクのポートは、サンプル無しとして読める。
-- `miniv4-adc-ext5` は基板のアナログ入力だけを 0〜4 に置く。どの `miniv4-md-*` とも組めるが、ポート番号が CanMotorMbed と違うので、各モータの `adc/port` を設定する。
-
-入力の並びを変えるときは、`miniv4-md-*` と同じく、組み合わせごとに snippet を足す。
+ポートの番号は ROS 側の `adc/port` との約束なので、組み合わせごとに並びを変える snippet は作らない。
+基板を足すときも、その基板が出せる入力を 1 つの並びに固定する。
 
 `snippet.yml` の `boards:` キーは正規表現にする。
 比較の対象が `<board>/<qualifiers>` なので、ボード名そのままの完全一致キーは、SoC 名を持つボードに当たらない。

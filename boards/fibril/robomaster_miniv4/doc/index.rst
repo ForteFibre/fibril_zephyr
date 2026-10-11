@@ -125,7 +125,8 @@ RS485 の設定例は :doc:`/drivers/amt21`、モータ CAN の使い方は :doc
 
 エンコーダ入力のピン名は CanMotorMbed の ``PinNames.h`` に合わせてある。
 ボードの devicetree はこれらのノードを持たない。
-``dts/fibril/robomaster_miniv4/qdec.dtsi`` が、表の割り当てで ENC0〜ENC5 の ``fibril,stm32-qdec`` を 6 本とも定義する（ラベルは ``enc0``〜``enc5``、:doc:`/drivers/qdec_stm32`）。
+``dts/fibril/robomaster_miniv4/qdec-enc0.dtsi``〜``qdec-enc5.dtsi`` が、表の割り当てで入力 1 本ずつの ``fibril,stm32-qdec`` を定義し、その timer を確保する（ラベルは ``enc0``〜``enc5``、:doc:`/drivers/qdec_stm32`）。
+``qdec.dtsi`` は 6 本をすべて取り込む。
 ENC0 と ENC5、ENC1 と ENC3 は、それぞれ同じ timer（``timers3``、``timers5``）にも載るので、両方を使うときは表の割り当てにする。
 ``miniv4-md-qdec4`` snippet はこの断片を include し、ENC0〜ENC3 をモータ 1〜4 と組にする。
 ENC4（``timers1``）と ENC5（``timers8``）は、ビルドが通ることだけを確かめてある。実機で数えたことはまだ無い。
@@ -136,7 +137,7 @@ ENC4（``timers1``）と ENC5（``timers8``）は、ビルドが通ることだ�
 アナログ入力のピン名も CanMotorMbed の ``PinNames.h`` に合わせてある。
 PA4 は ADC2 にしか、PA2 と PA3 は ADC1 にしか繋がらないので、ADC1 と ADC2 の両方にチャネルを定義してある（12 bit、最長のサンプリング時間）。
 ボードはチャネルを定義するだけで ADC を有効にしない。
-``MdMotor`` のキャリブレーションに使うときは、``miniv4-adc-*`` snippet が ``fibril,fcan-adc-port`` のノードを置き、``dts/fibril/robomaster_miniv4/adc.dtsi`` で ADC を有効にする（:doc:`/apps`）。
+``MdMotor`` のキャリブレーションに使うときは、``miniv4-adc`` snippet が ``fibril,fcan-adc-port`` のノードを置き、``dts/fibril/robomaster_miniv4/adc.dtsi`` で ADC を有効にする（:doc:`/apps`）。
 
 ロータリスイッチは ``fibril,id-switch``（``rotary_id``）として記述し、``chosen`` の ``fibril,node-id`` がこれを指す。
 ROT1 を最下位ビットとする 4 ビットの値として読み、fibril_can の node_id にそのまま使う（``lib/node_id``、:doc:`/apps` の「node_id を ID スイッチから読む」）。

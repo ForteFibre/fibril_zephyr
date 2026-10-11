@@ -41,6 +41,8 @@ ADC は満量を 1 とする 0〜1 に、モータは報告する電流 / 10000 
 基板の devicetree は、引き出しているアナログピンのチャネルを定義するだけで、ADC を有効にしない。
 miniv4 には、CanMotorMbed と同じ並びの `miniv4-adc-torque8-ext5` と、基板の入力だけを並べる `miniv4-adc-ext5` を置く。
 
+> ポートの並びの決め方は、[ADR 0014](0014-snippet-hardware-fragments.md) の決定 7 で、基板で固定の番号に改めた。miniv4 の snippet は `miniv4-adc` の 1 つになった。
+
 ### 2. 判定はモータごとに持ち、ポートは一括でサンプリングする
 
 `adc_port` の tick が、5 ms ごとにすべてのポートをサンプリングし、世代を進める。
