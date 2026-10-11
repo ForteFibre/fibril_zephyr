@@ -1,0 +1,21 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Eight fibril,fcan-adc-port children: the torque RoboMaster motors 1..8
+ * report, in that order. Included inside the port node, at the position the
+ * deployment wants them; the includer also includes
+ * <fibril/robomaster_miniv4/robomaster.dtsi>.
+ *
+ * A motor that is not fitted, or not driven by this deployment, still reports
+ * nothing, which reads as no sample on its port.
+ */
+
+torque0 { motor = <&rm_motor1>; };
+torque1 { motor = <&rm_motor2>; };
+torque2 { motor = <&rm_motor3>; };
+torque3 { motor = <&rm_motor4>; };
+torque4 { motor = <&rm_motor5>; };
+torque5 { motor = <&rm_motor6>; };
+torque6 { motor = <&rm_motor7>; };
+torque7 { motor = <&rm_motor8>; };

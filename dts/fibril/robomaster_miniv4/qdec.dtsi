@@ -1,0 +1,109 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * All six quadrature encoder inputs of a Mini V4 (enc0..enc5), by the
+ * silkscreen names CanMotorMbed's PinNames.h gives them. Included by every
+ * miniv4 overlay that names one of them.
+ *
+ * All six are always defined, wired or not: an input with nothing on it only
+ * never counts. The timers follow the board document's table, the one
+ * assignment where ENC0/ENC5 and ENC1/ENC3 do not share a timer, so no
+ * deployment has to pick between them.
+ *
+ * Every prescaler is zero because the prescaler divides encoder counts as
+ * well. counts-per-revolution is informational and depends on the encoder
+ * fitted; 2048 is a placeholder until a robot names its encoders. A
+ * deployment that knows better overrides the one input:
+ *
+ *     &enc2 {
+ *         counts-per-revolution = <4096>;
+ *         invert-direction;
+ *     };
+ */
+
+#ifndef FIBRIL_MINIV4_QDEC_DTSI
+#define FIBRIL_MINIV4_QDEC_DTSI
+
+&timers3 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc0: encoder0 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim3_ch1_pa6 &tim3_ch2_pa7>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+/* TIM5 rather than ENC1's other choice, so that ENC3 can keep TIM2. */
+&timers5 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc1: encoder1 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim5_ch1_pb2 &tim5_ch2_pc12>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+&timers4 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc2: encoder2 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim4_ch1_pd12 &tim4_ch2_pd13>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+/* PA0/PA1 could also be TIM5, which ENC1 needs. */
+&timers2 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc3: encoder3 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim2_ch1_pa0 &tim2_ch2_pa1>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+&timers1 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc4: encoder4 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim1_ch1_pe9 &tim1_ch2_pe11>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+/* PC6/PC7 could also be TIM3, which ENC0 needs. */
+&timers8 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc5: encoder5 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim8_ch1_pc6 &tim8_ch2_pc7>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+#endif /* FIBRIL_MINIV4_QDEC_DTSI */

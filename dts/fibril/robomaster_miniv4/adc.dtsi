@@ -1,0 +1,22 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The ADCs behind a Mini V4's five analog inputs. The board's devicetree
+ * defines the channels and leaves both ADCs disabled; an overlay that reads
+ * ADC__0..ADC__4 includes this. Nothing is sampled until a reader asks, so an
+ * input with nothing on it costs nothing.
+ */
+
+#ifndef FIBRIL_MINIV4_ADC_DTSI
+#define FIBRIL_MINIV4_ADC_DTSI
+
+&adc1 {
+    status = "okay";
+};
+
+&adc2 {
+    status = "okay";
+};
+
+#endif /* FIBRIL_MINIV4_ADC_DTSI */
