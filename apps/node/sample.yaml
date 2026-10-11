@@ -91,7 +91,7 @@ tests:
       - encoder
       - adc
     extra_args:
-      - SNIPPET=miniv4-can;miniv4-md-rotor8;miniv4-adc-torque8-ext5
+      - SNIPPET=miniv4-can;miniv4-md-rotor8;miniv4-adc
 
   app.node.miniv4_md_qdec4_adc:
     platform_allow:
@@ -105,4 +105,4 @@ tests:
       - encoder
       - adc
     extra_args:
-      - SNIPPET=miniv4-can;miniv4-md-qdec4;miniv4-adc-ext5
+      - SNIPPET=miniv4-can;miniv4-md-qdec4;miniv4-adc

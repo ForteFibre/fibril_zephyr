@@ -31,8 +31,9 @@ description: |
     };
 
   The port number a motor's `adc/port` names is the child's position here, so
-  reordering the children re-points every motor. The order belongs to the
-  deployment snippet, not to the board.
+  reordering the children re-points every motor. Keep the order fixed for
+  the board, every input it brings out in one list, so that a port number
+  means the same input in every image (doc/adr/0014).
 
   This node carries no reg and there is no reason to have two of them.
 

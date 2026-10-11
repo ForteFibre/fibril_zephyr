@@ -4,16 +4,15 @@
 # MdMotor's calibration inputs in CanMotorMbed's robomaster_miniv4 order:
 # ports 0..7 are the torque of RoboMaster motors 1..8, ports 8..12 the board's
 # ADC__0..ADC__4. With it, a motor's default adc/port watches its own torque,
-# as on CanMotorMbed. Layers on any miniv4-md-* deployment; a motor that
-# deployment does not drive reads as no sample on its port:
+# as on CanMotorMbed. Layers on any miniv4-md-* deployment, in either order:
 #
 #   west build -b fibril_robomaster_miniv4 apps/node \
-#     -S miniv4-can -S miniv4-md-rotor8 -S miniv4-adc-torque8-ext5
+#     -S miniv4-can -S miniv4-md-rotor8 -S miniv4-adc
 #
-# miniv4-adc-<input><count>... names the inputs in port order; see
-# doc/apps.md.
+# The ports are the board's, not the deployment's: all 13 are always there,
+# so a port number means the same input whatever else the image carries.
 
-name: miniv4-adc-torque8-ext5
+name: miniv4-adc
 
 boards:
   /fibril_robomaster_miniv4.*/:
