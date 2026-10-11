@@ -25,8 +25,11 @@
 
 /* Both motor buses, MOTCAN0 and MOTCAN1. The driver learns which bus a motor
  * is on from its feedback, so the ids are unique across the pair rather than
- * per bus. A bus with nothing on it, or with its supply off, is retried in the
- * background and costs the others nothing.
+ * per bus. A bus with no ESC on it starts and stays idle. A bus with its
+ * supply off cannot start; the driver retries it from the transmit work it
+ * shares with the other bus, at most every 500 ms, and each retry can hold
+ * that work for up to the controller's init timeout (see
+ * doc/drivers/robomaster.md).
  */
 &robomaster {
     cans = <&fdcan2 &fdcan3>;

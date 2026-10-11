@@ -5,12 +5,12 @@
  * All six quadrature encoder inputs of a Mini V4 (enc0..enc5), by the
  * silkscreen names CanMotorMbed's PinNames.h gives them.
  *
- * All six are defined, wired or not: an input with nothing on it only never
- * counts. The timers follow the board document's table, the one assignment
- * where ENC0/ENC5 and ENC1/ENC3 do not share a timer. A deployment that needs
- * one of those timers for something else includes the qdec-encN.dtsi it uses
- * instead of this file; each one claims its timer (FIBRIL_CLAIM_TIMn), so
- * taking the same timer twice stops the build.
+ * All six are defined, wired or not: an input with no encoder on it simply
+ * stays at zero counts. The timers follow the board document's table, the
+ * one assignment where ENC0/ENC5 and ENC1/ENC3 do not share a timer. A
+ * deployment that needs one of those timers for something else includes the
+ * qdec-encN.dtsi it uses instead of this file; each one claims its timer
+ * (FIBRIL_CLAIM_TIMn), so taking the same timer twice stops the build.
  *
  * Every prescaler is zero because the prescaler divides encoder counts as
  * well. counts-per-revolution is informational and depends on the encoder

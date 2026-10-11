@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Every input a Mini V4 can watch, at a port number fixed for the board:
- * CanMotorMbed's 13 miniv4 ports. A port with nothing behind it (a motor
- * that is not fitted or not driven, an analog pin left open) reads as no
- * sample or as a floating level, and no motor watches it unless its adc/port
- * says so. So the numbering never depends on which other snippets are
- * layered, and an adc/port set on the ROS side keeps its meaning.
+ * CanMotorMbed's 13 miniv4 ports. A torque port reads as no sample while its
+ * motor is not fitted, offline or stale; a fitted motor reports its current
+ * whether or not this image drives it. An analog pin left open reads as a
+ * floating level. No motor watches a port unless its adc/port says so, so
+ * the numbering never depends on which other snippets are layered, and an
+ * adc/port set on the ROS side keeps its meaning.
  */
 
 #include <fibril/robomaster_miniv4/robomaster.dtsi>

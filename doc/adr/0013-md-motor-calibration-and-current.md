@@ -95,4 +95,4 @@ bridge の既定のタイムアウト（1.5 s）に収めるためである。
 - ポートは、`fcan_poll` を回すスレッドではなく tick で読む。ADC は 5 ms ごとに数チャネルを順に読み、そのたびに tick を少しブロックする。
 - Mbed のように、ホストとの接続が切れたら監視を止める処理は無い。fibril_can の master の喪失は、ブロック型からは見えないためである（ADR 0010）。
 - `adc/port` は u8 で、255 を「モータと同じ番号」に使う。256 本以上のポートは持てない。
-- `sensor` の topic を足したので、モータ 8 台の構成は topic が 32 本になる。`snippets/miniv4/schema/md.yaml` の `max_frames` を 32 から 48 に上げ、master の frame planner に余裕を残した。
+- `sensor` の topic を足したので、モータ 8 台の構成は topic が 32 本になる。`snippets/miniv4/schema/md.yaml`（今は `snippets/common/md/schema.yaml`）の `max_frames` を 32 から 48 に上げ、master の frame planner に余裕を残した。
