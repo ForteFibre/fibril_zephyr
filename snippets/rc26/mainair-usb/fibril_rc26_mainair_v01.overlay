@@ -14,6 +14,11 @@
 
 #include <fibril/can-bitrate.h>
 
+#ifdef FIBRIL_CLAIM_FDCAN3
+#error "FDCAN3 claimed twice; rc26-mainair-usb is one claimant"
+#endif
+#define FIBRIL_CLAIM_FDCAN3 1
+
 / {
     gs_usb0: gs_usb0 {
         compatible = "gs_usb";

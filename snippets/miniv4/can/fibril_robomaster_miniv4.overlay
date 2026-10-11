@@ -13,6 +13,11 @@
 
 #include <fibril/can-bitrate.h>
 
+#ifdef FIBRIL_CLAIM_FDCAN1
+#error "FDCAN1 claimed twice; miniv4-can is one claimant"
+#endif
+#define FIBRIL_CLAIM_FDCAN1 1
+
 / {
     chosen {
         zephyr,canbus = &fdcan1;

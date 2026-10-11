@@ -13,6 +13,16 @@
 #include <fibril/can-bitrate.h>
 #include <fibril/robomaster-x8.dtsi>
 
+#ifdef FIBRIL_CLAIM_FDCAN2
+#error "FDCAN2 claimed twice; the RoboMaster bus is one claimant"
+#endif
+#define FIBRIL_CLAIM_FDCAN2 1
+
+#ifdef FIBRIL_CLAIM_FDCAN3
+#error "FDCAN3 claimed twice; the RoboMaster bus is one claimant"
+#endif
+#define FIBRIL_CLAIM_FDCAN3 1
+
 /* Both motor buses, MOTCAN0 and MOTCAN1. The driver learns which bus a motor
  * is on from its feedback, so the ids are unique across the pair rather than
  * per bus. A bus with nothing on it, or with its supply off, is retried in the

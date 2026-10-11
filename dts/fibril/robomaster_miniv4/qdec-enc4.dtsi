@@ -1,0 +1,30 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Encoder input ENC4 (PE9/PE11) on TIM1, as enc4. See qdec.dtsi for the
+ * settings every input shares.
+ */
+
+#ifndef FIBRIL_MINIV4_QDEC_ENC4_DTSI
+#define FIBRIL_MINIV4_QDEC_ENC4_DTSI
+
+#ifdef FIBRIL_CLAIM_TIM1
+#error "TIM1 claimed twice; ENC4 is one claimant"
+#endif
+#define FIBRIL_CLAIM_TIM1 1
+
+&timers1 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc4: encoder4 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim1_ch1_pe9 &tim1_ch2_pe11>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+#endif /* FIBRIL_MINIV4_QDEC_ENC4_DTSI */
