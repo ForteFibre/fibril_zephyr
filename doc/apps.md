@@ -41,9 +41,51 @@ west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
 RC26 MainAir には必ず USB の CAN が載り、電磁弁やエンコーダは搭載の有無が変わる。
 経路を別の層に括り出しておくと、機能の増減がデプロイ snippet 1 つの中で閉じる。
 
-機能側の overlay はボードが定義するラベルしか参照しない。
+機能側の overlay は、ボードが定義するラベルと、自分で include したハードウェアの断片（次の節）のラベルしか参照しない。
 トランスポート snippet が作るラベル（`fcan_hub` など）には触れない。
 この約束があるので、`-S` の順序を入れ替えても同じ blob が出る。
+
+CAN トランシーバの STB と、boot_id が使う RNG は、どの経路でも要るので、基板の DTS が持つ。
+トランスポート snippet は書かない。
+
+## ハードウェアは共有の断片に書く
+
+基板に繋がりうるハードウェア（RoboMaster のバスとモータ、エンコーダ、ADC）は、snippet ではなく `dts/fibril/` の断片に書く。
+overlay は `#include <fibril/...>` で取り込み、`fibril,fcan-*` のノードだけを自分で書く。
+判断の理由は [ADR 0014](adr/0014-snippet-hardware-fragments.md) にある。
+
+| 断片 | 中身 |
+| --- | --- |
+| `dts/fibril/can-bitrate.h` | fibril_can のバス（1 M / 5 M）と、classic CAN のアクチュエータのバス（1 M）のビットレート |
+| `dts/fibril/robomaster-x8.dtsi` | RoboMaster の ESC 8 台（`rm_motor1..8`、C620）とロータ角（`rm_enc1..8`）。基板に依存しない。`cans` は基板の断片が書く |
+| `dts/fibril/robomaster_miniv4/robomaster.dtsi` | 上を FDCAN2 と FDCAN3 に載せ、両方を 1 Mbps で有効にする |
+| `dts/fibril/robomaster_miniv4/qdec.dtsi` | ENC0〜ENC5（`enc0..5`）。timer は基板の文書の表の割り当て |
+| `dts/fibril/robomaster_miniv4/adc.dtsi` | ADC1 と ADC2 を有効にする（チャネルは基板の DTS が定義する） |
+| `dts/fibril/robomaster_miniv4/adc-ports-torque8.dtsi` | `fcan-adc-port` の子 8 つ（モータ 1〜8 のトルク）。ノードの中で include する |
+| `dts/fibril/robomaster_miniv4/adc-ports-ext5.dtsi` | `fcan-adc-port` の子 5 つ（ADC__0〜ADC__4）。ノードの中で include する |
+
+**未接続を許し、空回りのコストが小さいデバイスは、最大の構成で定義する。**
+たとえば ESC は 8 台とも定義する。
+繋がっていない ESC は feedback を返さないだけで、ほかのモータに影響しない。
+どのモータを使うかは、デプロイ snippet が `fibril,fcan-*` のノードに並べるものだけで決まる。
+応答を待つデバイス（AMT21、RobStride）は、繋いだものだけを書く。
+
+既定から外れる個体は、断片を include した後でラベルを上書きする。
+
+```dts
+#include <fibril/robomaster_miniv4/robomaster.dtsi>
+
+&rm_motor3 {
+    model = "c610";
+};
+```
+
+断片は、同じ名前で include されるように `<...>` で取り込む。
+2 つの snippet が同じ断片を別の相対パス（`"../x.dtsi"`）で include すると、ビルドの依存の一覧に同じファイルが 2 つの名前で載り、ninja が `multiple rules generate` で止まる。
+断片の include guard は、overlay がすべて 1 回のプリプロセッサの実行で処理されるので効く。
+
+基板を足すときは、`dts/fibril/<board>/` に、その基板のコネクタに繋がるものの断片を置く。
+RoboMaster を載せるなら、`robomaster-x8.dtsi` を include して `&robomaster { cans = <...>; };` を書く。
 
 ## snippet の中身
 
@@ -51,7 +93,7 @@ RC26 MainAir には必ず USB の CAN が載り、電磁弁やエンコーダは
 snippets/rc26/mainair-usb/
 ├── snippet.yml                        name と、何を append するか
 ├── mainair-usb.conf                   USB スタックとログ
-└── fibril_rc26_mainair_v01.overlay    gs_usb、hub、CAN、RNG
+└── fibril_rc26_mainair_v01.overlay    gs_usb、hub、CAN
 
 snippets/rc26/air/
 ├── snippet.yml
@@ -67,38 +109,39 @@ snippets/rc26/robstride/
 
 snippets/miniv4/can/
 ├── snippet.yml
-└── fibril_robomaster_miniv4.overlay   FDCAN1 を zephyr,canbus に、STB、RNG
+└── fibril_robomaster_miniv4.overlay   FDCAN1 を zephyr,canbus に
 
-snippets/miniv4/schema/md.yaml         miniv4-md-* が共有する node と limits
+snippets/common/md/                    MdMotor の役割。基板によらず *-md-* が共有する
+├── md.conf                            CONFIG_FIBRIL_NODE_SCHEMA と watchdog
+└── schema.yaml                        node と limits
 
 snippets/miniv4/md-qdec4/
-├── snippet.yml
-├── md-qdec4.conf                      CONFIG_FIBRIL_NODE_SCHEMA と watchdog
-└── fibril_robomaster_miniv4.overlay   RoboMaster バス、qdec、md_motor ノード
+├── snippet.yml                        ../../common/md/md.conf も append する
+└── fibril_robomaster_miniv4.overlay   md_motor ノード（RoboMaster 1〜4 と ENC0〜3）
 
 snippets/miniv4/md-rotor8/
-├── snippet.yml
-├── md-rotor8.conf                     CONFIG_FIBRIL_NODE_SCHEMA と watchdog
-└── fibril_robomaster_miniv4.overlay   RoboMaster バス、ロータのエンコーダ、md_motor ノード
+├── snippet.yml                        ../../common/md/md.conf も append する
+└── fibril_robomaster_miniv4.overlay   md_motor ノード（RoboMaster 1〜8 とロータ角）
 
 snippets/miniv4/adc-torque8-ext5/
 ├── snippet.yml
-└── fibril_robomaster_miniv4.overlay   adc_port ノード（トルク 8、基板の ADC 5）と ADC
+└── fibril_robomaster_miniv4.overlay   adc_port ノード（トルク 8、基板の ADC 5）
 
 snippets/miniv4/adc-ext5/
 ├── snippet.yml
-└── fibril_robomaster_miniv4.overlay   adc_port ノード（基板の ADC 5）と ADC
+└── fibril_robomaster_miniv4.overlay   adc_port ノード（基板の ADC 5）
 ```
 
 `miniv4-md-*` の名前の後半は、モータが閉ループに使うエンコーダを、モータの並び順に `<種類><台数>` で並べたものである。
 `qdec4` は基板の直交エンコーダ入力 4 本、`rotor8` は RoboMaster 8 台それぞれのロータ角（[robomaster_encoder](drivers/robomaster_encoder.md)）を使う。
 同じ基板でもモータとエンコーダの組み合わせは機体ごとに変わるので、組み合わせを増やすときは `miniv4-md-rotor4-qdec4` のように足していく。
+ハードウェアは断片がすでに最大の構成で定義しているので、足す snippet の overlay には `fcan-md-motor` のノードだけを書く。
 
-`miniv4-adc-*` は、`MdMotor` のキャリブレーションが見る入力（`AdcPort`）を足すデプロイ snippet で、`miniv4-md-*` の後ろに重ねる。
+`miniv4-adc-*` は、`MdMotor` のキャリブレーションが見る入力（`AdcPort`）を足すデプロイ snippet で、`miniv4-md-*` と重ねる。
 名前の後半は、入力をポートの並び順に `<種類><本数>` で並べたものである。
 `torque` は RoboMaster のトルク、`ext` は基板のアナログ入力 ADC__0〜ADC__4 を表す。
 
-- `miniv4-adc-torque8-ext5` は CanMotorMbed の miniv4 と同じ並び（0〜7 がモータ 1〜8 のトルク、8〜12 が ADC__0〜ADC__4）にする。モータ 8 台のラベルを参照するので、`miniv4-md-rotor8` と組む。
+- `miniv4-adc-torque8-ext5` は CanMotorMbed の miniv4 と同じ並び（0〜7 がモータ 1〜8 のトルク、8〜12 が ADC__0〜ADC__4）にする。どの `miniv4-md-*` とも組める。駆動しないモータのトルクのポートは、サンプル無しとして読める。
 - `miniv4-adc-ext5` は基板のアナログ入力だけを 0〜4 に置く。どの `miniv4-md-*` とも組めるが、ポート番号が CanMotorMbed と違うので、各モータの `adc/port` を設定する。
 
 入力の並びを変えるときは、`miniv4-md-*` と同じく、組み合わせごとに snippet を足す。

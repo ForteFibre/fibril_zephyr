@@ -68,6 +68,10 @@ devicetree でも無効のままにしてある。
 
 いずれの FDCAN もピンとクロックだけを設定して無効にしてあるので、使う側の overlay が ``status`` を ``"okay"`` にしてビットレートを与える。
 
+2 つのトランシーバの STB は、ボードの devicetree が gpio-hog で Low にする。
+どちらのバスを有効にしても、トランシーバは動作状態で始まる。
+fibril_can の boot_id が使う ``rng`` も、ボードの devicetree で有効にしてある。
+
 UART
 ****
 

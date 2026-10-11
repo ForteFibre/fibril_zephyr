@@ -117,17 +117,25 @@ Twister が認識する機能は ``gpio``、``uart``、``dma``、``can``、``adc
 FDCAN と ``usart3``、``usb`` はピンとクロックだけを設定して無効のままにしてある。
 使う側の overlay が ``status`` を ``"okay"`` にし、ボーレートやビットレート、DMA、子ノードを与える。
 
+外部 CAN のトランシーバの STB（PB11）は、ボードの devicetree が gpio-hog で Low にする。
+どの経路の snippet で ``fdcan1`` を使っても、トランシーバは動作状態で始まる。
+fibril_can の boot_id が使う ``rng`` も、ボードの devicetree で有効にしてある。
+
 RS485 の設定例は :doc:`/drivers/amt21`、モータ CAN の使い方は :doc:`/drivers/robomaster` を参照する。
 
 エンコーダ入力のピン名は CanMotorMbed の ``PinNames.h`` に合わせてある。
-ボードの devicetree はこれらのノードを持たず、使う側の overlay が timer の子に ``fibril,stm32-qdec`` のノードを置く（:doc:`/drivers/qdec_stm32`）。
+ボードの devicetree はこれらのノードを持たない。
+``dts/fibril/robomaster_miniv4/qdec.dtsi`` が、表の割り当てで ENC0〜ENC5 の ``fibril,stm32-qdec`` を 6 本とも定義する（ラベルは ``enc0``〜``enc5``、:doc:`/drivers/qdec_stm32`）。
 ENC0 と ENC5、ENC1 と ENC3 は、それぞれ同じ timer（``timers3``、``timers5``）にも載るので、両方を使うときは表の割り当てにする。
-``miniv4-md-qdec4`` snippet は ENC0〜ENC3 を使う。
+``miniv4-md-qdec4`` snippet はこの断片を include し、ENC0〜ENC3 をモータ 1〜4 と組にする。
+
+モータ CAN の RoboMaster ESC は ``dts/fibril/robomaster_miniv4/robomaster.dtsi`` が 8 台とも定義する（``rm_motor1``〜``rm_motor8`` と、ロータ角の ``rm_enc1``〜``rm_enc8``）。
+繋がっていない ESC は feedback が無いだけなので、どのデプロイも同じ断片を使う（:doc:`/apps`）。
 
 アナログ入力のピン名も CanMotorMbed の ``PinNames.h`` に合わせてある。
 PA4 は ADC2 にしか、PA2 と PA3 は ADC1 にしか繋がらないので、ADC1 と ADC2 の両方にチャネルを定義してある（12 bit、最長のサンプリング時間）。
 ボードはチャネルを定義するだけで ADC を有効にしない。
-``MdMotor`` のキャリブレーションに使うときは、``miniv4-adc-*`` snippet が ``fibril,fcan-adc-port`` のノードを置き、ADC を有効にする（:doc:`/apps`）。
+``MdMotor`` のキャリブレーションに使うときは、``miniv4-adc-*`` snippet が ``fibril,fcan-adc-port`` のノードを置き、``dts/fibril/robomaster_miniv4/adc.dtsi`` で ADC を有効にする（:doc:`/apps`）。
 
 ロータリスイッチは ``fibril,id-switch``（``rotary_id``）として記述し、``chosen`` の ``fibril,node-id`` がこれを指す。
 ROT1 を最下位ビットとする 4 ビットの値として読み、fibril_can の node_id にそのまま使う（``lib/node_id``、:doc:`/apps` の「node_id を ID スイッチから読む」）。

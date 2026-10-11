@@ -46,6 +46,7 @@
 | [0011](0011-robomaster-rotor-encoder.md) | RoboMaster のロータ角を、受信経路から通知を受ける encoder device として見せる | Proposed |
 | [0012](0012-node-id-switch-and-watchdog.md) | node_id を基板の ID スイッチの値そのままにし、watchdog を tick で叩く | Proposed |
 | [0013](0013-md-motor-calibration-and-current.md) | MdMotor の ADC キャリブレーションを AdcPort ブロック型で入れ替え可能にし、電流ベースラインは測り終えてから応答する | Proposed |
+| [0014](0014-snippet-hardware-fragments.md) | 基板に繋がるハードウェアを共有の devicetree 断片に切り出し、未接続を許すデバイスは最大の構成で書く | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -64,4 +65,5 @@
 0011-robomaster-rotor-encoder
 0012-node-id-switch-and-watchdog
 0013-md-motor-calibration-and-current
+0014-snippet-hardware-fragments
 ```
