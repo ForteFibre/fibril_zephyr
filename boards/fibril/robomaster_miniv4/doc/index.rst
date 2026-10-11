@@ -128,6 +128,7 @@ RS485 の設定例は :doc:`/drivers/amt21`、モータ CAN の使い方は :doc
 ``dts/fibril/robomaster_miniv4/qdec.dtsi`` が、表の割り当てで ENC0〜ENC5 の ``fibril,stm32-qdec`` を 6 本とも定義する（ラベルは ``enc0``〜``enc5``、:doc:`/drivers/qdec_stm32`）。
 ENC0 と ENC5、ENC1 と ENC3 は、それぞれ同じ timer（``timers3``、``timers5``）にも載るので、両方を使うときは表の割り当てにする。
 ``miniv4-md-qdec4`` snippet はこの断片を include し、ENC0〜ENC3 をモータ 1〜4 と組にする。
+ENC4（``timers1``）と ENC5（``timers8``）は、ビルドが通ることだけを確かめてある。実機で数えたことはまだ無い。
 
 モータ CAN の RoboMaster ESC は ``dts/fibril/robomaster_miniv4/robomaster.dtsi`` が 8 台とも定義する（``rm_motor1``〜``rm_motor8`` と、ロータ角の ``rm_enc1``〜``rm_enc8``）。
 繋がっていない ESC は feedback が無いだけなので、どのデプロイも同じ断片を使う（:doc:`/apps`）。

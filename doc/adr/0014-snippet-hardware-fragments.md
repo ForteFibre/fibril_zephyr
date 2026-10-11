@@ -42,7 +42,7 @@ miniv4 のデプロイ snippet が 4 つになった時点で、overlay には�
    - timer や CAN コントローラのような資源を占有するか。
 
    これに当たるのは、RoboMaster の ESC 8 台とロータ角、miniv4 の qdec 6 本（ENC0〜ENC5）、ADC のチャネルである。
-   - RoboMaster：繋がっていない ESC は feedback を返さないだけで、モータは `-ENODATA`、ロータ角はデータ無しになる。バスに電源が無くても `can_start` を後から再試行する。
+   - RoboMaster：繋がっていない ESC は feedback を返さないだけで、モータは `-ENODATA`、ロータ角はデータ無しになる。ドライバは feedback で所在を知ったモータにしか指令のフレームを送らないので、モータの CAN のトラフィックも増えない。バスに電源が無くても `can_start` を後から再試行する。
    - qdec：外部に依存しない。基板の文書の表の割り当てなら、6 本の timer は衝突しない。
    - ADC：読むまでサンプリングしない。
 
@@ -60,7 +60,7 @@ miniv4 のデプロイ snippet が 4 つになった時点で、overlay には�
 
 `miniv4-adc-torque8-ext5` は、どの `miniv4-md-*` とも組めるようになった。
 駆動しないモータのトルクのポートは、サンプル無しとして読める。
-`-S` の順序を入れ替えても同じ devicetree になる。
+`-S` の順序を入れ替えても、ノードの並びが変わるだけで、devicetree の中身と schema の blob は変わらない。
 
 最大の構成の分だけ、イメージが大きくなる。
 `miniv4-md-qdec4` では、text が約 1.7 KB、bss が約 1.5 KB 増えた（ESC 4 台、ロータ角 8 個、qdec 2 本の分）。
