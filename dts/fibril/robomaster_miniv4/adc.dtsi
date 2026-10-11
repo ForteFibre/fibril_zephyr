@@ -4,8 +4,9 @@
  *
  * The ADCs behind a Mini V4's five analog inputs. The board's devicetree
  * defines the channels and leaves both ADCs disabled; an overlay that reads
- * ADC__0..ADC__4 includes this. Nothing is sampled until a reader asks, so an
- * input with nothing on it costs nothing.
+ * ADC__0..ADC__4 includes this. The driver converts only when read; what
+ * reads, and how often, is up to the includer (miniv4-adc's AdcPort converts
+ * all five every 5 ms, wired or not).
  */
 
 #ifndef FIBRIL_MINIV4_ADC_DTSI
