@@ -141,6 +141,19 @@
 	pinctrl-names = "default";
 };
 
+/* The external transceiver's STB. CanMotorMbed held it low with a pull-down;
+ * nothing in the CAN driver touches the pin, so the hog takes it low before
+ * any device init runs, whichever transport snippet enables FDCAN1.
+ */
+&gpiob {
+	can_stb_hog {
+		gpio-hog;
+		gpios = <11 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "CAN_STB";
+	};
+};
+
 /* MOTCAN0 to the first RoboMaster motor bus on PB12/PB13. */
 &fdcan2 {
 	clocks = <&rcc STM32_CLOCK(APB1, 25)>,
@@ -236,6 +249,14 @@ zephyr_udc0: &usb {
 };
 
 &iwdg {
+	status = "okay";
+};
+
+/* fibril_can's boot_id decides which node survives an id collision and
+ * jitters T_listen, so two boards powering up together must not draw the
+ * same value.
+ */
+&rng {
 	status = "okay";
 };
 

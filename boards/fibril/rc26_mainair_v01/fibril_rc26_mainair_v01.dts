@@ -226,6 +226,28 @@
 	pinctrl-names = "default";
 };
 
+/* Both transceivers hold STB high by default, which leaves their bus
+ * disconnected, and nothing in the CAN driver touches the pin. The hogs take
+ * both low before any device init runs, so whichever snippet enables a bus
+ * finds its transceiver running; one that is not used only draws its active
+ * current.
+ */
+&gpioa {
+	can1_stb_hog {
+		gpio-hog;
+		gpios = <10 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "CAN1_STB";
+	};
+
+	can0_stb_hog {
+		gpio-hog;
+		gpios = <9 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "CAN0_STB";
+	};
+};
+
 /* I2C4 -> J26 gyro socket (SCL=PC6, SDA=PC7). 4.7 kΩ pull-ups on board. */
 &i2c4 {
 	pinctrl-0 = <&i2c4_scl_pc6 &i2c4_sda_pc7>;
@@ -252,6 +274,14 @@ zephyr_udc0: &usb {
 };
 
 &iwdg {
+	status = "okay";
+};
+
+/* fibril_can's boot_id decides which node survives an id collision and
+ * jitters T_listen, so two boards powering up together must not draw the
+ * same value.
+ */
+&rng {
 	status = "okay";
 };
 

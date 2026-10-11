@@ -8,8 +8,11 @@
  *
  * Only the transport. A deployment snippet adds the fibril,fcan-* nodes and
  * must reference board labels only, never the labels defined here, so that
- * the two overlays can be applied in either order.
+ * the two overlays can be applied in either order. The transceiver's STB and
+ * the RNG that boot_id draws from are the board's.
  */
+
+#include <fibril/can-bitrate.h>
 
 / {
     gs_usb0: gs_usb0 {
@@ -29,33 +32,11 @@
 };
 
 /* The board leaves every FDCAN disabled and hands the bitrate to the user, so
- * that a node picks the bus it is wired to. 1 Mbps arbitration and 5 Mbps data
- * are what the 80 MHz PLL_Q kernel clock divides cleanly (80 and 16 tq/bit);
- * see the clock comment in the board's .dts. The board leaves HSI48 running,
+ * that a node picks the bus it is wired to. The board leaves HSI48 running,
  * which is what feeds USB.
  */
 &fdcan3 {
     status = "okay";
-    bitrate = <1000000>;
-    bitrate-data = <5000000>;
-};
-
-/* CAN0's transceiver IC2 holds STB high by default, which leaves the peer
- * port talking to a disconnected bus. Nothing in the driver touches the pin,
- * so the hog takes it low before any device init runs.
- */
-&gpioa {
-    can0_stb_hog {
-        gpio-hog;
-        gpios = <9 GPIO_ACTIVE_HIGH>;
-        output-low;
-        line-name = "CAN0_STB";
-    };
-};
-
-/* boot_id decides which node survives an id collision and jitters T_listen,
- * so two boards powering up together must not draw the same value.
- */
-&rng {
-    status = "okay";
+    bitrate = <FIBRIL_FCAN_BITRATE>;
+    bitrate-data = <FIBRIL_FCAN_BITRATE_DATA>;
 };

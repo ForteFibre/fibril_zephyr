@@ -8,7 +8,10 @@
  * The two buses stay apart on purpose. RobStride speaks classic CAN with
  * 29-bit identifiers, which cannot share a controller with the CAN FD traffic
  * fibril_can runs, so the actuators get CAN1 and the transport keeps CAN0.
+ * CAN1's transceiver STB is the board's.
  */
+
+#include <fibril/can-bitrate.h>
 
 / {
     fcan_robstride: fcan-robstride {
@@ -23,14 +26,13 @@
 };
 
 /*
- * External CAN1 (board silkscreen) on FDCAN2. 1 Mbit/s with no data phase:
- * the RobStride protocol is classic CAN only, so the controller must not be
- * given a data bitrate that would let an FD frame out onto a bus that cannot
- * carry one.
+ * External CAN1 (board silkscreen) on FDCAN2. No data phase: the RobStride
+ * protocol is classic CAN only, so the controller must not be given a data
+ * bitrate that would let an FD frame out onto a bus that cannot carry one.
  */
 &fdcan2 {
     status = "okay";
-    bitrate = <1000000>;
+    bitrate = <FIBRIL_ACTUATOR_CAN_BITRATE>;
 
     robstride0: robstride {
         compatible = "robstride,bus";
@@ -60,19 +62,5 @@
             max-current-ma = <2400>;
             status = "okay";
         };
-    };
-};
-
-/*
- * CAN1's transceiver IC1 holds STB high by default, which leaves the bus
- * disconnected. Nothing in the driver touches the pin, so the hog takes it low
- * before any device init runs.
- */
-&gpioa {
-    can1_stb_hog {
-        gpio-hog;
-        gpios = <10 GPIO_ACTIVE_HIGH>;
-        output-low;
-        line-name = "CAN1_STB";
     };
 };
