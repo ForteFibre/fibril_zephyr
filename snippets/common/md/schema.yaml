@@ -1,11 +1,14 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: Apache-2.0
 #
-# Who a RoboMaster Mini V4 motor driver is on the bus.
+# Who a motor driver (MdMotor, CanMotorMbed's successor) is on the bus, on
+# any board.
 #
 # `{i}` in the node name is replaced with the node id at startup, so this file
 # describes a role rather than one board. There is no `types:` and no
-# `instances:`: the devicetree decides what the node runs.
+# `instances:`: the devicetree decides what the node runs. The limits are
+# sized for the largest deployment, eight motors, so a board that drives
+# fewer shares them.
 
 node: md_controller{i}
 protocol: 2

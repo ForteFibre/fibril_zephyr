@@ -1,0 +1,85 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The Mini V4's RS485 bus for AMT21x absolute encoders (USART3: TX=PC10,
+ * RX=PC11, DE=PB14), as amt21_bus, with no encoder on it.
+ *
+ * Unlike the RoboMaster ESCs and the qdec inputs, the encoders are not all
+ * defined here. The bus polls every encoder it is given and waits for an
+ * answer, so one that is not fitted costs a timeout and its retries until it
+ * is called offline, and a probe every offline-poll-interval-us after that.
+ * A deployment adds exactly the encoders it wires, by their RS485 address:
+ *
+ *     &amt21_bus {
+ *         amt0: encoder@10 {
+ *             compatible = "cui,amt21-encoder";
+ *             reg = <0x10>;
+ *             resolution = <14>;
+ *         };
+ *     };
+ *
+ * The async UART API the driver needs is Kconfig, which a fragment cannot
+ * set: the including snippet appends CONFIG_UART_ASYNC_API=y.
+ */
+
+#ifndef FIBRIL_MINIV4_AMT21_DTSI
+#define FIBRIL_MINIV4_AMT21_DTSI
+
+#ifdef FIBRIL_CLAIM_USART3
+#error "USART3 claimed twice; the AMT21 bus is one claimant"
+#endif
+#define FIBRIL_CLAIM_USART3 1
+
+#ifdef FIBRIL_CLAIM_DMA1_CH1
+#error "DMA1_CH1 claimed twice; the AMT21 bus is one claimant"
+#endif
+#define FIBRIL_CLAIM_DMA1_CH1 1
+
+#ifdef FIBRIL_CLAIM_DMA1_CH2
+#error "DMA1_CH2 claimed twice; the AMT21 bus is one claimant"
+#endif
+#define FIBRIL_CLAIM_DMA1_CH2 1
+
+&usart3 {
+    /* 2 Mbps, the rate CanMotorMbed ran this bus at and the one the A/D
+     * options of the AMT21 family use. The slower E/H options need a lower
+     * rate here and a longer response-timeout-us on the bus node. */
+    current-speed = <2000000>;
+
+    /* The USART drives the transceiver's DE itself; software cannot keep up
+     * with the encoder's 3 us turnaround at 2 Mbps. de-assert-time lets DE
+     * settle before the start bit, and the short de-deassert-time drops it
+     * before the encoder starts to reply. The values are the ones that ran
+     * clean on the miniv1 bring-up (samples/drivers/amt21). */
+    de-enable;
+    de-assert-time = <8>;
+    de-deassert-time = <2>;
+
+    /* The async UART API is backed by DMA on STM32. USART3's DMAMUX request
+     * lines on the G4 are 29 for TX and 28 for RX. */
+    dmas = <&dma1 1 29 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH)>,
+           <&dma1 2 28 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH)>;
+    dma-names = "tx", "rx";
+
+    status = "okay";
+
+    /* The binding's defaults for timing: four encoders at the default
+     * 100 us inter-command gap fit a 1 ms scan with room for a retry, which
+     * the bring-up sample's more generous values would not. */
+    amt21_bus: amt21 {
+        compatible = "cui,amt21";
+        #address-cells = <1>;
+        #size-cells = <0>;
+    };
+};
+
+&dma1 {
+    status = "okay";
+};
+
+&dmamux1 {
+    status = "okay";
+};
+
+#endif /* FIBRIL_MINIV4_AMT21_DTSI */

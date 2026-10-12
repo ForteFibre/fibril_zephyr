@@ -41,6 +41,8 @@ ADC は満量を 1 とする 0〜1 に、モータは報告する電流 / 10000 
 基板の devicetree は、引き出しているアナログピンのチャネルを定義するだけで、ADC を有効にしない。
 miniv4 には、CanMotorMbed と同じ並びの `miniv4-adc-torque8-ext5` と、基板の入力だけを並べる `miniv4-adc-ext5` を置く。
 
+> ポートの並びの決め方は、[ADR 0014](0014-snippet-hardware-fragments.md) の決定 7 で、基板で固定の番号に改めた。miniv4 の snippet は `miniv4-adc` の 1 つになった。
+
 ### 2. 判定はモータごとに持ち、ポートは一括でサンプリングする
 
 `adc_port` の tick が、5 ms ごとにすべてのポートをサンプリングし、世代を進める。
@@ -93,4 +95,4 @@ bridge の既定のタイムアウト（1.5 s）に収めるためである。
 - ポートは、`fcan_poll` を回すスレッドではなく tick で読む。ADC は 5 ms ごとに数チャネルを順に読み、そのたびに tick を少しブロックする。
 - Mbed のように、ホストとの接続が切れたら監視を止める処理は無い。fibril_can の master の喪失は、ブロック型からは見えないためである（ADR 0010）。
 - `adc/port` は u8 で、255 を「モータと同じ番号」に使う。256 本以上のポートは持てない。
-- `sensor` の topic を足したので、モータ 8 台の構成は topic が 32 本になる。`snippets/miniv4/schema/md.yaml` の `max_frames` を 32 から 48 に上げ、master の frame planner に余裕を残した。
+- `sensor` の topic を足したので、モータ 8 台の構成は topic が 32 本になる。`snippets/miniv4/schema/md.yaml`（今は `snippets/common/md/schema.yaml`）の `max_frames` を 32 から 48 に上げ、master の frame planner に余裕を残した。

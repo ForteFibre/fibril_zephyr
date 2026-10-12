@@ -11,7 +11,8 @@
 name: miniv4-md-rotor8
 
 append:
-  EXTRA_CONF_FILE: md-rotor8.conf
+  # The role, shared with every board's *-md-* snippet.
+  EXTRA_CONF_FILE: ../../common/md/md.conf
 
 boards:
   /fibril_robomaster_miniv4.*/:

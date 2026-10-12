@@ -69,10 +69,11 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 | --- | --- |
 | `apps/` | 実機に焼くアプリケーション。`apps/node/` が fibril_can スレーブ |
 | `app/` | ボード持ち込みの動作確認用アプリケーション |
-| `snippets/` | 焼く単位。トランスポート層とデプロイ層に分かれる |
+| `snippets/` | 焼く単位。トランスポート層とデプロイ層に分かれる。`snippets/common/` は基板によらない役割（ノードヘッダと Kconfig） |
 | `boards/fibril/` | 自作ボードの定義。ボードごとの詳細は各 `doc/index.rst` |
 | `drivers/` | out-of-tree ドライバの実装 |
 | `dts/bindings/` | 上記ドライバと機能の devicetree binding |
+| `dts/fibril/` | snippet の overlay が include するハードウェアの断片（基板に依存しないものと、`<board>/` の下の基板ごとのもの） |
 | `include/` | 公開ヘッダ。ドライバクラスの API はここが正本 |
 | `lib/` | out-of-tree ライブラリ。`lib/fibril_can_node/` にブロック型の実装、`lib/fcan_transport/` にバスへの繋ぎ方、`lib/motor_control/` にモータ 1 台ぶんの制御のコア、`lib/node_id/` に基板の ID スイッチから node_id を読む処理 |
 | `samples/` | ドライバ単体および fibril_can と組み合わせたサンプル |

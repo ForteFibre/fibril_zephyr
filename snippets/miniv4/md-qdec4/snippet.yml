@@ -13,7 +13,8 @@
 name: miniv4-md-qdec4
 
 append:
-  EXTRA_CONF_FILE: md-qdec4.conf
+  # The role, shared with every board's *-md-* snippet.
+  EXTRA_CONF_FILE: ../../common/md/md.conf
 
 boards:
   /fibril_robomaster_miniv4.*/:
