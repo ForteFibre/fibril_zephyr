@@ -62,6 +62,7 @@ overlay は `#include <fibril/...>` で取り込み、`fibril,fcan-*` のノー�
 | `dts/fibril/robomaster_miniv4/qdec-enc0.dtsi`〜`qdec-enc5.dtsi` | 入力 1 本ずつ（`enc0`〜`enc5`）。timer は基板の文書の表の割り当てで、その timer を確保する |
 | `dts/fibril/robomaster_miniv4/qdec.dtsi` | 上の 6 本をすべて取り込む |
 | `dts/fibril/robomaster_miniv4/adc.dtsi` | ADC1 と ADC2 を有効にする（チャネルは基板の DTS が定義する） |
+| `dts/fibril/robomaster_miniv4/amt21.dtsi` | RS485（USART3、2 Mbps、DMA）の AMT21 バス `amt21_bus`。エンコーダは載せない。応答を待つデバイスなので、デプロイが繋いだものだけを足す |
 
 **未接続を許し、空回りのコストが小さいデバイスは、最大の構成で定義する。**
 たとえば ESC は 8 台とも定義する。
@@ -108,6 +109,7 @@ overlay はすべて 1 回のプリプロセッサの実行に並ぶので、`-S
 | `FCAN_MD_MOTOR`、`FCAN_ADC_PORT`、`FCAN_SOLENOID`、`FCAN_ROBSTRIDE` | その `fibril,fcan-*` のノードを書く snippet |
 | `TIM<n>` | qdec の入力の断片（`qdec-encN.dtsi`）。PWM などで timer を使う断片も確保する |
 | `FDCAN<n>` | CAN コントローラを使う断片と snippet（RoboMaster のバス、経路、RobStride） |
+| `USART<n>`、`DMA1_CH<n>` | UART と DMA のチャネルを使う断片（AMT21 のバス） |
 
 確保は約束であり、強制ではない。
 排他の資源に触れる断片や snippet を足すときは、確保を書く。
@@ -148,6 +150,11 @@ snippets/miniv4/md-rotor8/
 ├── snippet.yml                        ../../common/md/md.conf も append する
 └── fibril_robomaster_miniv4.overlay   md_motor ノード（RoboMaster 1〜8 とロータ角）
 
+snippets/miniv4/md-amt4/
+├── snippet.yml                        ../../common/md/md.conf と amt21.conf を append する
+├── amt21.conf                         CONFIG_UART_ASYNC_API
+└── fibril_robomaster_miniv4.overlay   AMT21x 4 台と md_motor ノード（RoboMaster 1〜4）
+
 snippets/miniv4/adc/
 ├── snippet.yml
 └── fibril_robomaster_miniv4.overlay   adc_port ノード（基板で固定の 13 ポート）
@@ -155,6 +162,8 @@ snippets/miniv4/adc/
 
 `miniv4-md-*` の名前の後半は、モータが閉ループに使うエンコーダを、モータの並び順に `<種類><台数>` で並べたものである。
 `qdec4` は基板の直交エンコーダ入力 4 本、`rotor8` は RoboMaster 8 台それぞれのロータ角（[robomaster_encoder](drivers/robomaster_encoder.md)）を使う。
+`amt4` は RS485 の AMT21x 4 台（[amt21](drivers/amt21.md)）を使う。AMT21x は応答を待つので、断片はバスだけを持ち、エンコーダはアドレスとともにデプロイ snippet が書く。
+snippet が append できる Kconfig の断片は、全ボード向けと各ボード向けで 1 つずつなので、`md.conf` を全ボード向けに、`CONFIG_UART_ASYNC_API` を入れた `amt21.conf` をボード向けに append する。
 同じ基板でもモータとエンコーダの組み合わせは機体ごとに変わるので、組み合わせを増やすときは `miniv4-md-rotor4-qdec4` のように足していく。
 ハードウェアは断片がすでに最大の構成で定義しているので、足す snippet の overlay には `fcan-md-motor` のノードだけを書く。
 

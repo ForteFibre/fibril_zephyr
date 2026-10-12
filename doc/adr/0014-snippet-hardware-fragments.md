@@ -31,7 +31,7 @@ miniv4 のデプロイ snippet が 4 つになった時点で、overlay には�
 
 1. **基板に繋がりうるハードウェアは、`dts/fibril/` の断片に書く。** モジュールの `dts_root` が `.` なので、`dts/` は devicetree の include path に入っている。overlay は `#include <fibril/...>` で取り込む。
    - 基板に依存しない断片：`robomaster-x8.dtsi`（ESC 8 台とロータ角、`cans` は書かない）、`can-bitrate.h`（fibril_can のバスとアクチュエータのバスのビットレート）。
-   - 基板ごとの断片：`dts/fibril/<board>/`。miniv4 には `robomaster.dtsi`（バスを FDCAN2 と FDCAN3 に割り当てる）、`qdec-enc0.dtsi`〜`qdec-enc5.dtsi`（入力 1 本ずつ）とそれを全部取り込む `qdec.dtsi`、`adc.dtsi` がある。
+   - 基板ごとの断片：`dts/fibril/<board>/`。miniv4 には `robomaster.dtsi`（バスを FDCAN2 と FDCAN3 に割り当てる）、`qdec-enc0.dtsi`〜`qdec-enc5.dtsi`（入力 1 本ずつ）とそれを全部取り込む `qdec.dtsi`、`adc.dtsi`、`amt21.dtsi`（RS485 の AMT21 バス。エンコーダは載せない。決定 3）がある。
    - 断片には include guard を置く。overlay はすべて 1 回の C プリプロセッサの実行で処理されるので、2 つの snippet が同じ断片を include しても 1 回しか展開されない。
 
 2. **デプロイ snippet の overlay には、`fibril,fcan-*` のノードだけを書く。** `motors` と `encoders` の並びは、バス上のインスタンス番号であり、ROS 側との約束である。断片には入れず、ハードウェアを最大の構成にしてもこの数は変えない。AdcPort は例外で、決定 7 による。
@@ -64,7 +64,7 @@ miniv4 のデプロイ snippet が 4 つになった時点で、overlay には�
    overlay はすべて 1 回の C プリプロセッサの実行で `-include` として並ぶので、前の overlay で定義したマクロが後の overlay から見える。両側が確かめてから定義するので、`-S` をどの順に並べても衝突を捕まえられる。確保するものは次のとおり。
    - 役割：`NODE_ROLE`。`CONFIG_FIBRIL_NODE_SCHEMA` を決める snippet が確保する。Kconfig の文字列は後勝ちで黙って上書きされるので、overlay の側で止める。
    - `fibril,fcan-*` のノード：`FCAN_MD_MOTOR`、`FCAN_ADC_PORT`、`FCAN_SOLENOID`、`FCAN_ROBSTRIDE`。同じ名前のノードを 2 つの snippet が書くと、dtc は 1 つにマージし、プロパティは後勝ちになる。`instance_schema.cmake` の「有効なノードは 1 つ」の検査は、マージの後なので、これを捕まえられない。
-   - timer と CAN コントローラ：`TIM<n>`、`FDCAN<n>`。qdec は入力ごとの断片に分け、使う入力の timer だけを確保する。
+   - timer、CAN コントローラ、UART、DMA のチャネル：`TIM<n>`、`FDCAN<n>`、`USART<n>`、`DMA1_CH<n>`。qdec は入力ごとの断片に分け、使う入力の timer だけを確保する。
 
    `#error` はマクロを展開しないので、メッセージに出るのは後から確保した側だけである。もう一方は `FIBRIL_CLAIM_<名前>` を grep して探す。
 
