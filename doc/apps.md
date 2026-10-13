@@ -35,7 +35,7 @@ west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
 
 | 層 | 決めるもの | 例 |
 | --- | --- | --- |
-| トランスポート | 基板がバスに出る経路 | `rc26-mainair-usb`、`miniv4-can` |
+| トランスポート | 基板がバスに出る経路 | `rc26-mainair-usb`、`miniv4-can`、`miniv4-usb` |
 | デプロイ | ノード名、どの機能をどのピンに出すか（ID スイッチの無い基板では node_id も） | `rc26-air`、`rc26-robstride`、`miniv4-md-qdec4` |
 
 RC26 MainAir には必ず USB の CAN が載り、電磁弁やエンコーダは搭載の有無が変わる。
@@ -138,6 +138,11 @@ snippets/miniv4/can/
 ├── snippet.yml
 └── fibril_robomaster_miniv4.overlay   FDCAN1 を zephyr,canbus に
 
+snippets/miniv4/usb/
+├── snippet.yml
+├── usb.conf                           USB スタックとログ
+└── fibril_robomaster_miniv4.overlay   gs_usb、hub、USB、FDCAN1
+
 snippets/common/md/                    MdMotor の役割。基板によらず *-md-* が共有する
 ├── md.conf                            CONFIG_FIBRIL_NODE_SCHEMA と watchdog
 └── schema.yaml                        node と limits
@@ -159,6 +164,14 @@ snippets/miniv4/adc/
 ├── snippet.yml
 └── fibril_robomaster_miniv4.overlay   adc_port ノード（基板で固定の 13 ポート）
 ```
+
+miniv4 の経路は 2 つある。
+`miniv4-can` は外部 CAN（FDCAN1）に直接繋ぐ。
+`miniv4-usb` は、USB を hub の外部 port、FDCAN1 を peer にして、PC に FDCAN1 の先の fibril_can のバスを見せる。
+どちらも FDCAN1 を確保するので、重ねるとビルドが止まる。
+hub は、どのフレームもフィルタせずに CAN FD で中継する。
+そのため、FDCAN1 には fibril_can のデバイスだけを繋ぐ。
+モータのバス（FDCAN2、FDCAN3）は hub に入れない。RoboMaster、RobStride、ODrive のプロトコルは、fibril_can の ID 空間と重なるからである。
 
 `miniv4-md-*` の名前の後半は、モータが閉ループに使うエンコーダを、モータの並び順に `<種類><台数>` で並べたものである。
 `qdec4` は基板の直交エンコーダ入力 4 本、`rotor8` は RoboMaster 8 台それぞれのロータ角（[robomaster_encoder](drivers/robomaster_encoder.md)）を使う。
