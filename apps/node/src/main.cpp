@@ -30,7 +30,8 @@ LOG_MODULE_REGISTER(fibril_node, CONFIG_APP_LOG_LEVEL);
 
 #define MASTER_LOST_US 300000U /* SPEC §5.11 */
 
-/* fcan_init carves every variable-length buffer from this once. Sized with
+/* The node's storage, and every variable-length buffer fcan_init carves
+ * once, come from this. Sized with
  * headroom rather than tuned: the image can gain a block type without a
  * matching edit here, and running out is a boot failure, not a slow path.
  */
@@ -127,18 +128,6 @@ int main(void)
     return rc;
   }
 
-  /* fcan_node_storage_size() is a runtime call because fcan_node_t is opaque,
-   * so the node cannot be a static array. 8-byte alignment satisfies the
-   * seqlock and u64 hash fields the runtime keeps inside.
-   */
-  auto * node = static_cast<fcan_node_t *>(
-    k_heap_aligned_alloc(&fcan_heap, 8, fcan_node_storage_size(), K_NO_WAIT));
-
-  if (node == nullptr) {
-    LOG_ERR("fcan_heap OOM allocating node (%u bytes)", (unsigned)fcan_node_storage_size());
-    return -ENOMEM;
-  }
-
   fcan_gen::config_user user{};
 
 #if defined(CONFIG_FIBRIL_NODE_ID_SWITCH)
@@ -161,9 +150,14 @@ int main(void)
    */
   fcan_config_t cfg = fcan_gen::make_config(user);
 
-  if (fcan_init(node, &cfg) != FCAN_OK) {
-    LOG_ERR("fcan_init failed (fault=%d)", (int)fcan_fault(node));
-    return -EIO;
+  /* The library makes the node, not this file, so that the functions can read
+   * its state without this file having to hand it over.
+   */
+  fcan_node_t * node = nullptr;
+
+  rc = fibril_fcan_node_init(&cfg, &node);
+  if (rc != 0) {
+    return rc;
   }
   LOG_INF(
     "fcan_init OK: node_id=0x%02x schema_hash=0x%016llx blob_len=%u", user.node_id,

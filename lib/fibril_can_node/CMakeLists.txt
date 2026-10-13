@@ -3,6 +3,8 @@
 
 zephyr_library()
 
+zephyr_library_sources(node_state.cpp)
+
 include(${CMAKE_CURRENT_SOURCE_DIR}/instance_schema.cmake)
 
 add_subdirectory(adc_port)

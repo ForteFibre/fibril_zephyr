@@ -528,6 +528,13 @@ service の後送の応答（`*_complete`）も、fibril_can v0.3.3 からは安
 ただし **`tick` は `fcan_poll` と同じスレッドにいると仮定してはいけない。**
 `func.h` の `tick` の説明はこの前提で書いてある。
 
+ノードの状態は `fibril_fcan_node_state()` で読める。
+fibril_can v0.3.4 から `fcan_state` を別のスレッドから呼べるようになったので、hub 構成の `tick` からも読める。
+機能には `fcan_node_t` を渡さず、この関数だけを出している。ほかのランタイムの API は `tick` から安全に呼べるとは限らないためである。
+ノードは `fibril_can_node` が 1 イメージに 1 つだけ作る（`fibril_fcan_node_init()`）。アプリケーションはノードを自分で確保して `fcan_init` を呼ぶ代わりにこれを呼び、返ってきたノードを `fcan_gen::register_all` と transport に渡す。ノードを作る場所が 1 つなので、状態を読む側にノードを登録し忘れることが起きない。
+master からのフレームが `master_lost_us`（`apps/node` では 300 ms）途絶えると `FCAN_STATE_SUSPENDED` になり、次のフレームで `FCAN_STATE_RUNNING` に戻る。
+出力を master の指令より長く残したくない機能は、SUSPENDED かどうかではなく、RUNNING かどうかで判断する。master がまだノードを起動していない UNPROVISIONED と PROVISIONED も、同じ判定で止められる。
+
 ## `instance_counts` の埋め方
 
 ブロック配列の並びは schema から導かれる。
