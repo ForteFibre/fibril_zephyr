@@ -121,6 +121,10 @@ FDCAN と ``usart3``、``usb`` はピンとクロックだけを設定して無�
 どの経路の snippet で ``fdcan1`` を使っても、トランシーバは動作状態で始まる。
 fibril_can の boot_id が使う ``rng`` も、ボードの devicetree で有効にしてある。
 
+``usb`` は ``miniv4-usb`` snippet が有効にし、gs_usb として外部 CAN（``fdcan1``）と hub で繋ぐ（:doc:`/apps`）。
+USB のクロックは、ボードが動かしたままにしている HSI48 から取る。
+モータ CAN（``fdcan2``、``fdcan3``）は hub に入れない（:doc:`/adr/0015-hub-joins-fibril-can-only`）。
+
 RS485 の設定例は :doc:`/drivers/amt21`、モータ CAN の使い方は :doc:`/drivers/robomaster` を参照する。
 ``dts/fibril/robomaster_miniv4/amt21.dtsi`` が ``usart3`` を 2 Mbps の AMT21 バス（``amt21_bus``）にする。エンコーダはデプロイ snippet（``miniv4-md-amt4`` など）がアドレスとともに足す。
 

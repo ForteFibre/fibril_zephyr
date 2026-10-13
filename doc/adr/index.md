@@ -47,6 +47,7 @@
 | [0012](0012-node-id-switch-and-watchdog.md) | node_id を基板の ID スイッチの値そのままにし、watchdog を tick で叩く | Proposed |
 | [0013](0013-md-motor-calibration-and-current.md) | MdMotor の ADC キャリブレーションを AdcPort ブロック型で入れ替え可能にし、電流ベースラインは測り終えてから応答する | Proposed |
 | [0014](0014-snippet-hardware-fragments.md) | 基板に繋がるハードウェアを共有の devicetree 断片に切り出し、未接続を許すデバイスは最大の構成で書く | Proposed |
+| [0015](0015-hub-joins-fibril-can-only.md) | hub が繋ぐバスは fibril_can のデバイスだけにし、モータのバスへの生の転送はしない | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -66,4 +67,5 @@
 0012-node-id-switch-and-watchdog
 0013-md-motor-calibration-and-current
 0014-snippet-hardware-fragments
+0015-hub-joins-fibril-can-only
 ```

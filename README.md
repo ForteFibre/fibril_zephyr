@@ -74,6 +74,7 @@ west flash
 | `rc26-air` | デプロイ | RC26 MainAir V01 | 6 系統の電磁弁を ROS Service で駆動する |
 | `rc26-robstride` | デプロイ | RC26 MainAir V01 | CAN1 の RobStride アクチュエータを ROS から駆動する |
 | `miniv4-can` | トランスポート | RoboMaster Mini V4 | 外部 CAN（FDCAN1）に直接つなぐ |
+| `miniv4-usb` | トランスポート | RoboMaster Mini V4 | 外部 CAN（FDCAN1）を gs_usb で PC に見せ、自ノードを同じ論理バスに載せる。FDCAN1 には fibril_can のデバイスだけを繋ぐ |
 | `miniv4-md-qdec4` | デプロイ | RoboMaster Mini V4 | RoboMaster 4 台を基板の qdec で閉ループ制御する（CanMotorMbed の後継） |
 | `miniv4-md-rotor8` | デプロイ | RoboMaster Mini V4 | RoboMaster 8 台をそれぞれのロータ角で閉ループ制御する（CanMotorMbed の `ROBOMASTER_ENCODER`） |
 | `miniv4-md-amt4` | デプロイ | RoboMaster Mini V4 | RoboMaster 4 台を、RS485 の AMT21x（0x10、0x14、0x54、0x04）で閉ループ制御する |
