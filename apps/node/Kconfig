@@ -31,6 +31,21 @@ config APP_WATCHDOG_TIMEOUT_MS
 	  millisecond, so this only has to cover how long a tick may
 	  legitimately be held up.
 
+config APP_FCAN_HEAP_SIZE
+	int "Bytes reserved for the fibril_can node"
+	default 16384
+	help
+	  The node and the arena fcan_init carves its buffers from are both
+	  allocated from this heap, once, at boot. The arena grows with the
+	  schema's limits and with how many instances the board wires, so the
+	  default leaves room for any deployment rather than fitting one.
+
+	  Lower it in a deployment snippet when the board is short of RAM.
+	  Enable SYS_HEAP_RUNTIME_STATS to have the node log how much of it
+	  the boot actually used. Below that, fcan_init cannot get its arena,
+	  logs "fcan_init failed" with the NOMEM fault, and main returns
+	  before attaching the transport, so the node never reaches the bus.
+
 endmenu
 
 menu "Zephyr"

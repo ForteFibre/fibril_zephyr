@@ -31,11 +31,9 @@ LOG_MODULE_REGISTER(fibril_node, CONFIG_APP_LOG_LEVEL);
 #define MASTER_LOST_US 300000U /* SPEC §5.11 */
 
 /* The node's storage, and every variable-length buffer fcan_init carves
- * once, come from this. Sized with
- * headroom rather than tuned: the image can gain a block type without a
- * matching edit here, and running out is a boot failure, not a slow path.
+ * once, come from this. Running out is a boot failure, not a slow path.
  */
-K_HEAP_DEFINE(fcan_heap, 16 * 1024);
+K_HEAP_DEFINE(fcan_heap, CONFIG_APP_FCAN_HEAP_SIZE);
 
 static void * heap_alloc(size_t size, size_t align, void * ctx)
 {
@@ -162,6 +160,16 @@ int main(void)
   LOG_INF(
     "fcan_init OK: node_id=0x%02x schema_hash=0x%016llx blob_len=%u", user.node_id,
     (unsigned long long)fcan_schema_hash, (unsigned)fcan_schema_blob_len);
+
+#if defined(CONFIG_SYS_HEAP_RUNTIME_STATS)
+  /* Nothing allocates from fcan_heap after fcan_init, so this is the peak. */
+  struct sys_memory_stats heap_stats;
+
+  sys_heap_runtime_stats_get(&fcan_heap.heap, &heap_stats);
+  LOG_INF(
+    "fcan_heap: %u of %u bytes used", (unsigned)heap_stats.allocated_bytes,
+    (unsigned)CONFIG_APP_FCAN_HEAP_SIZE);
+#endif
 
   /* Also what installs the service and parameter dispatchers the functions
    * register their handlers into, so it has to run before any start hook.

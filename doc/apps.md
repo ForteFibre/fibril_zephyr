@@ -259,6 +259,19 @@ hub 構成では `fcan_poll` が hub のドライバのスレッドで回るの�
 `tick` を持つ機能が無いイメージでは叩く場所が無いので、watchdog を起動せず、ログに残す。
 STM32 の IWDG は `wdt_setup` で初めて動き出すので、`CONFIG_WATCHDOG` を立てただけで勝手にリセットがかかることはない。
 
+## fibril_can のノードに割く RAM
+
+`apps/node` は、fibril_can のノード本体と、`fcan_init` がバッファを切り出すアリーナを、起動時に 1 回だけ `fcan_heap` から確保する。
+大きさは `CONFIG_APP_FCAN_HEAP_SIZE`（既定 16384 バイト）で決まる。
+アリーナは schema の `limits` と、基板が配線したインスタンスの数に応じて大きくなる。
+既定値は、どの配置でも足りるように余裕を持たせた値である。
+
+RAM の少ない基板では、デプロイ snippet の `.conf` でこれを下げる。
+`CONFIG_SYS_HEAP_RUNTIME_STATS=y` を重ねると、`fcan_init` の後に実際に使った量がログに出る（`fcan_heap: <使った量> of <確保した量> bytes used`）。
+`fcan_init` の後は確保しないので、これが最大の使用量である。
+足りなければ `fcan_init` がアリーナを確保できず、`fcan_init failed` を NOMEM の fault とともにログに出す。
+`fibril_fcan_node_init` が `-EIO` を返し、transport を attach する前に `main` が戻るので、ノードはバスに出ない。
+
 ## 実装済みの機能
 
 | ブロック型 | compatible | 駆動するもの |
