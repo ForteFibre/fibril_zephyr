@@ -39,8 +39,8 @@ CanMotorMbed は、ホストの heartbeat が 1 s 途絶えると全モータを
    - RobstrideMotor の `command_timeout_ms` は、ADR 0006 のとおり、位置を含むすべての指令に効かせる。
    - 途絶で止めたら、新しい指令まで止めたままにする。止める処理は 1 回だけ行う。
    - 拒否した指令（値が NaN、扱えない `type`）は、指令として数えない。数えると、無効な指令を流し続けるだけで古い出力が止まらない。
-5. **RobstrideMotor は、出力が切れた後は `enable` で戻さない。** master の途絶でも `command_timeout_ms` でも同じである。ドライバは切れる前の目標を持ったままなので、`enable` で戻すと古い目標へ動く。ADR 0006 の「`enable` も通信として数える」は、出力が切れる前に期限を延ばす意味にだけ残る。
 4. **新しい指令は topic の世代で判断し、1 度だけ適用する。** 保持中の指令を毎 tick 当て直さない。RobstrideMotor では、これで `motion_target` を 1 度受けた後の `target` が上書きされ続ける不具合も消える。
+5. **RobstrideMotor は、出力が切れた後は `enable` で戻さない。** master の途絶でも `command_timeout_ms` でも同じである。ドライバは切れる前の目標を持ったままなので、`enable` で戻すと古い目標へ動く。ADR 0006 の「`enable` も通信として数える」は、出力が切れる前に期限を延ばす意味にだけ残る。
 
 ## Consequences
 
