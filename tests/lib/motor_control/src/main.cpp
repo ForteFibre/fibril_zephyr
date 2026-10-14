@@ -359,4 +359,41 @@ ZTEST(motor_control, test_reset_all_drops_a_slew_limited_output_at_once)
   zassert_near(mc.update(at(0)), 0.0f);
 }
 
+ZTEST(motor_control, test_stop_drops_a_slew_limited_closed_loop_to_duty_zero_at_once)
+{
+  MotorControl mc;
+  mc.duty_slew_limit(1.0f);
+  mc.speed_controller().kp(1.0f);
+  mc.set_speed(1.0f);
+  zassert_near(run(mc, at(0), 500), 0.5f);
+  mc.stop();
+  zassert_equal(mc.mode(), Mode::DUTY);
+  zassert_near(mc.update(at(0)), 0.0f);
+  /* the slew limit and the gains are kept */
+  mc.set_speed(1.0f);
+  zassert_near(mc.update(at(0)), 0.001f);
+}
+
+ZTEST(motor_control, test_stop_drops_feed_forward_before_it_lapses)
+{
+  MotorControl mc;
+  mc.set_position_speed(0.0f);
+  mc.set_duty_ff(0.3f);
+  mc.update(at(0));
+  mc.stop();
+  mc.set_position_speed(0.0f);
+  zassert_near(mc.update(at(0)), 0.0f);
+}
+
+ZTEST(motor_control, test_stop_keeps_a_tripped_stall_breaker_tripped)
+{
+  MotorControl mc;
+  mc.stall_timeout_ticks(3);
+  mc.set_duty(0.5f);
+  run(mc, at(0), 5);
+  mc.stop();
+  mc.set_duty(0.5f);
+  zassert_near(mc.update(at(0)), 0.0f);
+}
+
 ZTEST_SUITE(motor_control, NULL, NULL, NULL, NULL, NULL);

@@ -72,6 +72,13 @@ public:
   /** Back to the power-on state: DUTY at 0, every setting at its default. */
   void reset_all();
 
+  /**
+   * DUTY 0 at once, past the slew limit, with any feed-forward dropped. The
+   * gains, the encoder state and the stall breaker are kept. For an output
+   * that has lost the master's command rather than been told to coast.
+   */
+  void stop();
+
   void set_duty(float duty);
   void set_speed(float speed);
   void set_position(float position);
