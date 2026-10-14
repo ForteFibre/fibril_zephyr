@@ -124,11 +124,19 @@ struct motor_state
   float current_polarity;
   float current_offset;
   uint32_t baseline_ticks;
+  /* command_timeout_ms in ticks; 0 is off. */
+  uint32_t command_timeout_ticks;
 
   /* Generations of the last command applied from each M2S topic. The topics
    * keep their last value, so only a change here says a new frame arrived. */
   uint32_t target_seq;
   uint32_t trajectory_seq;
+
+  /* Ticks since the last new command, saturating. */
+  uint32_t command_age;
+  /* The timeout has stopped the motor and waits for a new command, so it
+   * stops it once rather than on every tick. */
+  bool command_lapsed;
 
   /* The encoder's accumulator generation, to notice a rebuilt position. */
   uint32_t position_epoch;
@@ -182,6 +190,8 @@ static void apply_params(uint8_t inst)
   }
   baseline_s = CLAMP(baseline_s, baseline_min_s, baseline_max_s);
   s->baseline_ticks = (uint32_t)std::lround(baseline_s / motor_control::MotorControl::tick_s);
+  s->command_timeout_ticks =
+    m.param_command_timeout_ms() * (1000U / motor_control::MotorControl::tick_us);
 
   c.encoder_gain(s->encoder_gain);
   /* The runtime stores parameters without checking the schema's min and max,
@@ -384,11 +394,43 @@ static void apply_commands(uint8_t inst)
     s->trajectory_seq = trajectory_seq;
   }
 
+  if (new_trajectory || new_target) {
+    s->command_age = 0;
+    s->command_lapsed = false;
+  }
+
   if (new_trajectory) {
     apply_trajectory(inst, *trajectory);
   } else if (new_target) {
     apply_target(inst, *target);
   }
+}
+
+/*
+ * The open-loop and speed modes need the master to keep sending: a duty or a
+ * speed held past the master's attention runs the mechanism into whatever is
+ * in the way. A position is a place to stay, so it is held (doc/adr/0016).
+ */
+static void watch_command(uint8_t inst)
+{
+  struct motor_state * s = &states[inst];
+  const motor_control::Mode mode = s->control.mode();
+
+  if (s->command_age < UINT32_MAX) {
+    s->command_age++;
+  }
+
+  if (s->command_lapsed || (s->command_timeout_ticks == 0U) ||
+      (s->command_age < s->command_timeout_ticks)) {
+    return;
+  }
+
+  if ((mode != motor_control::Mode::DUTY) && (mode != motor_control::Mode::SPEED)) {
+    return;
+  }
+
+  s->command_lapsed = true;
+  s->control.stop();
 }
 
 /*
@@ -715,6 +757,17 @@ static int md_motor_func_start(void)
 
 static void md_motor_func_tick(void)
 {
+  /* Read once, so every motor acts on the same state this tick. */
+  static bool was_running;
+  const bool running = fibril_fcan_node_state() == FCAN_STATE_RUNNING;
+  const bool master_lost = was_running && !running;
+
+  was_running = running;
+
+  if (master_lost) {
+    LOG_WRN("master lost, every motor stopped until commanded again");
+  }
+
   for (uint8_t i = 0; i < (uint8_t)ARRAY_SIZE(motors); i++) {
     struct motor_state * s = &states[i];
 
@@ -725,7 +778,16 @@ static void md_motor_func_tick(void)
     const motor_control::EncoderSample sample = sample_encoder(i);
 
     s->encoder_valid = sample.valid;
+
+    /* Stopped on the edge only, and before the commands: a frame landing in
+     * the same tick is the one that brings the node back to RUNNING, and
+     * dropping it would lose a one-shot position target for good. */
+    if (master_lost) {
+      s->control.stop();
+    }
+
     apply_commands(i);
+    watch_command(i);
     drive(i, s->control.update(sample));
     update_current(i);
     watch_sensor(i);
