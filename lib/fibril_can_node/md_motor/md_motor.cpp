@@ -327,13 +327,15 @@ static void drain_requests(uint8_t inst)
   }
 }
 
-static void apply_target(uint8_t inst, const fcan_gen::mdmotor::target & cmd)
+/* False when the command was refused, so it does not count as the master
+ * still commanding. */
+static bool apply_target(uint8_t inst, const fcan_gen::mdmotor::target & cmd)
 {
   struct motor_state * s = &states[inst];
 
   if (!std::isfinite(cmd.value)) {
     LOG_WRN("motor %u: non-finite target ignored", inst);
-    return;
+    return false;
   }
 
   switch (cmd.type) {
@@ -352,23 +354,26 @@ static void apply_target(uint8_t inst, const fcan_gen::mdmotor::target & cmd)
       break;
     default:
       LOG_WRN("motor %u: unsupported target type %u", inst, cmd.type);
-      break;
+      return false;
   }
+
+  return true;
 }
 
-static void apply_trajectory(uint8_t inst, const fcan_gen::mdmotor::trajectory & point)
+static bool apply_trajectory(uint8_t inst, const fcan_gen::mdmotor::trajectory & point)
 {
   struct motor_state * s = &states[inst];
 
   if (!std::isfinite(point.positions[0]) || !std::isfinite(point.velocities[0]) ||
       !std::isfinite(point.accelerations[0])) {
     LOG_WRN("motor %u: non-finite trajectory point ignored", inst);
-    return;
+    return false;
   }
 
   s->control.set_position_speed(point.positions[0]);
   s->control.set_velocity_ff(point.velocities[0]);
   s->control.set_duty_ff(s->accel_ff_gain * point.accelerations[0]);
+  return true;
 }
 
 /*
@@ -394,15 +399,17 @@ static void apply_commands(uint8_t inst)
     s->trajectory_seq = trajectory_seq;
   }
 
-  if (new_trajectory || new_target) {
-    s->command_age = 0;
-    s->command_lapsed = false;
-  }
+  bool applied = false;
 
   if (new_trajectory) {
-    apply_trajectory(inst, *trajectory);
+    applied = apply_trajectory(inst, *trajectory);
   } else if (new_target) {
-    apply_target(inst, *target);
+    applied = apply_target(inst, *target);
+  }
+
+  if (applied) {
+    s->command_age = 0;
+    s->command_lapsed = false;
   }
 }
 
