@@ -153,9 +153,9 @@ struct motor_state
 
   int64_t last_command_ms;
   bool commanded;
-  /* Set when the master was lost. The driver still holds the target from
-   * before, so only a new command, not an enable, may turn the output back
-   * on. */
+  /* Set when the master was lost or the command timed out. The driver still
+   * holds the target from before, so only a new command, not an enable, may
+   * turn the output back on. */
   bool awaiting_command;
 
   /* Generations of the last command read from each M2S topic. The topics
@@ -264,15 +264,15 @@ static void set_output(uint8_t inst, bool on)
  */
 static void refresh_output(uint8_t inst, int64_t now)
 {
-  const struct motor_state * s = &states[inst];
+  struct motor_state * s = &states[inst];
   const uint32_t timeout = s->tune.command_timeout_ms;
-  bool fresh = s->commanded;
 
-  if (fresh && (timeout != 0U)) {
-    fresh = (now - s->last_command_ms) <= (int64_t)timeout;
+  if (s->commanded && (timeout != 0U) && ((now - s->last_command_ms) > (int64_t)timeout)) {
+    s->commanded = false;
+    s->awaiting_command = true;
   }
 
-  set_output(inst, s->enabled && !s->overtemp && fresh);
+  set_output(inst, s->enabled && !s->overtemp && s->commanded);
 }
 
 static void apply_target(uint8_t inst, const fcan_gen::robstridemotor::target & cmd, int64_t now)
@@ -498,8 +498,9 @@ static fcan_gen::svc_status enable_motor(uint8_t inst, const enable_req & req, e
   states[inst].req.enable_value = req.on;
   /* Enabling is also the way back from an overtemperature stop, and it counts
    * as traffic in its own right: a master that enables a joint and then says
-   * nothing has still been heard from within the deadline. Not after the
-   * master was lost, though; see awaiting_command. */
+   * nothing has still been heard from within the deadline. Once the deadline
+   * has passed or the master was lost, it no longer is; see
+   * awaiting_command. */
   states[inst].req.clear_trip = req.on;
   states[inst].req.arm = req.on;
   k_spin_unlock(&lock, key);
