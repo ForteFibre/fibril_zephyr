@@ -153,6 +153,15 @@ struct motor_state
 
   int64_t last_command_ms;
   bool commanded;
+  /* Set when the master was lost. The driver still holds the target from
+   * before, so only a new command, not an enable, may turn the output back
+   * on. */
+  bool awaiting_command;
+
+  /* Generations of the last command read from each M2S topic. The topics
+   * keep their last value, so only a change here says a new frame arrived. */
+  uint32_t target_seq;
+  uint32_t motion_seq;
 
   /* What the driver was last told, so a disable is not re-sent every tick. */
   bool output_on;
@@ -220,6 +229,7 @@ static void apply_gains(uint8_t inst)
 static void mark_commanded(uint8_t inst, int64_t now)
 {
   states[inst].commanded = true;
+  states[inst].awaiting_command = false;
   states[inst].last_command_ms = now;
 }
 
@@ -361,7 +371,7 @@ static void drain_requests(uint8_t inst, const struct robstride_feedback * fb, b
     s->overtemp = false;
   }
 
-  if (req.arm) {
+  if (req.arm && !s->awaiting_command) {
     mark_commanded(inst, now);
   }
 
@@ -488,7 +498,8 @@ static fcan_gen::svc_status enable_motor(uint8_t inst, const enable_req & req, e
   states[inst].req.enable_value = req.on;
   /* Enabling is also the way back from an overtemperature stop, and it counts
    * as traffic in its own right: a master that enables a joint and then says
-   * nothing has still been heard from within the deadline. */
+   * nothing has still been heard from within the deadline. Not after the
+   * master was lost, though; see awaiting_command. */
   states[inst].req.clear_trip = req.on;
   states[inst].req.arm = req.on;
   k_spin_unlock(&lock, key);
@@ -615,12 +626,48 @@ static int robstride_func_start(void)
   return 0;
 }
 
+/*
+ * Applies the commands that arrived since the last tick, each once. Applying
+ * the held value every tick would count as fresh traffic and keep
+ * command_timeout_ms from ever lapsing, and once motion_target had been sent
+ * it would override every later target.
+ */
+static void apply_commands(uint8_t inst, int64_t now)
+{
+  struct motor_state * s = &states[inst];
+  const fcan_gen::robstridemotor m(inst);
+  uint32_t target_seq = s->target_seq;
+  uint32_t motion_seq = s->motion_seq;
+  const auto target = m.read_target(target_seq);
+  const auto motion = m.read_motion_target(motion_seq);
+
+  if (target && (target_seq != s->target_seq)) {
+    s->target_seq = target_seq;
+    apply_target(inst, *target, now);
+  }
+
+  if (motion && (motion_seq != s->motion_seq)) {
+    s->motion_seq = motion_seq;
+    apply_motion_target(inst, *motion, now);
+  }
+
+}
+
 static void robstride_func_tick(void)
 {
   const int64_t now = k_uptime_get();
+  /* Read once, so every motor acts on the same state this tick. */
+  static bool was_running;
+  const bool running = fibril_fcan_node_state() == FCAN_STATE_RUNNING;
+  const bool master_lost = was_running && !running;
+
+  was_running = running;
+
+  if (master_lost) {
+    LOG_WRN("master lost, every motor off until commanded again");
+  }
 
   for (uint8_t i = 0; i < (uint8_t)ARRAY_SIZE(motors); i++) {
-    const fcan_gen::robstridemotor m(i);
     struct robstride_feedback fb;
     const bool measured = robstride_get_feedback(motors[i], &fb) == 0;
 
@@ -632,14 +679,14 @@ static void robstride_func_tick(void)
     drain_requests(i, &fb, measured, now);
     guard_temperature(i, &fb, measured);
 
-    if (const auto target = m.read_target()) {
-      apply_target(i, *target, now);
+    /* Before the commands: a frame landing in the same tick is the one that
+     * brings the node back to RUNNING, and counts as the new command. */
+    if (master_lost) {
+      states[i].commanded = false;
+      states[i].awaiting_command = true;
     }
 
-    if (const auto motion = m.read_motion_target()) {
-      apply_motion_target(i, *motion, now);
-    }
-
+    apply_commands(i, now);
     refresh_output(i, now);
     publish_feedback(i, &fb, measured);
     publish_diagnostics(i, &fb);
