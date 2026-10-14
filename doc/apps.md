@@ -306,7 +306,7 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 - しきい値は `AdcPort` の `adcN/threshold` に、どのポートを見るかは `motorN/adc/port` に置く。`can_md_controller` の `adc{N}.threshold` は起動時だけ送る read only の param だったが、ここではいつでも変えられる。
 - `sensor` の `edge_position` には `invert` が掛かる。`can_md_controller` は掛けていなかった。
 - `calibrate_current_baseline` は測り終えてから応答し、静止していなかったら失敗を返す。測る時間は 0.05〜1 s（CanMotorMbed は 0.5〜5 s）。
-- 指令が途絶えたときに出力を止める仕組みはまだ無い。
+- `can_md_controller` には無かった `command_timeout_ms` がある。DUTY と VELOCITY で 200 ms 指令が来なければ DUTY 0 に落とす。速度を流す master は、それより短い間隔で送り続ける（下の「指令が途絶えたとき」）。
 
 `encoders` には、基板のエンコーダ入力（`fibril,stm32-qdec`、`cui,amt21-encoder`）のほか、RoboMaster のロータ角（`dji,robomaster-encoder`）を置ける。
 ロータ角のカウントは減速前の 8192 counts/rev なので、`encoder/gain` に減速比を含める。
@@ -321,6 +321,22 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 - エンコーダの値が無効な間は、ポートの値を見ない。その間にしきい値をまたいでいたら、エンコーダが戻った最初のサンプルで、そのときの位置を付けて出す。
 - `feedback.current` は、モータが報告する電流の生の値を 1000 で割ったものである（CanMotorMbed の `read_current()`）。`current/polarity` の符号を掛け、`current/offset` と、最後に測ったベースラインを引き、最後に `invert` を掛ける。結果が有限でなければ（`current/offset` が NaN など）、電流は無効とし、`feedback.current` は 0 にする。測っているベースラインは中止する。
 - `calibrate_current_baseline` は、`current/baseline_duration_s` の間、DUTY 0 で止まっているモータの電流を平均する。測り終えてから応答を返す（ACCEPTED の後に最終応答）。
+
+### 指令が途絶えたとき
+
+モータを駆動する型は、指令の途絶を 2 段で捉えて出力を止める。
+判断の理由は [ADR 0016](adr/0016-command-loss-stop.md) にある。
+
+| | `MdMotor` | `RobstrideMotor` |
+| --- | --- | --- |
+| master 全体の途絶（ノードが RUNNING でなくなる。`apps/node` では 300 ms） | すべてのモードで DUTY 0 | 出力を切る |
+| `command_timeout_ms`（既定 200 ms、0 で無効） | DUTY と VELOCITY だけ DUTY 0。POSITION と trajectory は保持する | すべての指令で出力を切る |
+| 再開 | 新しい `target` か `trajectory` | 新しい `target` か `motion_target`。`command_timeout_ms` で切れたときは `enable` でもよい |
+
+- 新しい指令は topic の世代で判断し、届いた tick に 1 度だけ適用する。同じ値を送り直しても、新しい指令として数える。
+- DUTY 0 は slew 制限を越えてその場で落とし、`trajectory` のフィードフォワードも捨てる。ゲイン、エンコーダ、失速ブレーカの状態は残す。
+- `RobstrideMotor` は保持中の目標を当て直さないので、`reset_encoder`、`gear_ratio`、`invert` の変更は次の指令から効く。
+- `Solenoid` は止めない。master が途絶えても、弁の状態を保持する。
 
 ## 機能を 1 つ足す
 

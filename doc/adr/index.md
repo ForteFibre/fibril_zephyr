@@ -48,6 +48,7 @@
 | [0013](0013-md-motor-calibration-and-current.md) | MdMotor の ADC キャリブレーションを AdcPort ブロック型で入れ替え可能にし、電流ベースラインは測り終えてから応答する | Proposed |
 | [0014](0014-snippet-hardware-fragments.md) | 基板に繋がるハードウェアを共有の devicetree 断片に切り出し、未接続を許すデバイスは最大の構成で書く | Proposed |
 | [0015](0015-hub-joins-fibril-can-only.md) | hub が繋ぐバスは fibril_can のデバイスだけにし、モータのバスへの生の転送はしない | Proposed |
+| [0016](0016-command-loss-stop.md) | 指令の途絶を、master 全体の途絶と topic ごとの途絶の 2 段で捉えて出力を止める | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -68,4 +69,5 @@
 0013-md-motor-calibration-and-current
 0014-snippet-hardware-fragments
 0015-hub-joins-fibril-can-only
+0016-command-loss-stop
 ```
