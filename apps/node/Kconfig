@@ -42,9 +42,12 @@ config APP_FCAN_HEAP_SIZE
 
 	  Lower it in a deployment snippet when the board is short of RAM.
 	  Enable SYS_HEAP_RUNTIME_STATS to have the node log how much of it
-	  the boot actually used. Below that, fcan_init cannot get its arena,
-	  logs "fcan_init failed" with the NOMEM fault, and main returns
-	  before attaching the transport, so the node never reaches the bus.
+	  the boot actually used. Below that, fibril_fcan_node_init() fails
+	  and main returns before attaching the transport, so the node never
+	  reaches the bus. The node is allocated first: if even it does not
+	  fit, the log says "out of memory for the node" and the call returns
+	  -ENOMEM. Otherwise fcan_init cannot get its arena, the log says
+	  "fcan_init failed" with the NOMEM fault, and the call returns -EIO.
 
 endmenu
 

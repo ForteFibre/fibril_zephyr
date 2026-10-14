@@ -269,8 +269,13 @@ STM32 の IWDG は `wdt_setup` で初めて動き出すので、`CONFIG_WATCHDOG
 RAM の少ない基板では、デプロイ snippet の `.conf` でこれを下げる。
 `CONFIG_SYS_HEAP_RUNTIME_STATS=y` を重ねると、`fcan_init` の後に実際に使った量がログに出る（`fcan_heap: <使った量> of <確保した量> bytes used`）。
 `fcan_init` の後は確保しないので、これが最大の使用量である。
-足りなければ `fcan_init` がアリーナを確保できず、`fcan_init failed` を NOMEM の fault とともにログに出す。
-`fibril_fcan_node_init` が `-EIO` を返し、transport を attach する前に `main` が戻るので、ノードはバスに出ない。
+足りなければ `fibril_fcan_node_init` が失敗し、transport を attach する前に `main` が戻るので、ノードはバスに出ない。
+ログと戻り値は、どちらの確保で足りなくなったかで分かれる。
+
+| 足りなくなった確保 | ログ | `fibril_fcan_node_init` の戻り値 |
+| --- | --- | --- |
+| ノード本体（先に確保する） | `out of memory for the node` | `-ENOMEM` |
+| `fcan_init` のアリーナ | `fcan_init failed`（fault は NOMEM） | `-EIO` |
 
 ## 実装済みの機能
 
