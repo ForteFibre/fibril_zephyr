@@ -331,9 +331,10 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 | --- | --- | --- |
 | master 全体の途絶（ノードが RUNNING でなくなる。`apps/node` では 300 ms） | すべてのモードで DUTY 0 | 出力を切る |
 | `command_timeout_ms`（既定 200 ms、0 で無効） | DUTY と VELOCITY だけ DUTY 0。POSITION と trajectory は保持する | すべての指令で出力を切る |
-| 再開 | 新しい `target` か `trajectory` | 新しい `target` か `motion_target`。`command_timeout_ms` で切れたときは `enable` でもよい |
+| 再開 | 新しい `target` か `trajectory` | 新しい `target` か `motion_target`。`enable` だけでは戻らない |
 
-- 新しい指令は topic の世代で判断し、届いた tick に 1 度だけ適用する。同じ値を送り直しても、新しい指令として数える。
+- 新しい指令は topic の世代で判断し、届いた tick に 1 度だけ適用する。同じ値を送り直しても、新しい指令として数える。値が NaN の指令や、扱えない `type` の指令は、拒否して指令として数えない。
+- `RobstrideMotor` の `enable` は、出力が切れる前なら期限を延ばすが、切れた後は出力を戻さない。ドライバが切れる前の目標を持ったままなので、戻すと古い目標へ動く。
 - DUTY 0 は slew 制限を越えてその場で落とし、`trajectory` のフィードフォワードも捨てる。ゲイン、エンコーダ、失速ブレーカの状態は残す。
 - `RobstrideMotor` は保持中の目標を当て直さないので、`reset_encoder`、`gear_ratio`、`invert` の変更は次の指令から効く。
 - `Solenoid` は止めない。master が途絶えても、弁の状態を保持する。
