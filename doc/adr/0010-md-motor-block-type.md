@@ -94,6 +94,7 @@ CanMotorMbed は、機種によらず RoboMaster に `duty × 10000` を送っ�
 
 - ゲインの表と、`target` と `feedback` を使うコードは、そのまま移せる。param を設定するコードは、bridge の node と名前に合わせて直すか、adapter を通す。
 - 指令が途絶えたときに出力を止める仕組みはまだ無い。fibril_can の `master_lost_us` は S2M の送信を止めるだけで、ブロック型からは見えない。決めるまでは、master が止まっても最後の指令を保持し続ける。
+  その後、ADR 0016 で、master の途絶と `command_timeout_ms` で止めるようにした。
 - 制御のコアは 1 kHz の tick を前提にしている（ADR 0009）。direct のトランスポートは 1 ms の `k_timer` で tick を回すが、hub のトランスポートは `tick(); k_sleep(K_MSEC(1))` なので周期が 1 ms より長くなる。hub の基板でこのブロック型を使う前に直す。
   その後、hub のトランスポートも周期 1 ms の `k_timer` で回すように改めた（[apps.md](../apps.md) の「tick の契約」）。
 - ADC のキャリブレーション（`sensor`、`sensor_state`、`trigger`、`trigger_cancel`）、feedback の `current`、診断はまだ無い。

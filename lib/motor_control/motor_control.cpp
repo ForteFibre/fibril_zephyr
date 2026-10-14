@@ -163,6 +163,16 @@ void MotorControl::watch_stall(float duty, const EncoderSample & encoder)
   }
 }
 
+void MotorControl::stop()
+{
+  set_duty(0.0f);
+  drop_duty_limiter();
+  /* A cascaded POSITION target arriving within ff_timeout_ticks would
+   * otherwise pick up the feed-forward of the stream that was cut off. */
+  _velocity_ff_ticks = 0;
+  _duty_ff_ticks = 0;
+}
+
 void MotorControl::set_duty(float duty)
 {
   _mode = Mode::DUTY;

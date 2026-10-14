@@ -43,7 +43,10 @@ types:
       # 2 original has no equivalent: there, the link dying takes the process
       # with it. Here the node outlives its master, so the deadline is
       # explicit. 0 turns it off, which is only right for a motor whose last
-      # target is safe to hold indefinitely.
+      # target is safe to hold indefinitely. Every target and motion_target
+      # counts, a position included, so a master holding a joint keeps
+      # sending. Losing the master altogether turns the output off whatever
+      # this says (doc/adr/0016).
       command_timeout_ms: { type: u32, default: 200, min: 0, max: 60000 }
 
       # Fallback gains for the operation-control frame, used when
@@ -164,7 +167,8 @@ types:
       # Moves where zero is in the reported position, without touching the
       # motor's stored mechanical zero. `offset: true` sets the shift itself,
       # `offset: false` picks the shift that makes the current position read
-      # as `value`.
+      # as `value`. A target already held stays where it is on the motor; the
+      # new zero applies from the next command, as do gear_ratio and invert.
       #
       # ResetEncoder.srv answers with nothing, and `success` has no field to
       # land in on the ROS side — the caller gets the empty response the srv
