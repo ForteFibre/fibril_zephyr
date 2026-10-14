@@ -25,6 +25,7 @@ LOG_MODULE_REGISTER(fcan_transport, CONFIG_FCAN_TRANSPORT_LOG_LEVEL);
 #define HUB_DEV DEVICE_DT_GET_ONE(fibril_can_hub)
 
 static fcan_hub_t * hub;
+static struct k_timer tick_timer;
 
 int fcan_transport_init(void)
 {
@@ -100,9 +101,27 @@ void fcan_transport_run(fcan_node_t * node, void (*tick)(void))
    * fcan_topic_commit is built for a committer and a scheduler in different
    * contexts. It does mean a tick must not assume it shares a thread with
    * fcan_poll.
+   *
+   * A periodic timer rather than a sleep after each tick, so the tick's own
+   * run time does not stretch the period.
    */
+  k_timer_init(&tick_timer, NULL, NULL);
+  k_timer_start(&tick_timer, K_MSEC(1), K_MSEC(1));
+
+  uint32_t missed = 0;
+
   while (true) {
+    const uint32_t expired = k_timer_status_sync(&tick_timer);
+
+    /* Missed periods are dropped, not replayed: a burst of ticks would send
+     * the motors several commands back to back without a fresh feedback in
+     * between.
+     */
+    if (expired > 1) {
+      missed += expired - 1;
+      LOG_WRN_RATELIMIT_RATE(1000, "tick overran; %u period(s) missed so far", missed);
+    }
+
     tick();
-    k_sleep(K_MSEC(1));
   }
 }
