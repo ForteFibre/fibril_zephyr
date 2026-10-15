@@ -212,6 +212,7 @@ codegen は複数のファイルを決定的にマージする。
 | ノードヘッダ | `CONFIG_FIBRIL_NODE_SCHEMA` が指す YAML | `node:`、`protocol:`、`limits:` |
 | ブロック型 | 各機能の `type.yaml` | `types:` |
 | インスタンス | 各機能が devicetree から生成 | `instances:` |
+| 組み込みのインスタンス | `can_diag` がトランスポートから生成 | `instances:` |
 
 ブロック型は実装済みのものを全部渡す。
 インスタンス化されない型は blob を作る前に落とされるので、渡す一覧を誰も管理しなくてよい。
@@ -219,6 +220,10 @@ codegen は複数のファイルを決定的にマージする。
 **このイメージが何を担うかは devicetree だけが決める。**
 `fibril,fcan-*` のノードを置くと、そのノードから `instances:` の断片が生成され、機能のソースがコンパイルされる。
 ノードを消せば両方消える。
+
+例外は、CAN の健全性を出す `can_diag` である（下の「CAN の健全性（can_diag）」）。
+devicetree が選んだトランスポートから instances を作り、全てのイメージに入る。
+`apps/node` の「何も有効にしていないイメージを拒む」検査は、devicetree 由来の instances だけで行う。
 
 手で書くのはノードヘッダだけになる。
 
@@ -257,6 +262,7 @@ hub 構成では `fcan_poll` が hub のドライバのスレッドで回るの�
 デバッガで止めている間は watchdog も止まる（`WDT_OPT_PAUSE_HALTED_BY_DBG`）。
 
 `tick` を持つ機能が無いイメージでは叩く場所が無いので、watchdog を起動せず、ログに残す。
+`can_diag`（既定で全てのイメージに入る）が `tick` を持つので、これは `CONFIG_FIBRIL_CAN_NODE_CAN_DIAG=n` にしたイメージだけで起きる。
 STM32 の IWDG は `wdt_setup` で初めて動き出すので、`CONFIG_WATCHDOG` を立てただけで勝手にリセットがかかることはない。
 
 ## fibril_can のノードに割く RAM
@@ -285,6 +291,7 @@ RAM の少ない基板では、デプロイ snippet の `.conf` でこれを下�
 | `RobstrideMotor` | `fibril,fcan-robstride` | RobStride アクチュエータ。指令、feedback、診断、再ゼロ |
 | `MdMotor` | `fibril,fcan-md-motor` | エンコーダで閉ループにした電流指令のモータ。CanMotorMbed の後継 |
 | `AdcPort` | `fibril,fcan-adc-port` | `MdMotor` のキャリブレーションが見る入力。ADC のチャネルか、モータが報告する電流 |
+| `CanPortDiag`、`CanHubDiag` | なし（トランスポートから決まる） | この基板の CAN コントローラと hub の健全性。下の「CAN の健全性（can_diag）」 |
 
 `RobstrideMotor` は `robstride_actuator_bridge_ros2` が ROS グラフに出していたインタフェースをそのまま名乗る。
 モータを PC の SocketCAN から基板に移しても購読側は変わらない、というのがこの型の目的である。
@@ -310,6 +317,31 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 
 `encoders` には、基板のエンコーダ入力（`fibril,stm32-qdec`、`cui,amt21-encoder`）のほか、RoboMaster のロータ角（`dji,robomaster-encoder`）を置ける。
 ロータ角のカウントは減速前の 8192 counts/rev なので、`encoder/gain` に減速比を含める。
+
+### CAN の健全性（can_diag）
+
+`can_diag`（`lib/fibril_can_node/can_diag/`）は、この基板が fibril_can のバスに出るのに使う CAN コントローラの健全性を、fibril_can のブロック型 `CanPortDiag` と `CanHubDiag` で出す。
+ブロック型の定義（`type.yaml` にあたる `zephyr/schema/can_diag.yaml`）と、値を読む関数は fibril_can にある。
+bridge と `fibril_can_diagnostics` が同じ型を使うためで、このリポジトリには実装だけを置く。
+
+devicetree のノードと binding は無い。
+instances はトランスポートが決める。
+
+| トランスポート | instances | ROS の topic |
+| --- | --- | --- |
+| direct | `CanPortDiag` 1 つ（`zephyr,canbus`） | `/<node>/can0/diag` |
+| hub | peer ごとに `CanPortDiag`、`CanHubDiag` 1 つ | `/<node>/can{i}/diag`、`/<node>/can_hub/diag` |
+
+hub の `can{i}` は `peers` の i 番目で、hub の port i + 1 にあたる（port 0 は USB の外部 face）。
+
+- 値は `tick` で 1 秒ごとに読み直す。topic の周期も 1 秒である。
+- CAN_STATS（bit、stuff、CRC、form、ack の各エラー、`rx_overrun`）は、`CONFIG_STATS` と `CONFIG_CAN_STATS` を `imply` で入れる。ドライバは `can_start()` で CAN_STATS を 0 に戻すので、コントローラごとに持ち越して起動からの単調増加にする。
+- bus-off に入った回数は、direct では `can_diag` がコントローラの state change callback で数え、hub では hub のドライバが数えた値を読む。どちらも、ほかに callback を置くものが無いことが前提である。
+- `CanHubDiag` は 8 port までしか表せないので、`CONFIG_FCAN_HUB_MAX_PORTS` が 8 を超えるとビルドが止まる。
+
+外すときは `CONFIG_FIBRIL_CAN_NODE_CAN_DIAG=n` にする。
+RAM が足りないときは、`CONFIG_CAN_STATS=n` でエラーカウンタだけを外せる（`stats_valid` が false になる）。
+全ての基板に入れる判断の理由は [ADR 0017](adr/0017-can-diag-builtin-function.md) にある。
 
 ### キャリブレーションと電流
 
