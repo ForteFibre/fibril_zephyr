@@ -30,6 +30,13 @@ manifest:
       # application passes in fcan_config_t::instance_counts. Bump this
       # deliberately, together with any migration the release notes call for.
       #
+      # v0.3.5 adds the CanPortDiag and CanHubDiag block types
+      # (zephyr/schema/can_diag.yaml) and the helpers that read a controller's
+      # health and a hub's counters from a tick (can_diag.h, and
+      # fcan_hub_zephyr_get_diag / _peer* in can_hub.h), which the can_diag
+      # function publishes. The runtime and the codegen are unchanged from
+      # v0.3.4.
+      #
       # v0.3.4 lets fcan_state be read from a thread that does not run
       # fcan_poll (#66), which is what fibril_fcan_node_state() relies on when a
       # tick runs behind a hub. It keeps, from v0.3.3, fcan_svc_complete staging
@@ -40,7 +47,7 @@ manifest:
       # arrived. The codegen package must be at least v0.3.3: an older
       # fcan_codegen emits a *_complete that returns nothing, and apps/node with
       # MdMotor fails to compile. v0.3.4 changes the runtime only.
-      revision: v0.3.4
+      revision: v0.3.5
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
     - name: fibril_common
