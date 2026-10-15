@@ -39,9 +39,10 @@ fibril_common は ROS 2 のノードが使っているものと同じ制御器�
 fibril_common の revision は、タグではなくコミットで固定してある（現在は `8f336f4`）。Zephyr module の入口（fibril_common#69）と `-Wdouble-promotion` の修正（fibril_common#74）を含むタグが、まだ無いためである。
 これより前の版では、`CONFIG_FIBRIL_COMMON` を立てたビルドが twister の `-Werror` で止まる。
 
-fibril_can の revision はブランチではなくタグで固定してある（現在は v0.3.4）。
+fibril_can の revision はブランチではなくタグで固定してある（現在は v0.3.5）。
+v0.3.5 で、基板の CAN の健全性を出すブロック型（`CanPortDiag`、`CanHubDiag`）と、それを読む Zephyr の関数が入り、`can_diag` が使う。
 v0.3.4 で `fcan_state` を `fcan_poll` と別のスレッドから読めるようになり、hub 構成の tick から `fibril_fcan_node_state()` を呼べる。
-`fcan_codegen`（`ros-jazzy-fibril-can-codegen`）は v0.3.3 以上にする（v0.3.4 は runtime だけの変更である）。v0.3.3 より前の codegen が出す `*_complete` は戻り値を返さず、MdMotor が `FCAN_E_BUSY` を見られない。v0.3.2 より前の codegen は、MdMotor が使う `read_<topic>(seq)` も出さない。
+`fcan_codegen`（`ros-jazzy-fibril-can-codegen`）は v0.3.3 以上にする（v0.3.4 と v0.3.5 で codegen は変わっていない）。v0.3.3 より前の codegen が出す `*_complete` は戻り値を返さず、MdMotor が `FCAN_E_BUSY` を見られない。v0.3.2 より前の codegen は、MdMotor が使う `read_<topic>(seq)` も出さない。
 codegen が決めるブロック配列の並びはワイヤの契約の一部で、`main` を追いかけていると `fcan_config_t::instance_counts` の割り当てが黙って変わる。
 上げるときは意図して上げ、必要な移行を同じ変更に含める。
 指したいものにタグが無いときだけコミットで固定する。
