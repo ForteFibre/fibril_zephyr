@@ -81,8 +81,8 @@ static constexpr uint8_t adc_port_own = 255;
 static constexpr float still_duty = 1e-3F;
 static constexpr float still_speed = 0.1F / motor_control::MotorControl::tick_s;
 
-/* What current/baseline_duration_s is clamped to. The upper bound keeps the
- * deferred reply inside the bridge's service timeout. */
+/* What current/baseline_duration_s is clamped to. The upper bound dates from
+ * when the bridge timed out deferred replies; see type.yaml. */
 static constexpr float baseline_min_s = 0.05F;
 static constexpr float baseline_max_s = 1.0F;
 

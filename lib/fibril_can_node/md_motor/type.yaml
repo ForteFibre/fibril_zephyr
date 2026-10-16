@@ -75,9 +75,10 @@ types:
       # minus what the last calibrate_current_baseline measured.
       current/polarity: { type: f32, default: 1.0 }
       current/offset: { type: f32, default: 0.0 }
-      # How long calibrate_current_baseline averages. Clamped to 0.05..1 s so
-      # the reply lands inside the bridge's service timeout (1.5 s by
-      # default); CanMotorMbed allowed up to 5 s.
+      # How long calibrate_current_baseline averages, clamped to 0.05..1 s.
+      # The upper bound once kept the reply inside the bridge's service
+      # timeout, which no longer applies after ACCEPTED (fibril_can's
+      # ADR-0018); CanMotorMbed allowed up to 5 s.
       current/baseline_duration_s: { type: f32, default: 0.5, min: 0.05, max: 1.0 }
 
       # Drop to DUTY 0 when no target or trajectory point has arrived for this
