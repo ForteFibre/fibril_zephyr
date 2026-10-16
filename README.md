@@ -90,7 +90,7 @@ west build -b <ボード名> app -- -DEXTRA_CONF_FILE=debug.conf   # 診断用 K
 `apps/node` のビルドには `fcan_codegen` が要る。
 `ros-jazzy-fibril-can-codegen` パッケージが入っていれば自動で見つかる。
 入っていなければ絶対パスを渡す（`-- -DFCAN_CODEGEN=/abs/path/fcan_codegen`）。
-`west.yml` は fibril_can を v0.3.5 に固定している。`fcan_codegen` は v0.3.3 以上にする（それより古いと MdMotor を含む `apps/node` がコンパイルできない）。理由は [doc/overview.md](doc/overview.md) にある。
+`west.yml` は fibril_can を v0.3.7 に固定している。`fcan_codegen` も v0.3.7 以上にする（それより古いと、MdMotor を含む `apps/node` の後送の応答が届かない）。理由は [doc/overview.md](doc/overview.md) にある。
 
 構成の考え方と機能の足し方は [doc/apps.md](doc/apps.md) にある。
 
