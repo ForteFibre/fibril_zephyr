@@ -60,6 +60,8 @@ ROS 側の adapter が `sensor` を購読して作る（2026-10-06 の決定）�
 CanMotorMbed の `feat/fibril-can` にある `trigger` は、位置に着いたかを判定するもので、名前が同じだけの別物である。
 これも引き継がない。
 
+その後、fibril_can の ADR-0018 で ACCEPTED の後の呼び出しにタイムアウトが掛からなくなったので、[ADR 0018](0018-md-motor-trigger-in-firmware.md) で `trigger` をファームウェアに入れた。
+
 ### 4. `feedback.current` は生の値 / 1000 にする
 
 CanMotorMbed の `read_current()` と同じ値にする（2026-10-10、ユーザーが選んだ）。

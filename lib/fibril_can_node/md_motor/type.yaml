@@ -8,9 +8,8 @@
 # that drove CanMotorMbed, closely enough that its gain tables and message
 # types carry over: same Target/Feedback/ResetEncoder types, same parameter
 # names under motorN. It is not a drop-in replacement. The bridge puts the
-# parameters on its own node, the trajectory point needs all three arrays
-# filled, and WaitSensorTrigger is left to the host; doc/apps.md lists the
-# differences.
+# parameters on its own node and the trajectory point needs all three arrays
+# filled; doc/apps.md lists the differences.
 
 types:
   MdMotor:
@@ -87,6 +86,11 @@ types:
       # position once and expect it held. 0 turns it off. Losing the master
       # altogether stops every mode regardless (doc/adr/0016).
       command_timeout_ms: { type: u32, default: 200 }
+
+      # The edge `trigger` waits for: 0 FALL, 1 RISE (SensorState's values,
+      # and can_md_controller's adc.direction), 2 either. Appended last so the
+      # bits of the parameters above keep their place.
+      adc/direction: { type: u8, default: 0 }
 
     topics:
       # DUTY, VELOCITY and POSITION. TORQUE and TRAJECTORY are ignored with a
@@ -181,3 +185,20 @@ types:
         ros:
           type: std_srvs/srv/Trigger
           map: { success: success }
+
+      # Waits for the watched AdcPort to cross its threshold in the direction
+      # adc/direction names, and answers with the position at that tick. Only
+      # a crossing counts, not the level the port starts at. There is no time
+      # limit: the call ends with the edge, with trigger_cancel, with a second
+      # trigger, or when the node leaves RUNNING (fibril_can's ADR-0018).
+      trigger:
+        request: {}
+        response: { triggered_position: f32, success: bool }
+        ros: { type: fibril_control_msgs/srv/WaitSensorTrigger }
+
+      # Ends a waiting trigger with success false. `success` exists for the
+      # same reason as reset_encoder's; Empty has nothing to carry it.
+      trigger_cancel:
+        request: {}
+        response: { success: bool }
+        ros: { type: std_srvs/srv/Empty }
