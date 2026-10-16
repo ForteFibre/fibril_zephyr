@@ -122,7 +122,10 @@ struct requests
   fcan_gen::call_handle baseline_call;
   bool trigger;
   fcan_gen::call_handle trigger_call;
+  /* trigger_cancel before the trigger above arrived, so it ends the call
+   * already waiting; after it, so it ends that new one instead. */
   bool trigger_cancel;
+  bool trigger_cancel_new;
   /* Any bit at all re-reads every parameter; there are few enough of them
    * that tracking which changed would cost more than reading them. */
   uint32_t params_changed;
@@ -189,6 +192,9 @@ struct motor_state
   fcan_gen::call_handle trigger_call;
   motor_control::LevelWatch trigger_watch;
   bool trigger_primed;
+  /* The port trigger_watch remembers a level for; sensor_port is the same for
+   * `sensor`, and the two are reset separately. */
+  uint8_t trigger_port;
 
   /* Answers the runtime has not taken yet, oldest first. */
   struct
@@ -358,9 +364,7 @@ static void start_trigger(uint8_t inst, fcan_gen::call_handle call)
   s->trigger_waiting = true;
   s->trigger_watch.start();
   s->trigger_primed = false;
-  if (!s->sensor.active()) {
-    s->sensor_port = watched_port(inst, s->adc_port);
-  }
+  s->trigger_port = watched_port(inst, s->adc_port);
 }
 
 static void drain_requests(uint8_t inst)
@@ -406,6 +410,9 @@ static void drain_requests(uint8_t inst)
 
   if (req.trigger) {
     start_trigger(inst, req.trigger_call);
+    if (req.trigger_cancel_new) {
+      queue_trigger_reply(inst, false, 0.0F);
+    }
   }
 }
 
@@ -732,14 +739,16 @@ static void watch_sensor(uint8_t inst)
   }
 
   /* A level remembered for another port says nothing about this one, so start
-   * over: the next sample reports the new port's level, as sensor_state does. */
-  if (port != s->sensor_port) {
-    if (sensing) {
-      s->sensor.start();
-    }
+   * over: the next sample reports the new port's level, as sensor_state does,
+   * and a trigger waits for a crossing on the new port. */
+  if (sensing && (port != s->sensor_port)) {
+    s->sensor.start();
+    s->sensor_port = port;
+  }
+  if (s->trigger_waiting && (port != s->trigger_port)) {
     s->trigger_watch.start();
     s->trigger_primed = false;
-    s->sensor_port = port;
+    s->trigger_port = port;
   }
 
   /* An edge is only worth its position. While the encoder is out the watcher
@@ -882,8 +891,14 @@ static fcan_gen::svc_status trigger(uint8_t inst, trigger_resp & resp, fcan_gen:
 static fcan_gen::svc_status trigger_cancel(uint8_t inst, trigger_cancel_resp & resp)
 {
   k_spinlock_key_t key = k_spin_lock(&lock);
+  struct requests & req = states[inst].req;
 
-  states[inst].req.trigger_cancel = true;
+  /* A trigger not drained yet came first, so this cancel is meant for it. */
+  if (req.trigger) {
+    req.trigger_cancel_new = true;
+  } else {
+    req.trigger_cancel = true;
+  }
   k_spin_unlock(&lock, key);
 
   resp.success = true;
