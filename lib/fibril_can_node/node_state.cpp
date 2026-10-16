@@ -59,3 +59,8 @@ fcan_node_state_t fibril_fcan_node_state(void)
 
   return fcan_state(the_node);
 }
+
+bool fibril_fcan_call_live(fcan_call_handle_t call)
+{
+  return fcan_svc_call_live(the_node, call);
+}
