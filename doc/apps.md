@@ -309,7 +309,7 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 - `trajectory`（`JointTrajectoryPoint`）は `positions`、`velocities`、`accelerations` をどれも 1 要素以上埋める。短い配列のメッセージは bridge が捨てる。
 - `invert`、`use_cascade_position`、`accel_ff_gain` は node 側の param になった。`can_md_controller` は host で処理していた。
 - `encoder.offset` の param は無い。`reset_encoder` を呼ぶ。
-- `trigger`（`WaitSensorTrigger`）は、待つ時間に上限が無い。`can_md_controller` と同じく、`trigger_cancel` か 2 回目の `trigger` で `success=false` で終わる。加えて、ノードが RUNNING から外れたときにも終わる。`adc/direction` の 2 は、`can_md_controller` では一致しない値だったが、ここではどちらの向きでも一致する。
+- `trigger`（`WaitSensorTrigger`）は、待つ時間に上限が無い。`can_md_controller` と同じく、`trigger_cancel` か 2 回目の `trigger` で `success=false` で終わる。加えて、master がノードを止めたとき（STOP、再 DISCOVER）にも終わる。`adc/direction` の 2 は、`can_md_controller` では一致しない値だったが、ここではどちらの向きでも一致する。
 - しきい値は `AdcPort` の `adcN/threshold` に、どのポートを見るかは `motorN/adc/port` に置く。`can_md_controller` の `adc{N}.threshold` は起動時だけ送る read only の param だったが、ここではいつでも変えられる。
 - `sensor` の `edge_position` には `invert` が掛かる。`can_md_controller` は掛けていなかった。
 - `calibrate_current_baseline` は測り終えてから応答し、静止していなかったら失敗を返す。測る時間は 0.05〜1 s（CanMotorMbed は 0.5〜5 s）。
@@ -353,7 +353,7 @@ RAM が足りないときは、`CONFIG_CAN_STATS=n` でエラーカウンタだ�
 - エンコーダの値が無効な間は、ポートの値を見ない。その間にしきい値をまたいでいたら、エンコーダが戻った最初のサンプルで、そのときの位置を付けて出す。
 - `feedback.current` は、モータが報告する電流の生の値を 1000 で割ったものである（CanMotorMbed の `read_current()`）。`current/polarity` の符号を掛け、`current/offset` と、最後に測ったベースラインを引き、最後に `invert` を掛ける。結果が有限でなければ（`current/offset` が NaN など）、電流は無効とし、`feedback.current` は 0 にする。測っているベースラインは中止する。
 - `calibrate_current_baseline` は、`current/baseline_duration_s` の間、DUTY 0 で止まっているモータの電流を平均する。測り終えてから応答を返す（ACCEPTED の後に最終応答）。
-- `trigger` は、`adc/port` のポートが、`adc/direction`（0 が FALL、1 が RISE、2 がどちらでも）の向きにしきい値をまたぐまで待ち、そのときの位置を `triggered_position` に入れて返す。数えるのは待ち始めた後にまたいだときだけで、待ち始めたときの向きでは返らない。`sensor_state` とは別に監視するので、`sensor` の配信と同時に使える。`trigger_cancel` と 2 回目の `trigger` は、待っている `trigger` を `success=false` で終わらせる。待つ時間に上限は無く、ノードが RUNNING から外れると fibril_can の runtime が呼び出しを破棄し、master も同時に失敗で返す。判断の理由は [ADR 0018](adr/0018-md-motor-trigger-in-firmware.md) にある。
+- `trigger` は、`adc/port` のポートが、`adc/direction`（0 が FALL、1 が RISE、2 がどちらでも）の向きにしきい値をまたぐまで待ち、そのときの位置を `triggered_position` に入れて返す。数えるのは待ち始めた後にまたいだときだけで、待ち始めたときの向きでは返らない。`sensor_state` とは別に監視するので、`sensor` の配信と同時に使える。`trigger_cancel` と 2 回目の `trigger` は、待っている `trigger` を `success=false` で終わらせる。待つ時間に上限は無い。master がノードを止めると（STOP、再 DISCOVER）、fibril_can の runtime が呼び出しを破棄し、master も同じ呼び出しを失敗で返す。master を見失って SUSPENDED になっても、待ち続ける。判断の理由は [ADR 0018](adr/0018-md-motor-trigger-in-firmware.md) にある。
 
 ### 指令が途絶えたとき
 

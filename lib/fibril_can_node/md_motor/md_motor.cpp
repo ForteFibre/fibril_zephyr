@@ -683,8 +683,8 @@ static void reply_triggers(uint8_t inst)
 {
   struct motor_state * s = &states[inst];
 
-  /* The node left RUNNING: the runtime dropped the call and the master gave up
-   * on it, so there is nothing left to wait for. */
+  /* The node stopped serving calls: the runtime dropped the call and the
+   * master gave up on it, so there is nothing left to wait for. */
   if (s->trigger_waiting && !fibril_fcan_call_live(s->trigger_call)) {
     s->trigger_waiting = false;
   }

@@ -113,8 +113,9 @@ fcan_node_state_t fibril_fcan_node_state(void);
  * @brief Whether a call the function answered ACCEPTED is still awaited.
  * @ingroup fibril_can_node
  *
- * The runtime drops every accepted call when the node leaves RUNNING, and
- * the master gives up on it at the same moment. From then on this is false
+ * The runtime drops every accepted call when the node stops serving calls
+ * (STOP, DISCOVER, FAULT; not SUSPENDED), and the master gives up on it when
+ * it sees that state. From then on this is false
  * and completing the call does nothing, so a function waiting on something
  * for the call stops waiting. Safe to read from a tick.
  */

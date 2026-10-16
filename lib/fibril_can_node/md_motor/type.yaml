@@ -191,7 +191,7 @@ types:
       # adc/direction names, and answers with the position at that tick. Only
       # a crossing counts, not the level the port starts at. There is no time
       # limit: the call ends with the edge, with trigger_cancel, with a second
-      # trigger, or when the node leaves RUNNING (fibril_can's ADR-0018).
+      # trigger, or when the master stops the node (fibril_can's ADR-0018).
       trigger:
         request: {}
         response: { triggered_position: f32, success: bool }

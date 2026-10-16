@@ -17,8 +17,8 @@ Proposed
 [ADR 0013](0013-md-motor-calibration-and-current.md) の 3 節は、これをファームウェアに入れず、ROS 側の adapter が `sensor` を購読して作るとした。
 fibril_can の service は bridge のタイムアウト（`service_timeout_ms`、既定 1.5 s）に縛られ、いつ来るか分からないエッジを待てなかったためである。
 
-fibril_can の ADR-0018（SPEC §7.6）で、ACCEPTED の後の呼び出しにはタイムアウトを掛けず、ノードが RUNNING から外れたときに終わらせることになった。
-スレーブの runtime は RUNNING から外れたときに受理した呼び出しを破棄し、master は HEARTBEAT の node_state を見て同じ時点で失敗を返す。
+fibril_can の ADR-0018（SPEC §7.6）で、ACCEPTED の後の呼び出しにはタイムアウトを掛けず、ノードの状態で終わらせることになった。
+スレーブの runtime は STOP、再 DISCOVER、FAULT のときに受理した呼び出しを破棄し、master は HEARTBEAT の node_state と boot_id を見て同じ呼び出しを失敗で返す。SUSPENDED では、どちらも終わらせない。
 これで、いつ終わるか分からない呼び出しをファームウェアの service として書ける。
 
 ## Decision
@@ -31,7 +31,7 @@ fibril_can の ADR-0018（SPEC §7.6）で、ACCEPTED の後の呼び出しに�
 - `trigger_cancel` と 2 回目の `trigger` は、待っている呼び出しを `success=false` で終わらせる。`can_md_controller` と同じである。
 - `adc/direction` は 0 が FALL、1 が RISE で、`can_md_controller` の `adc.direction` と同じ値である。2 はどちらの向きでも一致する。`can_md_controller` の 2（BOTH）はどの向きとも一致せず、待ちが終わらなかったので、値の意味を変えても困る利用者はいない。
 - 待つ時間に上限は持たない。ROS の service は呼び出し側が待つのをやめたことを伝えないので、待ちをやめたい利用者は `trigger_cancel` を呼ぶ。
-- ノードが RUNNING から外れたら、`fibril_fcan_call_live()` が false になったのを tick で見て、待つのをやめる。
+- runtime が呼び出しを破棄したら、`fibril_fcan_call_live()` が false になったのを tick で見て、待つのをやめる。master を見失って SUSPENDED になっても、`trigger` は待ち続ける（モータは ADR 0016 のとおり止まる）。
 
 ## Consequences
 
