@@ -351,6 +351,24 @@ static void queue_trigger_reply(uint8_t inst, bool success, float position)
   s->trigger_waiting = false;
 }
 
+/* Takes the starting level from the port's latest sample, so an edge before
+ * the next sample still counts. Without one, the next sample is the start. */
+static void prime_trigger(uint8_t inst, uint8_t port)
+{
+  struct motor_state * s = &states[inst];
+  float value;
+
+  s->trigger_watch.start();
+  s->trigger_port = port;
+  s->trigger_primed = false;
+
+  if (adc_port::read(port, value)) {
+    const auto event = s->trigger_watch.update(value, adc_port::threshold(port));
+
+    s->trigger_primed = event != motor_control::LevelWatch::Event::NONE;
+  }
+}
+
 static void start_trigger(uint8_t inst, fcan_gen::call_handle call)
 {
   struct motor_state * s = &states[inst];
@@ -362,9 +380,7 @@ static void start_trigger(uint8_t inst, fcan_gen::call_handle call)
 
   s->trigger_call = call;
   s->trigger_waiting = true;
-  s->trigger_watch.start();
-  s->trigger_primed = false;
-  s->trigger_port = watched_port(inst, s->adc_port);
+  prime_trigger(inst, watched_port(inst, s->adc_port));
 }
 
 static void drain_requests(uint8_t inst)
@@ -746,9 +762,7 @@ static void watch_sensor(uint8_t inst)
     s->sensor_port = port;
   }
   if (s->trigger_waiting && (port != s->trigger_port)) {
-    s->trigger_watch.start();
-    s->trigger_primed = false;
-    s->trigger_port = port;
+    prime_trigger(inst, port);
   }
 
   /* An edge is only worth its position. While the encoder is out the watcher
