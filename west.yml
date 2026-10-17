@@ -30,6 +30,16 @@ manifest:
       # application passes in fcan_config_t::instance_counts. Bump this
       # deliberately, together with any migration the release notes call for.
       #
+      # v0.4.0 cuts the slave's RAM, Flash and stack (fibril_can#79): a schema
+      # with service_buffer 0 now drops the segmentation code from the image
+      # here too, FRAME_DEFINE no longer needs ~400 B of ISR stack, and the
+      # codegen caps max_copy_entries by the topics' field count. It also makes
+      # the router forget only the targeted node's std IDs on a DISCOVER, and
+      # shares the router/hub driver code. The breaking change is in the
+      # embedded master only, which nothing here uses. The v0.3.7 codegen
+      # still works with it; the v0.4.0 codegen is what brings the smaller
+      # generated code and the copy-entry cap.
+      #
       # v0.3.7 ends an ACCEPTED call on the node's state instead of a timeout
       # (fibril_can ADR-0018): the call handle carries an epoch the runtime
       # stamps, which MdMotor's trigger relies on. The generated dispatchers
@@ -53,7 +63,7 @@ manifest:
       # arrived. The codegen package must be at least v0.3.3: an older
       # fcan_codegen emits a *_complete that returns nothing, and apps/node with
       # MdMotor fails to compile. v0.3.4 changes the runtime only.
-      revision: v0.3.7
+      revision: v0.4.0
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
     - name: fibril_common
