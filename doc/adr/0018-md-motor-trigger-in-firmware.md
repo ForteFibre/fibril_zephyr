@@ -29,7 +29,7 @@ fibril_can の ADR-0018（SPEC §7.6）で、ACCEPTED の後の呼び出しに�
 - 数えるのは待ち始めた後のエッジだけで、待ち始めたときの向きでは返らない。`sensor_state` が有効にした直後に出す向きと同じものを一致とみなすと、すでにセンサの上にいる機構が動かないまま原点を決めてしまう。
 - 待ち始めたときの向きは、その時点で最新の AdcPort のサンプルから取る。次のサンプルから取ると、待ち始めてから次のサンプルまでの間のエッジを見落とし、そのまま向きが変わらなければ待ちが終わらない。代わりに、待ち始める直前の 1 周期（5 ms）の間のエッジは数える。サンプルが無ければ、次のサンプルから取る。
 - 監視は `sensor_state` と別に持つ。`sensor` の配信を止めたり、向きの報告を動かしたりしない。
-- `trigger_cancel` と 2 回目の `trigger` は、待っている呼び出しを `success=false` で終わらせる。`can_md_controller` と同じである。
+- `trigger_cancel` と 2 回目の `trigger` は、待っている呼び出しを `success=false` で終わらせる。`can_md_controller` と同じである。ただし、エッジとほぼ同時（同じ tick の中）に届いたときは、取り消された方が `success=true` で返ることがある。handler と tick の順を揃える仕組みは持たず、利用者の制約とする。取り消した後に `success=true` が返っても、エッジは実際に来ている。
 - `adc/direction` は 0 が FALL、1 が RISE で、`can_md_controller` の `adc.direction` と同じ値である。2 はどちらの向きでも一致する。`can_md_controller` の 2（BOTH）はどの向きとも一致せず、待ちが終わらなかったので、値の意味を変えても困る利用者はいない。
 - 待つ時間に上限は持たない。ROS の service は呼び出し側が待つのをやめたことを伝えないので、待ちをやめたい利用者は `trigger_cancel` を呼ぶ。
 - runtime が呼び出しを破棄したら、`fibril_fcan_call_live()` が false になったのを tick で見て、待つのをやめる。master を見失って SUSPENDED になっても、`trigger` は待ち続ける（モータは ADR 0016 のとおり止まる）。
