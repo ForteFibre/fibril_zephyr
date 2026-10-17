@@ -8,9 +8,10 @@
  *
  * Everything that touches a motor or an encoder happens in the tick. The
  * service and parameter handlers run on whichever thread drives fcan_poll,
- * so they raise a request and return; the tick consumes it. The one deferred
- * reply, calibrate_current_baseline's, is handed to the runtime from the tick
- * when the run ends, and fcan_poll sends it (ADR 0013).
+ * so they raise a request and return; the tick consumes it. The deferred
+ * replies, calibrate_current_baseline's and trigger's, are handed to the
+ * runtime from the tick when they are due, and fcan_poll sends them (ADR 0013,
+ * ADR 0018).
  */
 
 #define DT_DRV_COMPAT fibril_fcan_md_motor
@@ -43,6 +44,10 @@ using sensor_state_req = fcan_gen::mdmotor::sensor_state_req;
 using sensor_state_resp = fcan_gen::mdmotor::sensor_state_resp;
 using baseline_req = fcan_gen::mdmotor::calibrate_current_baseline_req;
 using baseline_resp = fcan_gen::mdmotor::calibrate_current_baseline_resp;
+using trigger_req = fcan_gen::mdmotor::trigger_req;
+using trigger_resp = fcan_gen::mdmotor::trigger_resp;
+using trigger_cancel_req = fcan_gen::mdmotor::trigger_cancel_req;
+using trigger_cancel_resp = fcan_gen::mdmotor::trigger_cancel_resp;
 
 BUILD_ASSERT(
   DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 1,
@@ -76,10 +81,21 @@ static constexpr uint8_t adc_port_own = 255;
 static constexpr float still_duty = 1e-3F;
 static constexpr float still_speed = 0.1F / motor_control::MotorControl::tick_s;
 
-/* What current/baseline_duration_s is clamped to. The upper bound keeps the
- * deferred reply inside the bridge's service timeout. */
+/* What current/baseline_duration_s is clamped to. The upper bound dates from
+ * when the bridge timed out deferred replies; see type.yaml. */
 static constexpr float baseline_min_s = 0.05F;
 static constexpr float baseline_max_s = 1.0F;
+
+/* adc/direction, and fibril_control_msgs/msg/SensorState's direction. */
+enum adc_direction {
+  ADC_FALL = 0,
+  ADC_RISE = 1,
+  ADC_EITHER = 2,
+};
+
+/* A trigger replaced by a second one and the second's own answer can both
+ * wait for a staging slot at once. */
+static constexpr uint8_t trigger_replies_max = 2;
 
 /* fibril_control_msgs/msg/Target's constants. */
 enum target_type {
@@ -104,6 +120,12 @@ struct requests
   bool sensor_state_on;
   bool baseline;
   fcan_gen::call_handle baseline_call;
+  bool trigger;
+  fcan_gen::call_handle trigger_call;
+  /* trigger_cancel before the trigger above arrived, so it ends the call
+   * already waiting; after it, so it ends that new one instead. */
+  bool trigger_cancel;
+  bool trigger_cancel_new;
   /* Any bit at all re-reads every parameter; there are few enough of them
    * that tracking which changed would cost more than reading them. */
   uint32_t params_changed;
@@ -121,6 +143,7 @@ struct motor_state
   float accel_ff_gain;
   bool cascade;
   uint8_t adc_port;
+  uint8_t adc_direction;
   float current_polarity;
   float current_offset;
   uint32_t baseline_ticks;
@@ -161,6 +184,29 @@ struct motor_state
   /* Set by the handler, cleared by the tick once it has replied, so a second
    * call cannot overwrite the handle of one still running. Under `lock`. */
   bool baseline_busy;
+
+  /* A trigger waiting for its edge. It has a watch of its own, so the levels
+   * sensor_state reports do not move it, and it skips the first event, which
+   * is the level the port starts at rather than a crossing. */
+  bool trigger_waiting;
+  fcan_gen::call_handle trigger_call;
+  motor_control::LevelWatch trigger_watch;
+  bool trigger_primed;
+  /* The port trigger_watch remembers a level for; sensor_port is the same for
+   * `sensor`, and the two are reset separately. */
+  uint8_t trigger_port;
+
+  /* Answers the runtime has not taken yet, oldest first. */
+  struct
+  {
+    fcan_gen::call_handle call;
+    float position;
+    bool success;
+  } trigger_replies[trigger_replies_max];
+  uint8_t trigger_reply_count;
+  /* Under `lock`: a trigger request not drained yet, or answers still queued.
+   * The handler refuses another trigger meanwhile rather than lose a handle. */
+  bool trigger_busy;
 };
 
 static struct motor_state states[ARRAY_SIZE(motors)];
@@ -179,6 +225,7 @@ static void apply_params(uint8_t inst)
   s->accel_ff_gain = m.param_accel_ff_gain();
   s->cascade = m.param_use_cascade_position();
   s->adc_port = m.param_adc__port();
+  s->adc_direction = m.param_adc__direction();
   s->current_polarity = (m.param_current__polarity() < 0.0F) ? -1.0F : 1.0F;
   s->current_offset = m.param_current__offset();
 
@@ -289,6 +336,53 @@ static uint8_t watched_port(uint8_t inst, uint8_t port)
   return (port == adc_port_own) ? inst : port;
 }
 
+static void queue_trigger_reply(uint8_t inst, bool success, float position)
+{
+  struct motor_state * s = &states[inst];
+
+  /* The handler refuses a trigger while answers are queued, so at most the
+   * replaced call and the current one are here. */
+  if (s->trigger_reply_count >= trigger_replies_max) {
+    LOG_ERR("motor %u: trigger reply dropped", inst);
+    return;
+  }
+
+  s->trigger_replies[s->trigger_reply_count++] = {s->trigger_call, position, success};
+  s->trigger_waiting = false;
+}
+
+/* Takes the starting level from the port's latest sample, so an edge before
+ * the next sample still counts. Without one, the next sample is the start. */
+static void prime_trigger(uint8_t inst, uint8_t port)
+{
+  struct motor_state * s = &states[inst];
+  float value;
+
+  s->trigger_watch.start();
+  s->trigger_port = port;
+  s->trigger_primed = false;
+
+  if (adc_port::read(port, value)) {
+    const auto event = s->trigger_watch.update(value, adc_port::threshold(port));
+
+    s->trigger_primed = event != motor_control::LevelWatch::Event::NONE;
+  }
+}
+
+static void start_trigger(uint8_t inst, fcan_gen::call_handle call)
+{
+  struct motor_state * s = &states[inst];
+
+  /* A second trigger replaces the first, as can_md_controller did. */
+  if (s->trigger_waiting) {
+    queue_trigger_reply(inst, false, 0.0F);
+  }
+
+  s->trigger_call = call;
+  s->trigger_waiting = true;
+  prime_trigger(inst, watched_port(inst, s->adc_port));
+}
+
 static void drain_requests(uint8_t inst)
 {
   struct motor_state * s = &states[inst];
@@ -324,6 +418,17 @@ static void drain_requests(uint8_t inst)
   if (req.baseline) {
     s->baseline_call = req.baseline_call;
     s->baseline.start(s->baseline_ticks);
+  }
+
+  if (req.trigger_cancel && s->trigger_waiting) {
+    queue_trigger_reply(inst, false, 0.0F);
+  }
+
+  if (req.trigger) {
+    start_trigger(inst, req.trigger_call);
+    if (req.trigger_cancel_new) {
+      queue_trigger_reply(inst, false, 0.0F);
+    }
   }
 }
 
@@ -574,6 +679,62 @@ static void update_current(uint8_t inst)
   s->current = s->sign * (current - s->baseline.offset());
 }
 
+static void watch_trigger(uint8_t inst, float value, float threshold)
+{
+  struct motor_state * s = &states[inst];
+  const auto event = s->trigger_watch.update(value, threshold);
+
+  if (event == motor_control::LevelWatch::Event::NONE) {
+    return;
+  }
+
+  if (!s->trigger_primed) {
+    s->trigger_primed = true;
+    return;
+  }
+
+  const uint8_t direction = (event == motor_control::LevelWatch::Event::HIGH) ? ADC_RISE : ADC_FALL;
+
+  if ((s->adc_direction == ADC_EITHER) || (s->adc_direction == direction)) {
+    queue_trigger_reply(inst, true, s->control.position());
+  }
+}
+
+/* Hands queued answers to the runtime in order. FCAN_E_BUSY keeps the rest for
+ * the next tick; FCAN_E_STALE means the runtime already dropped the call. */
+static void reply_triggers(uint8_t inst)
+{
+  struct motor_state * s = &states[inst];
+
+  /* The node stopped serving calls: the runtime dropped the call and the
+   * master gave up on it, so there is nothing left to wait for. */
+  if (s->trigger_waiting && !fibril_fcan_call_live(s->trigger_call)) {
+    s->trigger_waiting = false;
+  }
+
+  while (s->trigger_reply_count > 0U) {
+    const auto & r = s->trigger_replies[0];
+    trigger_resp resp{};
+
+    resp.triggered_position = r.position;
+    resp.success = r.success;
+
+    if (fcan_gen::mdmotor::trigger_complete(r.call, FCAN_SVC_OK, resp) == FCAN_E_BUSY) {
+      break;
+    }
+
+    for (uint8_t i = 1; i < s->trigger_reply_count; i++) {
+      s->trigger_replies[i - 1] = s->trigger_replies[i];
+    }
+    s->trigger_reply_count--;
+  }
+
+  k_spinlock_key_t key = k_spin_lock(&lock);
+
+  s->trigger_busy = s->req.trigger || (s->trigger_reply_count > 0U);
+  k_spin_unlock(&lock, key);
+}
+
 /* Runs once per AdcPort sampling, so a port is compared once per sample. */
 static void watch_sensor(uint8_t inst)
 {
@@ -587,16 +748,21 @@ static void watch_sensor(uint8_t inst)
   s->adc_generation = generation;
 
   const uint8_t port = watched_port(inst, s->adc_port);
+  const bool sensing = s->sensor.active();
 
-  if (!s->sensor.active()) {
+  if (!sensing && !s->trigger_waiting) {
     return;
   }
 
   /* A level remembered for another port says nothing about this one, so start
-   * over: the next sample reports the new port's level, as sensor_state does. */
-  if (port != s->sensor_port) {
+   * over: the next sample reports the new port's level, as sensor_state does,
+   * and a trigger waits for a crossing on the new port. */
+  if (sensing && (port != s->sensor_port)) {
     s->sensor.start();
     s->sensor_port = port;
+  }
+  if (s->trigger_waiting && (port != s->trigger_port)) {
+    prime_trigger(inst, port);
   }
 
   /* An edge is only worth its position. While the encoder is out the watcher
@@ -606,15 +772,24 @@ static void watch_sensor(uint8_t inst)
     return;
   }
 
-  const auto event = s->sensor.update(value, adc_port::threshold(port));
+  const float threshold = adc_port::threshold(port);
+
+  if (s->trigger_waiting) {
+    watch_trigger(inst, value, threshold);
+  }
+
+  if (!sensing) {
+    return;
+  }
+
+  const auto event = s->sensor.update(value, threshold);
 
   if (event == motor_control::LevelWatch::Event::NONE) {
     return;
   }
 
   if (auto pub = fcan_gen::mdmotor(inst).publish_sensor()) {
-    /* fibril_control_msgs/msg/SensorState's RISE and FALL. */
-    pub->direction = (event == motor_control::LevelWatch::Event::HIGH) ? 1U : 0U;
+    pub->direction = (event == motor_control::LevelWatch::Event::HIGH) ? ADC_RISE : ADC_FALL;
     pub->edge_position = s->control.position();
   }
 }
@@ -698,6 +873,53 @@ static fcan_gen::svc_status calibrate_current_baseline(
   return FCAN_SVC_ACCEPTED;
 }
 
+/* Answered from the tick, by reply_triggers(), once the edge comes. */
+static fcan_gen::svc_status trigger(uint8_t inst, trigger_resp & resp, fcan_gen::call_handle call)
+{
+  struct motor_state * s = &states[inst];
+  const uint8_t port = watched_port(inst, fcan_gen::mdmotor(inst).param_adc__port());
+
+  resp.triggered_position = 0.0F;
+  resp.success = false;
+
+  if (port >= adc_port::count()) {
+    LOG_WRN("motor %u: trigger refused, no AdcPort %u", inst, port);
+    return FCAN_SVC_APP_ERROR;
+  }
+
+  k_spinlock_key_t key = k_spin_lock(&lock);
+
+  if (s->trigger_busy) {
+    k_spin_unlock(&lock, key);
+    return FCAN_SVC_BUSY;
+  }
+
+  s->trigger_busy = true;
+  s->req.trigger = true;
+  s->req.trigger_call = call;
+  k_spin_unlock(&lock, key);
+
+  return FCAN_SVC_ACCEPTED;
+}
+
+static fcan_gen::svc_status trigger_cancel(uint8_t inst, trigger_cancel_resp & resp)
+{
+  k_spinlock_key_t key = k_spin_lock(&lock);
+  struct requests & req = states[inst].req;
+
+  /* A trigger not drained yet came first, so this cancel is meant for it. */
+  if (req.trigger) {
+    req.trigger_cancel_new = true;
+  } else {
+    req.trigger_cancel = true;
+  }
+  k_spin_unlock(&lock, key);
+
+  resp.success = true;
+
+  return FCAN_SVC_OK;
+}
+
 static fcan_gen::svc_status reset_safety(uint8_t inst, reset_safety_resp & resp)
 {
   k_spinlock_key_t key = k_spin_lock(&lock);
@@ -745,6 +967,13 @@ static int md_motor_func_start(void)
     m.on_calibrate_current_baseline(
       [i](const baseline_req &, baseline_resp & resp, fcan_gen::call_handle call) noexcept {
         return calibrate_current_baseline(i, resp, call);
+      });
+    m.on_trigger([i](const trigger_req &, trigger_resp & resp, fcan_gen::call_handle call) noexcept {
+      return trigger(i, resp, call);
+    });
+    m.on_trigger_cancel(
+      [i](const trigger_cancel_req &, trigger_cancel_resp & resp, fcan_gen::call_handle) noexcept {
+        return trigger_cancel(i, resp);
       });
     m.on_params_changed([i](uint32_t changed_mask) noexcept { params_changed(i, changed_mask); });
 
@@ -798,6 +1027,7 @@ static void md_motor_func_tick(void)
     drive(i, s->control.update(sample));
     update_current(i);
     watch_sensor(i);
+    reply_triggers(i);
     publish_feedback(i);
   }
 }

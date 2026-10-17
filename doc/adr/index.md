@@ -50,6 +50,7 @@
 | [0015](0015-hub-joins-fibril-can-only.md) | hub が繋ぐバスは fibril_can のデバイスだけにし、モータのバスへの生の転送はしない | Proposed |
 | [0016](0016-command-loss-stop.md) | 指令の途絶を、master 全体の途絶と topic ごとの途絶の 2 段で捉えて出力を止める | Proposed |
 | [0017](0017-can-diag-builtin-function.md) | CAN の健全性は、devicetree に書かない組み込みの機能として全てのイメージで出す | Proposed |
+| [0018](0018-md-motor-trigger-in-firmware.md) | MdMotor の trigger をファームウェアに入れる | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -72,4 +73,5 @@
 0015-hub-joins-fibril-can-only
 0016-command-loss-stop
 0017-can-diag-builtin-function
+0018-md-motor-trigger-in-firmware
 ```

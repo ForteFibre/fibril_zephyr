@@ -8,9 +8,8 @@
 # that drove CanMotorMbed, closely enough that its gain tables and message
 # types carry over: same Target/Feedback/ResetEncoder types, same parameter
 # names under motorN. It is not a drop-in replacement. The bridge puts the
-# parameters on its own node, the trajectory point needs all three arrays
-# filled, and WaitSensorTrigger is left to the host; doc/apps.md lists the
-# differences.
+# parameters on its own node and the trajectory point needs all three arrays
+# filled; doc/apps.md lists the differences.
 
 types:
   MdMotor:
@@ -76,9 +75,10 @@ types:
       # minus what the last calibrate_current_baseline measured.
       current/polarity: { type: f32, default: 1.0 }
       current/offset: { type: f32, default: 0.0 }
-      # How long calibrate_current_baseline averages. Clamped to 0.05..1 s so
-      # the reply lands inside the bridge's service timeout (1.5 s by
-      # default); CanMotorMbed allowed up to 5 s.
+      # How long calibrate_current_baseline averages, clamped to 0.05..1 s.
+      # The upper bound once kept the reply inside the bridge's service
+      # timeout, which no longer applies after ACCEPTED (fibril_can's
+      # ADR-0018); CanMotorMbed allowed up to 5 s.
       current/baseline_duration_s: { type: f32, default: 0.5, min: 0.05, max: 1.0 }
 
       # Drop to DUTY 0 when no target or trajectory point has arrived for this
@@ -87,6 +87,11 @@ types:
       # position once and expect it held. 0 turns it off. Losing the master
       # altogether stops every mode regardless (doc/adr/0016).
       command_timeout_ms: { type: u32, default: 200 }
+
+      # The edge `trigger` waits for: 0 FALL, 1 RISE (SensorState's values,
+      # and can_md_controller's adc.direction), 2 either. Appended last so the
+      # bits of the parameters above keep their place.
+      adc/direction: { type: u8, default: 0 }
 
     topics:
       # DUTY, VELOCITY and POSITION. TORQUE and TRAJECTORY are ignored with a
@@ -181,3 +186,20 @@ types:
         ros:
           type: std_srvs/srv/Trigger
           map: { success: success }
+
+      # Waits for the watched AdcPort to cross its threshold in the direction
+      # adc/direction names, and answers with the position at that tick. Only
+      # a crossing counts, not the level the port starts at. There is no time
+      # limit: the call ends with the edge, with trigger_cancel, with a second
+      # trigger, or when the master stops the node (fibril_can's ADR-0018).
+      trigger:
+        request: {}
+        response: { triggered_position: f32, success: bool }
+        ros: { type: fibril_control_msgs/srv/WaitSensorTrigger }
+
+      # Ends a waiting trigger with success false. `success` exists for the
+      # same reason as reset_encoder's; Empty has nothing to carry it.
+      trigger_cancel:
+        request: {}
+        response: { success: bool }
+        ros: { type: std_srvs/srv/Empty }

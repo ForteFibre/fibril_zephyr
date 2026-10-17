@@ -30,6 +30,12 @@ manifest:
       # application passes in fcan_config_t::instance_counts. Bump this
       # deliberately, together with any migration the release notes call for.
       #
+      # v0.3.7 ends an ACCEPTED call on the node's state instead of a timeout
+      # (fibril_can ADR-0018): the call handle carries an epoch the runtime
+      # stamps, which MdMotor's trigger relies on. The generated dispatchers
+      # build handles through the runtime, so the codegen has to be v0.3.7
+      # too; an older one compiles but every deferred reply goes stale.
+      #
       # v0.3.5 adds the CanPortDiag and CanHubDiag block types
       # (zephyr/schema/can_diag.yaml) and the helpers that read a controller's
       # health and a hub's counters from a tick (can_diag.h, and
@@ -47,7 +53,7 @@ manifest:
       # arrived. The codegen package must be at least v0.3.3: an older
       # fcan_codegen emits a *_complete that returns nothing, and apps/node with
       # MdMotor fails to compile. v0.3.4 changes the runtime only.
-      revision: v0.3.5
+      revision: v0.3.7
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
     - name: fibril_common
