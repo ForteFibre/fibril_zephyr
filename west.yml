@@ -36,9 +36,9 @@ manifest:
       # codegen caps max_copy_entries by the topics' field count. It also makes
       # the router forget only the targeted node's std IDs on a DISCOVER, and
       # shares the router/hub driver code. The breaking change is in the
-      # embedded master only, which nothing here uses. The v0.3.7 codegen
-      # still works with it; the v0.4.0 codegen is what brings the smaller
-      # generated code and the copy-entry cap.
+      # embedded master only, which nothing here uses. Use the v0.4.0 codegen
+      # (the v0.3.7 one still works) and upgrade ros-jazzy-fibril-can-core
+      # with it: the codegen package does not pin the core version.
       #
       # v0.3.7 ends an ACCEPTED call on the node's state instead of a timeout
       # (fibril_can ADR-0018): the call handle carries an epoch the runtime
