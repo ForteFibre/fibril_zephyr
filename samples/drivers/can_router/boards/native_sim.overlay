@@ -21,7 +21,7 @@
 		compatible = "fibril,can-router";
 		status = "okay";
 		downlinks = <&dl0>, <&dl1>;
-		max-stdids = <256>;
+		max-stdids = <512>;
 		max-node-ids = <32>;
 	};
 };
