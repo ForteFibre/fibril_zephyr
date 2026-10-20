@@ -5,13 +5,11 @@
  * What RC26's actuator node drives. The transport snippet decides how it
  * reaches the fibril_can bus, so nothing here mentions that controller.
  *
- * The two buses stay apart on purpose. RobStride speaks classic CAN with
- * 29-bit identifiers, which cannot share a controller with the CAN FD traffic
- * fibril_can runs, so the actuators get CAN1 and the transport keeps CAN0.
- * CAN1's transceiver STB is the board's.
+ * The bus comes from dts/fibril/rc26_mainair_v01/; the motors and their
+ * order are said here.
  */
 
-#include <fibril/can-bitrate.h>
+#include <fibril/rc26_mainair_v01/robstride.dtsi>
 
 /* One node schema per image; see doc/apps.md. */
 #ifdef FIBRIL_CLAIM_NODE_ROLE
@@ -23,11 +21,6 @@
 #error "FCAN_ROBSTRIDE claimed twice; rc26-robstride is one claimant"
 #endif
 #define FIBRIL_CLAIM_FCAN_ROBSTRIDE 1
-
-#ifdef FIBRIL_CLAIM_FDCAN2
-#error "FDCAN2 claimed twice; rc26-robstride is one claimant"
-#endif
-#define FIBRIL_CLAIM_FDCAN2 1
 
 / {
     fcan_robstride: fcan-robstride {
@@ -41,42 +34,18 @@
     };
 };
 
-/*
- * External CAN1 (board silkscreen) on FDCAN2. No data phase: the RobStride
- * protocol is classic CAN only, so the controller must not be given a data
- * bitrate that would let an FD frame out onto a bus that cannot carry one.
- */
-&fdcan2 {
-    status = "okay";
-    bitrate = <FIBRIL_ACTUATOR_CAN_BITRATE>;
+/* One actuator, at the CAN id a RobStride ships with. */
+&robstride0 {
+    joint0: motor@1 {
+        compatible = "robstride,motor";
+        reg = <0x01>;
+        model = "rs05";
 
-    robstride0: robstride {
-        compatible = "robstride,bus";
-        #address-cells = <1>;
-        #size-cells = <0>;
-        cans = <&fdcan2>;
-
-        /* Must differ from every motor reg below; the receive filter keys on
-         * it. 0xfd is what the ROS 2 host implementation defaults to, so a
-         * motor moved between the two needs no reconfiguration. */
-        master-can-id = <0xfd>;
-
-        /* Feedback arrives as the reply to each command, which the driver
-         * sends every 5 ms, so this leaves room for several missed intervals
-         * before a motor is called stale. */
-        feedback-timeout-ms = <100>;
-
-        joint0: motor@1 {
-            compatible = "robstride,motor";
-            reg = <0x01>;
-            model = "rs05";
-
-            /* The full-scale value a DUTY target is measured against, and the
-             * limit the motor enforces on itself. 2.4 A is the RS05 rated
-             * current rather than its 11 A peak, which is both the ROS 2
-             * host's default and the value a joint can hold indefinitely. */
-            max-current-ma = <2400>;
-            status = "okay";
-        };
+        /* The full-scale value a DUTY target is measured against, and the
+         * limit the motor enforces on itself. 2.4 A is the RS05 rated
+         * current rather than its 11 A peak, which is both the ROS 2
+         * host's default and the value a joint can hold indefinitely. */
+        max-current-ma = <2400>;
+        status = "okay";
     };
 };
