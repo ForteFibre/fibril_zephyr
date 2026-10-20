@@ -51,6 +51,7 @@
 | [0016](0016-command-loss-stop.md) | 指令の途絶を、master 全体の途絶と topic ごとの途絶の 2 段で捉えて出力を止める | Proposed |
 | [0017](0017-can-diag-builtin-function.md) | CAN の健全性は、devicetree に書かない組み込みの機能として全てのイメージで出す | Proposed |
 | [0018](0018-md-motor-trigger-in-firmware.md) | MdMotor の trigger をファームウェアに入れる | Proposed |
+| [0019](0019-robstride-mode-params-readback.md) | RobStride の設定をモードごとに書き、読み戻して確かめてから有効化する | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -74,4 +75,5 @@
 0016-command-loss-stop
 0017-can-diag-builtin-function
 0018-md-motor-trigger-in-firmware
+0019-robstride-mode-params-readback
 ```
