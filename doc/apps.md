@@ -648,9 +648,16 @@ static const uint8_t counts[FCAN_NUM_BLOCK_ARRAYS] = {
 `fcan_codegen` は `ros-jazzy-fibril-can-codegen` パッケージが `/opt/ros/jazzy/lib/fibril_can_codegen/` に置く。
 このパスは既定で探されるので、パッケージが入っている機械では何も渡さなくてよい。
 
-入っていない場合は絶対パスを渡す。twister には環境変数で渡す。
+見つからなければ、`fcan_invoke_codegen` が `modules/lib/fibril_can` から host 向けに CLI をビルドする。
+置き場所はビルドディレクトリの `fcan_codegen_host/` で、`west build -p` のたびにビルドし直す。
+protobuf と yaml-cpp が要る（macOS は `brew install protobuf yaml-cpp`、Ubuntu は `protobuf-compiler libprotobuf-dev libyaml-cpp-dev`）。
+ROS 2 の無い Mac では、これで `west build` が通る。
+この CLI は `west.yml` が固定した fibril_can と同じ版なので、deb の版がずれる心配が無い。
+
+手元の CLI を使うときは絶対パスを、deb があっても木からのビルドを使うときは `FCAN_CODEGEN_FROM_SOURCE` を渡す。twister には環境変数で渡す。
 
 ```shell
 west build -b <board> apps/node -S <transport> -S <deployment> -- -DFCAN_CODEGEN=/abs/path/fcan_codegen
+west build -b <board> apps/node -S <transport> -S <deployment> -- -DFCAN_CODEGEN_FROM_SOURCE=ON
 FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps
 ```

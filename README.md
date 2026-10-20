@@ -90,8 +90,17 @@ west build -b <ボード名> app -- -DEXTRA_CONF_FILE=debug.conf   # 診断用 K
 
 `apps/node` のビルドには `fcan_codegen` が要る。
 `ros-jazzy-fibril-can-codegen` パッケージが入っていれば自動で見つかる。
-入っていなければ絶対パスを渡す（`-- -DFCAN_CODEGEN=/abs/path/fcan_codegen`）。
-`west.yml` は fibril_can を v0.3.7 に固定している。`fcan_codegen` も v0.3.7 以上にする（それより古いと、MdMotor を含む `apps/node` の後送の応答が届かない）。理由は [doc/overview.md](doc/overview.md) にある。
+見つからなければ、`west.yml` が固定した fibril_can の木から host 向けにビルドする（ビルドディレクトリの `fcan_codegen_host/`）。
+これには protobuf と yaml-cpp が要る。Mac（Apple Silicon）ではこれで `west build` が通る。
+
+```shell
+brew install protobuf yaml-cpp                                            # macOS
+sudo apt install protobuf-compiler libprotobuf-dev libyaml-cpp-dev         # Ubuntu
+```
+
+deb の codegen は版が runtime とずれることがある（`west.yml` は fibril_can を v0.4.2 に固定している。古い codegen では MdMotor を含む `apps/node` の後送の応答が届かない）。
+木からビルドした CLI を必ず使うときは `-- -DFCAN_CODEGEN_FROM_SOURCE=ON` を、手元の CLI を使うときは `-- -DFCAN_CODEGEN=/abs/path/fcan_codegen` を渡す。
+理由は [doc/overview.md](doc/overview.md) にある。
 
 構成の考え方と機能の足し方は [doc/apps.md](doc/apps.md) にある。
 

@@ -14,10 +14,12 @@ sample:
 common:
   build_only: true
   # Codegen needs the fcan_codegen CLI. It is found automatically where the
-  # ros-jazzy-fibril-can-codegen package is installed; elsewhere set it in the
-  # environment, which is what reaches the helper:
+  # ros-jazzy-fibril-can-codegen package is installed, and otherwise built
+  # from modules/lib/fibril_can (needs protobuf and yaml-cpp). To pick one,
+  # set it in the environment, which is what reaches the helper:
   #   FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps
-  # twister's --extra-args=-DFCAN_CODEGEN=... does not.
+  #   FCAN_CODEGEN_FROM_SOURCE=ON west twister -T apps
+  # twister's --extra-args=-D... does not.
   filter: CONFIG_FIBRIL_CAN
   # Each scenario names its own board: twister joins a list under `common`
   # with the scenario's, so a board listed here would also be tried with
