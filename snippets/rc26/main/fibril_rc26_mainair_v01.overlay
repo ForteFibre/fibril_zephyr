@@ -1,0 +1,78 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * What RC26's main node drives: rc26-air's valves and rc26-robstride's
+ * actuators together. The transport snippet decides how it reaches the
+ * fibril_can bus, so nothing here mentions that controller.
+ *
+ * The RobStride bus comes from dts/fibril/rc26_mainair_v01/; the valve
+ * wiring, the motors and their order are said here.
+ */
+
+#include <fibril/rc26_mainair_v01/robstride.dtsi>
+
+/* One node schema per image; see doc/apps.md. */
+#ifdef FIBRIL_CLAIM_NODE_ROLE
+#error "NODE_ROLE claimed twice; rc26-main is one claimant"
+#endif
+#define FIBRIL_CLAIM_NODE_ROLE 1
+
+#ifdef FIBRIL_CLAIM_FCAN_SOLENOID
+#error "FCAN_SOLENOID claimed twice; rc26-main is one claimant"
+#endif
+#define FIBRIL_CLAIM_FCAN_SOLENOID 1
+
+#ifdef FIBRIL_CLAIM_FCAN_ROBSTRIDE
+#error "FCAN_ROBSTRIDE claimed twice; rc26-main is one claimant"
+#endif
+#define FIBRIL_CLAIM_FCAN_ROBSTRIDE 1
+
+/ {
+    /* The six +12 V outputs J18-J23, in silkscreen order, wired as in
+     * rc26-air. The pins are not consecutive on the port because the
+     * TBD62783A inputs were placed to keep the +12 V traces short; taking
+     * them from the board's air0..air5 nodes is not possible, since those are
+     * gpio-leds children rather than a GPIO phandle-array.
+     */
+    fcan_solenoid: fcan-solenoid {
+        compatible = "fibril,fcan-solenoid";
+
+        /* Becomes air0..air5 on the ROS side, matching the silkscreen. */
+        fcan-ns = "air{i}";
+
+        gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>,   /* Air0 - J18 */
+                <&gpioa 6 GPIO_ACTIVE_HIGH>,   /* Air1 - J19 */
+                <&gpioa 0 GPIO_ACTIVE_HIGH>,   /* Air2 - J20 */
+                <&gpioa 5 GPIO_ACTIVE_HIGH>,   /* Air3 - J21 */
+                <&gpioa 7 GPIO_ACTIVE_HIGH>,   /* Air4 - J22 */
+                <&gpioa 4 GPIO_ACTIVE_HIGH>;   /* Air5 - J23 */
+        status = "okay";
+    };
+
+    fcan_robstride: fcan-robstride {
+        compatible = "fibril,fcan-robstride";
+
+        /* Becomes motor0..motorN on the ROS side. */
+        fcan-ns = "motor{i}";
+
+        motors = <&joint0>;
+        status = "okay";
+    };
+};
+
+/* One actuator, at the CAN id a RobStride ships with, as in rc26-robstride.
+ * A machine replaces it with its own ids, models and current limits. */
+&robstride0 {
+    joint0: motor@1 {
+        compatible = "robstride,motor";
+        reg = <0x01>;
+        model = "rs05";
+
+        /* The full-scale value a DUTY target is measured against, and the
+         * limit the motor enforces on itself. 2.4 A is the RS05 rated
+         * current rather than its 11 A peak. */
+        max-current-ma = <2400>;
+        status = "okay";
+    };
+};

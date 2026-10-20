@@ -1,0 +1,67 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The RC26 MainAir V01's RobStride bus on external CAN1 (board silkscreen),
+ * which is FDCAN2, as robstride0, with no motor on it. CAN1's transceiver STB
+ * is the board's.
+ *
+ * The bus stays apart from the fibril_can one on purpose. RobStride speaks
+ * classic CAN with 29-bit identifiers, which cannot share a controller with
+ * the CAN FD traffic fibril_can runs, so the actuators get CAN1 and the
+ * transport keeps CAN0.
+ *
+ * The motors are not defined here. The driver commands every motor it is
+ * given every 5 ms and waits for the reply, so one that is not fitted is
+ * called stale and its feedback lost. A deployment adds exactly the motors it
+ * wires, by their CAN id:
+ *
+ *     &robstride0 {
+ *         joint0: motor@1 {
+ *             compatible = "robstride,motor";
+ *             reg = <0x01>;
+ *             model = "rs05";
+ *             max-current-ma = <2400>;
+ *             status = "okay";
+ *         };
+ *     };
+ */
+
+#ifndef FIBRIL_RC26_MAINAIR_V01_ROBSTRIDE_DTSI
+#define FIBRIL_RC26_MAINAIR_V01_ROBSTRIDE_DTSI
+
+#include <fibril/can-bitrate.h>
+
+#ifdef FIBRIL_CLAIM_FDCAN2
+#error "FDCAN2 claimed twice; the RobStride bus is one claimant"
+#endif
+#define FIBRIL_CLAIM_FDCAN2 1
+
+/*
+ * No data phase: the RobStride protocol is classic CAN only, so the
+ * controller must not be given a data bitrate that would let an FD frame out
+ * onto a bus that cannot carry one.
+ */
+&fdcan2 {
+    status = "okay";
+    bitrate = <FIBRIL_ACTUATOR_CAN_BITRATE>;
+
+    robstride0: robstride {
+        compatible = "robstride,bus";
+        #address-cells = <1>;
+        #size-cells = <0>;
+        cans = <&fdcan2>;
+
+        /* Must differ from every motor reg; the receive filter keys on it.
+         * 0xfd is what the ROS 2 host implementation defaults to, so a motor
+         * moved between the two needs no reconfiguration. */
+        master-can-id = <0xfd>;
+
+        /* Feedback arrives as the reply to each command, which the driver
+         * sends every 5 ms, so this leaves room for several missed intervals
+         * before a motor is called stale. */
+        feedback-timeout-ms = <100>;
+    };
+};
+
+#endif /* FIBRIL_RC26_MAINAIR_V01_ROBSTRIDE_DTSI */
