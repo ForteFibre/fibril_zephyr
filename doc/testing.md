@@ -43,11 +43,15 @@ twister は `common` のリストをシナリオのリストに連結するの�
 
 `apps/` のビルドは `fcan_codegen` CLI を要求する。
 `ros-jazzy-fibril-can-codegen` を入れた環境では自動で見つかる。
-そうでなければ環境変数で渡す。
+見つからなければ、`modules/lib/fibril_can` から host 向けにビルドする（シナリオごとのビルドディレクトリの `fcan_codegen_host/`。protobuf と yaml-cpp が要る）。
+CI（Linux と macOS）はこの経路でビルドする。Windows は protobuf と yaml-cpp を入れる手順が無いので、`apps/` を飛ばす。
+手元の CLI や、木からのビルドを指定するときは環境変数で渡す。
 twister の `--extra-args=-DFCAN_CODEGEN=...` はヘルパに届かないので効かない。
 
 ```shell
-FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps --integration
+west twister -T apps --integration                                         # 見つからなければ木からビルドする
+FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps --integration     # 手元の CLI を使う
+FCAN_CODEGEN_FROM_SOURCE=ON west twister -T apps --integration             # deb があっても木からビルドする
 ```
 
 ## 構成
