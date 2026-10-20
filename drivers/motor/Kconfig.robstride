@@ -35,4 +35,51 @@ config MOTOR_ROBSTRIDE_PARAM_TIMEOUT_MS
 	help
 	  How long robstride_get_parameter() waits for the motor to answer.
 
+config MOTOR_ROBSTRIDE_VERIFY
+	bool "Read back every parameter the handshake writes"
+	default y
+	help
+	  Count a parameter as written only once the motor has answered a read
+	  of it with the value sent. A frame reaching the wire proves nothing:
+	  any node on the bus acknowledges it. Turning this off makes the
+	  handshake trust the transmit completion alone, which is shorter by
+	  one interval per batch of writes.
+
+config MOTOR_ROBSTRIDE_VERIFY_TIMEOUT_MS
+	int "Readback timeout in milliseconds"
+	default 20
+	range 1 1000
+	depends on MOTOR_ROBSTRIDE_VERIFY
+	help
+	  How long the handshake waits for the replies to one batch of reads
+	  before writing that batch again.
+
+config MOTOR_ROBSTRIDE_VERIFY_RETRIES
+	int "Writes of one batch before configuring starts over"
+	default 3
+	range 1 100
+	depends on MOTOR_ROBSTRIDE_VERIFY
+	help
+	  A batch the motor still has not confirmed after this many writes
+	  counts as a failed configuration: the driver waits
+	  MOTOR_ROBSTRIDE_CONFIGURE_BACKOFF_MS and starts again from the stop
+	  frame.
+
+config MOTOR_ROBSTRIDE_RUNNING_TIMEOUT_MS
+	int "Time for the motor to report running after enable"
+	default 100
+	range 1 10000
+	help
+	  No command is sent until a feedback frame reports the motor running
+	  after the enable. A motor that has not by then, and is not
+	  calibrating, counts as a failed configuration.
+
+config MOTOR_ROBSTRIDE_CONFIGURE_BACKOFF_MS
+	int "Pause before configuring again after a failure"
+	default 200
+	range 0 10000
+	help
+	  How long the driver leaves a motor alone after giving up on
+	  configuring it, before starting again from the stop frame.
+
 endif # MOTOR_ROBSTRIDE

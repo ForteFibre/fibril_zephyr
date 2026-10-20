@@ -300,6 +300,11 @@ RAM の少ない基板では、デプロイ snippet の `.conf` でこれを下�
 RobStride のバスは classic CAN なので、fibril_can が使うコントローラとは別のものを割り当てる（[doc/drivers/robstride.md](drivers/robstride.md)）。
 `fibril,fcan-robstride` は `motors` に `robstride,motor` のノードを並べるだけで、モータ自身の配線と上限は `robstride,bus` の側に残る。
 
+モータに書くゲインと加速度は、ROS 2 実装と同じ名前と既定値の param で、run mode ごとに持つ（`motion/`、`position/`、`trajectory/`、`velocity/`、`current/`）。
+ドライバはモードを切り替えるたびにそのモードの値を書き、読み戻して確かめてから有効化する（[ADR 0019](adr/0019-robstride-mode-params-readback.md)）。
+`feedback` の `is_ready` は、それが済んで Running になってから立つ。
+`diagnostics` の `configure_failures` は、設定をやり直した回数を起動から数える。
+
 `MdMotor` は CanMotorMbed がしていた速度と位置の制御を基板で回す（`lib/motor_control`、[ADR 0009](adr/0009-motor-control-core.md)）。
 `fibril,fcan-md-motor` は `motors` と `encoders` を同じ位置どうしで組にし、1 組を 1 インスタンスにする。
 ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッセージの型、topic と param の名前、ゲインの単位はそのまま使える。

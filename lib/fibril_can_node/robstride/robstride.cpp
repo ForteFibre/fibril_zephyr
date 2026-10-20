@@ -82,17 +82,53 @@ enum param_bit {
   PARAM_BIT_COMMAND_TIMEOUT_MS,
   PARAM_BIT_MOTION_KP,
   PARAM_BIT_MOTION_KD,
-  PARAM_BIT_GAINS_POSITION_KP,
-  PARAM_BIT_GAINS_VELOCITY_KP,
-  PARAM_BIT_GAINS_VELOCITY_KI,
-  PARAM_BIT_GAINS_CURRENT_KP,
-  PARAM_BIT_GAINS_CURRENT_KI,
+  PARAM_BIT_MOTION_CUR_KP,
+  PARAM_BIT_MOTION_CUR_KI,
+  PARAM_BIT_POSITION_MAX_VEL,
+  PARAM_BIT_POSITION_ACC,
+  PARAM_BIT_POSITION_POS_KP,
+  PARAM_BIT_POSITION_SPD_KP,
+  PARAM_BIT_POSITION_SPD_KI,
+  PARAM_BIT_POSITION_CUR_KP,
+  PARAM_BIT_POSITION_CUR_KI,
+  PARAM_BIT_TRAJECTORY_MAX_VEL,
+  PARAM_BIT_TRAJECTORY_ACC,
+  PARAM_BIT_TRAJECTORY_POS_KP,
+  PARAM_BIT_TRAJECTORY_SPD_KP,
+  PARAM_BIT_TRAJECTORY_SPD_KI,
+  PARAM_BIT_TRAJECTORY_CUR_KP,
+  PARAM_BIT_TRAJECTORY_CUR_KI,
+  PARAM_BIT_VELOCITY_ACC,
+  PARAM_BIT_VELOCITY_SPD_KP,
+  PARAM_BIT_VELOCITY_SPD_KI,
+  PARAM_BIT_VELOCITY_CUR_KP,
+  PARAM_BIT_VELOCITY_CUR_KI,
+  PARAM_BIT_CURRENT_CUR_KP,
+  PARAM_BIT_CURRENT_CUR_KI,
 };
 
-#define PARAM_MASK_GAINS                                                                 \
-  (BIT(PARAM_BIT_GAINS_POSITION_KP) | BIT(PARAM_BIT_GAINS_VELOCITY_KP) |                 \
-   BIT(PARAM_BIT_GAINS_VELOCITY_KI) | BIT(PARAM_BIT_GAINS_CURRENT_KP) |                  \
-   BIT(PARAM_BIT_GAINS_CURRENT_KI))
+/* The parameters each run mode is written from. A change to any of them, or
+ * to the gear ratio that scales max_vel and acc, hands that mode's set to the
+ * driver again; the other modes are left alone, so retuning one does not
+ * pause commands to a motor running in another. */
+#define PARAM_MASK_RANGE(first, last) (BIT_MASK((last) + 1) & ~BIT_MASK(first))
+
+static uint32_t mode_param_mask(enum robstride_mode mode)
+{
+  switch (mode) {
+    case ROBSTRIDE_MODE_OPERATION:
+      return PARAM_MASK_RANGE(PARAM_BIT_MOTION_CUR_KP, PARAM_BIT_MOTION_CUR_KI);
+    case ROBSTRIDE_MODE_POSITION:
+      return PARAM_MASK_RANGE(PARAM_BIT_TRAJECTORY_MAX_VEL, PARAM_BIT_TRAJECTORY_CUR_KI);
+    case ROBSTRIDE_MODE_POSITION_CSP:
+      return PARAM_MASK_RANGE(PARAM_BIT_POSITION_MAX_VEL, PARAM_BIT_POSITION_CUR_KI);
+    case ROBSTRIDE_MODE_VELOCITY:
+      return PARAM_MASK_RANGE(PARAM_BIT_VELOCITY_ACC, PARAM_BIT_VELOCITY_CUR_KI);
+    case ROBSTRIDE_MODE_CURRENT:
+    default:
+      return PARAM_MASK_RANGE(PARAM_BIT_CURRENT_CUR_KP, PARAM_BIT_CURRENT_CUR_KI);
+  }
+}
 
 /*
  * Snapshot of the parameters a conversion needs. Taken as a set rather than
@@ -212,18 +248,72 @@ static void tunable_read(uint8_t inst, struct tunable * out)
   out->motion_kd = m.param_motion__kd();
 }
 
-static void apply_gains(uint8_t inst)
+static struct robstride_mode_params read_mode_params(
+  uint8_t inst, enum robstride_mode mode, float gear_ratio)
 {
   const fcan_gen::robstridemotor m(inst);
-  const struct robstride_gains gains = {
-    .position_kp = m.param_gains__position_kp(),
-    .velocity_kp = m.param_gains__velocity_kp(),
-    .velocity_ki = m.param_gains__velocity_ki(),
-    .current_kp = m.param_gains__current_kp(),
-    .current_ki = m.param_gains__current_ki(),
-  };
+  struct robstride_mode_params p = {};
 
-  (void)robstride_set_gains(motors[inst], &gains);
+  /* Only magnitudes go to the motor, so invert has no part in this. */
+  switch (mode) {
+    case ROBSTRIDE_MODE_OPERATION:
+      p.current_kp = m.param_motion__cur_kp();
+      p.current_ki = m.param_motion__cur_ki();
+      break;
+    case ROBSTRIDE_MODE_POSITION:
+      p.max_velocity = m.param_trajectory__max_vel() * gear_ratio;
+      p.acceleration = m.param_trajectory__acc() * gear_ratio;
+      p.position_kp = m.param_trajectory__pos_kp();
+      p.velocity_kp = m.param_trajectory__spd_kp();
+      p.velocity_ki = m.param_trajectory__spd_ki();
+      p.current_kp = m.param_trajectory__cur_kp();
+      p.current_ki = m.param_trajectory__cur_ki();
+      break;
+    case ROBSTRIDE_MODE_POSITION_CSP:
+      p.max_velocity = m.param_position__max_vel() * gear_ratio;
+      p.acceleration = m.param_position__acc() * gear_ratio;
+      p.position_kp = m.param_position__pos_kp();
+      p.velocity_kp = m.param_position__spd_kp();
+      p.velocity_ki = m.param_position__spd_ki();
+      p.current_kp = m.param_position__cur_kp();
+      p.current_ki = m.param_position__cur_ki();
+      break;
+    case ROBSTRIDE_MODE_VELOCITY:
+      p.acceleration = m.param_velocity__acc() * gear_ratio;
+      p.velocity_kp = m.param_velocity__spd_kp();
+      p.velocity_ki = m.param_velocity__spd_ki();
+      p.current_kp = m.param_velocity__cur_kp();
+      p.current_ki = m.param_velocity__cur_ki();
+      break;
+    case ROBSTRIDE_MODE_CURRENT:
+    default:
+      p.current_kp = m.param_current__cur_kp();
+      p.current_ki = m.param_current__cur_ki();
+      break;
+  }
+
+  return p;
+}
+
+/* Hands the driver the values of every mode whose parameters are in the
+ * mask, reading the gear ratio from the snapshot the tick has just taken. */
+static void apply_mode_params(uint8_t inst, uint32_t changed_mask)
+{
+  const float gear_ratio = states[inst].tune.gear_ratio;
+  const bool rescaled = (changed_mask & BIT(PARAM_BIT_GEAR_RATIO)) != 0U;
+
+  for (int mode = 0; mode < ROBSTRIDE_MODE_COUNT; ++mode) {
+    if (!rescaled && ((changed_mask & mode_param_mask((enum robstride_mode)mode)) == 0U)) {
+      continue;
+    }
+
+    const struct robstride_mode_params p =
+      read_mode_params(inst, (enum robstride_mode)mode, gear_ratio);
+
+    if (robstride_set_mode_params(motors[inst], (enum robstride_mode)mode, &p) != 0) {
+      LOG_WRN("motor %u: mode %d parameters rejected", inst, mode);
+    }
+  }
 }
 
 static void mark_commanded(uint8_t inst, int64_t now)
@@ -358,9 +448,7 @@ static void drain_requests(uint8_t inst, const struct robstride_feedback * fb, b
   if (req.params_changed != 0U) {
     tunable_read(inst, &s->tune);
 
-    if ((req.params_changed & PARAM_MASK_GAINS) != 0U) {
-      apply_gains(inst);
-    }
+    apply_mode_params(inst, req.params_changed);
   }
 
   if (req.enable) {
@@ -449,8 +537,8 @@ static void publish_feedback(uint8_t inst, const struct robstride_feedback * fb,
   }
 
   pub->is_ready = s->output_on && !s->overtemp &&
-                  (fb->run_state == ROBSTRIDE_RUN_STATE_RUNNING) && (fb->error_code == 0U) &&
-                  (fb->fault_bits == 0U);
+                  fb->configured && (fb->run_state == ROBSTRIDE_RUN_STATE_RUNNING) &&
+                  (fb->error_code == 0U) && (fb->fault_bits == 0U);
   pub->position = to_load(t, fb->position + s->position_offset);
   pub->velocity = to_load(t, fb->velocity);
   pub->output = torque_to_load(t, fb->torque);
@@ -476,6 +564,8 @@ static void publish_diagnostics(uint8_t inst, const struct robstride_feedback * 
   pub->fault_bits = fb->fault_bits;
   pub->warning_bits = fb->warning_bits;
   pub->temperature = fb->temperature;
+  pub->configured = fb->configured;
+  pub->configure_failures = fb->configure_failures;
 }
 
 /* Fires from fcan_poll, so it only records what changed; the tick is what
@@ -613,10 +703,10 @@ static int robstride_func_start(void)
 
     tunable_read(i, &states[i].tune);
 
-    /* Written unconditionally, so that a motor whose gains were edited over
-     * its own USB link comes back to the schema's values rather than
-     * behaving differently from the identical joint beside it. */
-    apply_gains(i);
+    /* Every mode, unconditionally, so that a motor whose values were edited
+     * over its own USB link comes back to the schema's rather than behaving
+     * differently from the identical joint beside it. */
+    apply_mode_params(i, UINT32_MAX);
 
     /* The ROS 2 original starts with the motor enabled and only a manual
      * disable holding it back. Nothing is driven yet: the output stays off
