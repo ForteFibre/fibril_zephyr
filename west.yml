@@ -30,6 +30,14 @@ manifest:
       # application passes in fcan_config_t::instance_counts. Bump this
       # deliberately, together with any migration the release notes call for.
       #
+      # v0.4.1 builds fcan_codegen from this tree when none is installed
+      # (fibril_can#89): fcan_invoke_codegen configures
+      # fibril_can_codegen/standalone with the host compiler into
+      # <build dir>/fcan_codegen_host, so a machine without ROS 2 (macOS)
+      # needs only protobuf and yaml-cpp, and the CLI matches the runtime.
+      # -DFCAN_CODEGEN_FROM_SOURCE=ON uses it even where the deb is
+      # installed. The runtime is unchanged from v0.4.0.
+      #
       # v0.4.0 cuts the slave's RAM, Flash and stack (fibril_can#79): a schema
       # with service_buffer 0 now drops the segmentation code from the image
       # here too, FRAME_DEFINE no longer needs ~400 B of ISR stack, and the
@@ -63,12 +71,7 @@ manifest:
       # arrived. The codegen package must be at least v0.3.3: an older
       # fcan_codegen emits a *_complete that returns nothing, and apps/node with
       # MdMotor fails to compile. v0.3.4 changes the runtime only.
-      #
-      # TEMPORARY: the branch of ForteFibre/fibril_can#89, which adds
-      # fibril_can_codegen/standalone/ for building fcan_codegen without ROS 2.
-      # The CI builds apps/ on macOS with it. Pin back to the release tag that
-      # contains #89 before merging.
-      revision: feat/2026-10-20-fcan-codegen-macos
+      revision: v0.4.1
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
     - name: fibril_common
