@@ -63,7 +63,12 @@ manifest:
       # arrived. The codegen package must be at least v0.3.3: an older
       # fcan_codegen emits a *_complete that returns nothing, and apps/node with
       # MdMotor fails to compile. v0.3.4 changes the runtime only.
-      revision: v0.4.0
+      #
+      # TEMPORARY: the branch of ForteFibre/fibril_can#89, which adds
+      # fibril_can_codegen/standalone/ for building fcan_codegen without ROS 2.
+      # The CI builds apps/ on macOS with it. Pin back to the release tag that
+      # contains #89 before merging.
+      revision: feat/2026-10-20-fcan-codegen-macos
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
     - name: fibril_common
