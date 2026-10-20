@@ -30,6 +30,11 @@ manifest:
       # application passes in fcan_config_t::instance_counts. Bump this
       # deliberately, together with any migration the release notes call for.
       #
+      # v0.4.2 calls protoc directly for fibril_can_core (fibril_can#91). With
+      # v0.4.1, building the codegen on a host whose CMake is 3.28 (Ubuntu
+      # 24.04's apt) fails with "fibril_can.pb.h: No such file or directory",
+      # because protobuf_generate there writes the output under proto/.
+      #
       # v0.4.1 builds fcan_codegen from this tree when none is installed
       # (fibril_can#89): fcan_invoke_codegen configures
       # fibril_can_codegen/standalone with the host compiler into
@@ -71,7 +76,7 @@ manifest:
       # arrived. The codegen package must be at least v0.3.3: an older
       # fcan_codegen emits a *_complete that returns nothing, and apps/node with
       # MdMotor fails to compile. v0.3.4 changes the runtime only.
-      revision: v0.4.1
+      revision: v0.4.2
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
     - name: fibril_common

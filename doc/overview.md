@@ -39,7 +39,8 @@ fibril_common は ROS 2 のノードが使っているものと同じ制御器�
 fibril_common の revision は、タグではなくコミットで固定してある（現在は `8f336f4`）。Zephyr module の入口（fibril_common#69）と `-Wdouble-promotion` の修正（fibril_common#74）を含むタグが、まだ無いためである。
 これより前の版では、`CONFIG_FIBRIL_COMMON` を立てたビルドが twister の `-Werror` で止まる。
 
-fibril_can の revision はブランチではなくタグで固定してある（現在は v0.4.1）。
+fibril_can の revision はブランチではなくタグで固定してある（現在は v0.4.2）。
+v0.4.2 で、host の CMake が 3.28（Ubuntu 24.04 の apt）のときも codegen をビルドできるようになった。v0.4.1 では `fibril_can.pb.h` が見つからずに止まる。
 v0.4.1 で、`fcan_codegen` が見つからなければ、`fcan_invoke_codegen` が fibril_can の木から host 向けにビルドするようになった（ビルドディレクトリの `fcan_codegen_host/`。protobuf と yaml-cpp が要る）。この CLI は runtime と同じ版になる。deb の版がずれているときは `-DFCAN_CODEGEN_FROM_SOURCE=ON` で木からのビルドを使う。runtime は v0.4.0 から変わらない。
 v0.4.0 で、slave の RAM、Flash、スタックが減った。`service_buffer` が 0 のスキーマでは分割転送のコードがイメージから外れ、FRAME_DEFINE は ISR のスタックをほとんど使わなくなった。router は、node 宛の DISCOVER でそのノードの学習だけを消す。互換を壊す変更は組み込み master にだけあり、このリポジトリは使っていない。
 v0.3.7 で、ACCEPTED を返した呼び出しはタイムアウトではなくノードの状態で終わるようになり（fibril_can の ADR-0018）、MdMotor の `trigger` が使う。呼び出しの handle は runtime が世代を入れて作る。

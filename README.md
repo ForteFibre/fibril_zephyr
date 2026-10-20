@@ -97,7 +97,7 @@ brew install protobuf yaml-cpp                                            # macO
 sudo apt install protobuf-compiler libprotobuf-dev libyaml-cpp-dev         # Ubuntu
 ```
 
-deb の codegen は版が runtime とずれることがある（`west.yml` は fibril_can を v0.4.1 に固定している。古い codegen では MdMotor を含む `apps/node` の後送の応答が届かない）。
+deb の codegen は版が runtime とずれることがある（`west.yml` は fibril_can を v0.4.2 に固定している。古い codegen では MdMotor を含む `apps/node` の後送の応答が届かない）。
 木からビルドした CLI を必ず使うときは `-- -DFCAN_CODEGEN_FROM_SOURCE=ON` を、手元の CLI を使うときは `-- -DFCAN_CODEGEN=/abs/path/fcan_codegen` を渡す。
 理由は [doc/overview.md](doc/overview.md) にある。
 
