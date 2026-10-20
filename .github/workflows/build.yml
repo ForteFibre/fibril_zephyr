@@ -66,6 +66,36 @@ jobs:
           fi
           west twister -T app -v --inline-logs --integration $EXTRA_TWISTER_FLAGS
 
+      # apps/ needs the fcan_codegen CLI. There is no ROS 2 here, so build it
+      # with plain CMake from the fibril_can that west.yml pins, which keeps
+      # the codegen and the runtime at the same version. Windows is skipped:
+      # it has no package manager step for protobuf and yaml-cpp yet.
+      - name: Install codegen dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            protobuf-compiler libprotobuf-dev libyaml-cpp-dev ninja-build
+
+      - name: Install codegen dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf yaml-cpp ninja
+
+      - name: Build fcan_codegen
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cmake -S modules/lib/fibril_can/fibril_can_codegen/standalone \
+            -B build/fcan_codegen -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/fcan_codegen
+          echo "FCAN_CODEGEN=$PWD/build/fcan_codegen/fcan_codegen" >> "$GITHUB_ENV"
+
+      - name: Build apps
+        if: runner.os != 'Windows'
+        working-directory: example-application
+        shell: bash
+        run: west twister -T apps -v --inline-logs --integration
+
       - name: Twister Tests
         working-directory: example-application
         shell: bash
