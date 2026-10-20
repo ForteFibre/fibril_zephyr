@@ -34,8 +34,8 @@ extern "C" {
  * and then fails is re-sent by the driver rather than surfacing here.
  *
  * Selecting a target also selects the mode it belongs to. Switching mode makes
- * the driver stop the motor, write the new mode and enable it again, which
- * takes a few command intervals.
+ * the driver stop the motor, write the new mode and its parameters, read them
+ * back and enable it again, which takes several command intervals.
  *
  * @defgroup motor_robstride RobStride driver
  * @ingroup motor_interface
@@ -63,6 +63,9 @@ enum robstride_mode {
   /** Quadrature current. */
   ROBSTRIDE_MODE_CURRENT = 4,
 };
+
+/** @brief Number of values in @ref robstride_mode. */
+#define ROBSTRIDE_MODE_COUNT 5
 
 /** @brief Run state reported by the motor alongside every feedback frame. */
 enum robstride_run_state {
@@ -107,14 +110,33 @@ struct robstride_limits
 };
 
 /**
- * @brief Gains of the motor's internal loops.
+ * @brief What the driver writes into the motor for one control mode.
  *
- * The driver does not write these until @ref robstride_set_gains is called, so
- * a motor keeps the gains stored in its own memory unless the application
- * overrides them.
+ * Each mode uses only some of the fields: @ref ROBSTRIDE_MODE_POSITION all of
+ * them, @ref ROBSTRIDE_MODE_POSITION_CSP everything but @c acceleration,
+ * @ref ROBSTRIDE_MODE_VELOCITY everything but @c max_velocity and
+ * @c position_kp, and @ref ROBSTRIDE_MODE_CURRENT and
+ * @ref ROBSTRIDE_MODE_OPERATION the current loop alone. The others are ignored.
+ *
+ * Until @ref robstride_set_mode_params has been called for a mode, the driver
+ * writes none of these for it, and the motor runs that mode on the values in
+ * its own memory.
  */
-struct robstride_gains
+struct robstride_mode_params
 {
+  /**
+   * Velocity cap in rad/s, motor side. The trajectory generator's cruise
+   * velocity in @ref ROBSTRIDE_MODE_POSITION, and the velocity limit in
+   * @ref ROBSTRIDE_MODE_POSITION_CSP, where it never exceeds the limit from
+   * @ref robstride_set_limits.
+   */
+  float max_velocity;
+  /**
+   * Acceleration in rad/s^2, motor side. The trajectory generator's in
+   * @ref ROBSTRIDE_MODE_POSITION, the velocity ramp's in
+   * @ref ROBSTRIDE_MODE_VELOCITY.
+   */
+  float acceleration;
   /** Proportional gain of the position loop. */
   float position_kp;
   /** Proportional gain of the velocity loop. */
@@ -159,6 +181,22 @@ struct robstride_feedback
    * marks the motor online without moving this on.
    */
   int64_t timestamp_ms;
+  /**
+   * @brief True once the motor holds everything the driver writes for the
+   *        current mode and has reported running since it was enabled.
+   *
+   * Each value is read back from the motor before it counts as written (unless
+   * @kconfig{CONFIG_MOTOR_ROBSTRIDE_VERIFY} is off). Commands are only sent
+   * while this is true.
+   */
+  bool configured;
+  /**
+   * @brief Times configuring the motor has been given up on and started over.
+   *
+   * Counts from boot and is never reset, so a motor that keeps needing retries
+   * stays visible after it has come up.
+   */
+  uint32_t configure_failures;
 };
 
 /**
@@ -262,18 +300,23 @@ int robstride_set_limits(const struct device * dev, const struct robstride_limit
 int robstride_get_limits(const struct device * dev, struct robstride_limits * limits);
 
 /**
- * @brief Override the gains of the motor's internal loops.
+ * @brief Set what the driver writes into the motor for one mode.
  *
- * Once this has been called the gains are part of what the driver writes back
- * whenever the motor has to be configured again, so a fault does not leave the
- * motor running on the gains stored in its own memory.
+ * Every time the motor is configured for @p mode, which is on enable, on a
+ * switch into the mode and after a fault, these values are written and read
+ * back before the motor is enabled. Changing them for the mode the motor is in
+ * rewrites them without stopping it; commands pause for the few intervals the
+ * readback takes.
  *
  * @param dev RobStride motor device instance.
- * @param gains Gains to apply.
+ * @param mode Mode these values belong to.
+ * @param params Values to write. @c max_velocity is clamped to the model limit.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not a RobStride motor, or @p gains is NULL.
+ * @retval -EINVAL @p dev is not a RobStride motor, @p mode is not a mode,
+ *                 @p params is NULL, or a field is negative or not a number.
  */
-int robstride_set_gains(const struct device * dev, const struct robstride_gains * gains);
+int robstride_set_mode_params(
+  const struct device * dev, enum robstride_mode mode, const struct robstride_mode_params * params);
 
 /**
  * @brief Store the current position as the mechanical zero.

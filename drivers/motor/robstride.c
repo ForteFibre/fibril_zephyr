@@ -22,8 +22,14 @@ LOG_MODULE_REGISTER(motor_robstride, CONFIG_MOTOR_LOG_LEVEL);
 /* A disabled motor is silent, so probe it slowly to keep presence known. */
 #define ROBSTRIDE_PROBE_INTERVAL_MS 500
 /* Largest number of frames one motor can need in a single interval, which is
- * the stage that writes the five loop gains. */
+ * also how many parameters one batch writes or reads back. */
 #define ROBSTRIDE_TX_BURST 5
+
+/* Read only with readback on, where Kconfig defines them. */
+#define ROBSTRIDE_VERIFY_TIMEOUT_MS                                                         \
+  COND_CODE_1(CONFIG_MOTOR_ROBSTRIDE_VERIFY, (CONFIG_MOTOR_ROBSTRIDE_VERIFY_TIMEOUT_MS), (0))
+#define ROBSTRIDE_VERIFY_RETRIES                                                            \
+  COND_CODE_1(CONFIG_MOTOR_ROBSTRIDE_VERIFY, (CONFIG_MOTOR_ROBSTRIDE_VERIFY_RETRIES), (1))
 
 /* Communication types, carried in bits 28..24 of the identifier. */
 #define ROBSTRIDE_TYPE_GET_ID 0x00U
@@ -50,6 +56,9 @@ LOG_MODULE_REGISTER(motor_robstride, CONFIG_MOTOR_LOG_LEVEL);
 #define ROBSTRIDE_PARAM_LOC_KP 0x701EU
 #define ROBSTRIDE_PARAM_SPD_KP 0x701FU
 #define ROBSTRIDE_PARAM_SPD_KI 0x7020U
+#define ROBSTRIDE_PARAM_ACC_RAD 0x7022U
+#define ROBSTRIDE_PARAM_VEL_MAX 0x7024U
+#define ROBSTRIDE_PARAM_ACC_SET 0x7025U
 #define ROBSTRIDE_PARAM_EP_SCAN_TIME 0x7026U
 #define ROBSTRIDE_PARAM_ZERO_STA 0x7029U
 
@@ -128,14 +137,96 @@ enum robstride_tx_stage {
   ROBSTRIDE_TX_STAGE_NONE,
   ROBSTRIDE_TX_STAGE_STOP,
   ROBSTRIDE_TX_STAGE_PROBE,
-  ROBSTRIDE_TX_STAGE_CONFIGURE,
-  ROBSTRIDE_TX_STAGE_LIMITS,
-  ROBSTRIDE_TX_STAGE_GAINS,
+  ROBSTRIDE_TX_STAGE_PARAM_WRITE,
+  ROBSTRIDE_TX_STAGE_PARAM_VERIFY,
+  ROBSTRIDE_TX_STAGE_REF,
   ROBSTRIDE_TX_STAGE_ENABLE,
   ROBSTRIDE_TX_STAGE_COMMAND,
 };
 
 #define ROBSTRIDE_TX_STAGE_COUNT (ROBSTRIDE_TX_STAGE_COMMAND + 1)
+
+/*
+ * Every parameter the handshake writes, in the order it writes them. The run
+ * mode comes first because the motor takes it only while stopped, and it goes
+ * out alone behind a stop frame.
+ */
+enum robstride_param_slot {
+  ROBSTRIDE_SLOT_RUN_MODE,
+  ROBSTRIDE_SLOT_LIMIT_CUR,
+  ROBSTRIDE_SLOT_LIMIT_SPD,
+  ROBSTRIDE_SLOT_LIMIT_TORQUE,
+  ROBSTRIDE_SLOT_VEL_MAX,
+  ROBSTRIDE_SLOT_ACC_SET,
+  ROBSTRIDE_SLOT_ACC_RAD,
+  ROBSTRIDE_SLOT_LOC_KP,
+  ROBSTRIDE_SLOT_SPD_KP,
+  ROBSTRIDE_SLOT_SPD_KI,
+  ROBSTRIDE_SLOT_CUR_KP,
+  ROBSTRIDE_SLOT_CUR_KI,
+  ROBSTRIDE_SLOT_COUNT,
+};
+
+static const uint16_t robstride_slot_index[ROBSTRIDE_SLOT_COUNT] = {
+  [ROBSTRIDE_SLOT_RUN_MODE] = ROBSTRIDE_PARAM_RUN_MODE,
+  [ROBSTRIDE_SLOT_LIMIT_CUR] = ROBSTRIDE_PARAM_LIMIT_CUR,
+  [ROBSTRIDE_SLOT_LIMIT_SPD] = ROBSTRIDE_PARAM_LIMIT_SPD,
+  [ROBSTRIDE_SLOT_LIMIT_TORQUE] = ROBSTRIDE_PARAM_LIMIT_TORQUE,
+  [ROBSTRIDE_SLOT_VEL_MAX] = ROBSTRIDE_PARAM_VEL_MAX,
+  [ROBSTRIDE_SLOT_ACC_SET] = ROBSTRIDE_PARAM_ACC_SET,
+  [ROBSTRIDE_SLOT_ACC_RAD] = ROBSTRIDE_PARAM_ACC_RAD,
+  [ROBSTRIDE_SLOT_LOC_KP] = ROBSTRIDE_PARAM_LOC_KP,
+  [ROBSTRIDE_SLOT_SPD_KP] = ROBSTRIDE_PARAM_SPD_KP,
+  [ROBSTRIDE_SLOT_SPD_KI] = ROBSTRIDE_PARAM_SPD_KI,
+  [ROBSTRIDE_SLOT_CUR_KP] = ROBSTRIDE_PARAM_CUR_KP,
+  [ROBSTRIDE_SLOT_CUR_KI] = ROBSTRIDE_PARAM_CUR_KI,
+};
+
+/*
+ * How far a value read back may sit from the one written and still count. The
+ * same margins as robstride_actuator_bridge_ros2, tighter for the integral and
+ * current-loop gains, whose factory values are around 0.01. The run mode is an
+ * integer and compared exactly.
+ */
+static const float robstride_slot_tolerance[ROBSTRIDE_SLOT_COUNT] = {
+  [ROBSTRIDE_SLOT_RUN_MODE] = 0.0F,
+  [ROBSTRIDE_SLOT_LIMIT_CUR] = 1.0e-3F,
+  [ROBSTRIDE_SLOT_LIMIT_SPD] = 1.0e-3F,
+  [ROBSTRIDE_SLOT_LIMIT_TORQUE] = 1.0e-3F,
+  [ROBSTRIDE_SLOT_VEL_MAX] = 1.0e-3F,
+  [ROBSTRIDE_SLOT_ACC_SET] = 1.0e-3F,
+  [ROBSTRIDE_SLOT_ACC_RAD] = 1.0e-3F,
+  [ROBSTRIDE_SLOT_LOC_KP] = 1.0e-3F,
+  [ROBSTRIDE_SLOT_SPD_KP] = 1.0e-3F,
+  [ROBSTRIDE_SLOT_SPD_KI] = 1.0e-4F,
+  [ROBSTRIDE_SLOT_CUR_KP] = 1.0e-4F,
+  [ROBSTRIDE_SLOT_CUR_KI] = 1.0e-4F,
+};
+
+/* Written in every mode. CSP also overrides what goes into LIMIT_SPD. */
+#define ROBSTRIDE_SLOTS_COMMON                                                    \
+  (BIT(ROBSTRIDE_SLOT_RUN_MODE) | BIT(ROBSTRIDE_SLOT_LIMIT_CUR) |                 \
+   BIT(ROBSTRIDE_SLOT_LIMIT_SPD) | BIT(ROBSTRIDE_SLOT_LIMIT_TORQUE))
+
+#define ROBSTRIDE_SLOTS_LIMITS                                                    \
+  (BIT(ROBSTRIDE_SLOT_LIMIT_CUR) | BIT(ROBSTRIDE_SLOT_LIMIT_SPD) |                \
+   BIT(ROBSTRIDE_SLOT_LIMIT_TORQUE))
+
+#define ROBSTRIDE_SLOTS_CURRENT_LOOP (BIT(ROBSTRIDE_SLOT_CUR_KP) | BIT(ROBSTRIDE_SLOT_CUR_KI))
+
+#define ROBSTRIDE_SLOTS_SPEED_LOOP                                                \
+  (BIT(ROBSTRIDE_SLOT_SPD_KP) | BIT(ROBSTRIDE_SLOT_SPD_KI) | ROBSTRIDE_SLOTS_CURRENT_LOOP)
+
+/* What each mode writes from its robstride_mode_params, once it has some. */
+static const uint16_t robstride_mode_slots[ROBSTRIDE_MODE_COUNT] = {
+  [ROBSTRIDE_MODE_OPERATION] = ROBSTRIDE_SLOTS_CURRENT_LOOP,
+  [ROBSTRIDE_MODE_POSITION] = BIT(ROBSTRIDE_SLOT_VEL_MAX) | BIT(ROBSTRIDE_SLOT_ACC_SET) |
+                              BIT(ROBSTRIDE_SLOT_LOC_KP) | ROBSTRIDE_SLOTS_SPEED_LOOP,
+  [ROBSTRIDE_MODE_POSITION_CSP] = BIT(ROBSTRIDE_SLOT_LIMIT_SPD) | BIT(ROBSTRIDE_SLOT_LOC_KP) |
+                                  ROBSTRIDE_SLOTS_SPEED_LOOP,
+  [ROBSTRIDE_MODE_VELOCITY] = BIT(ROBSTRIDE_SLOT_ACC_RAD) | ROBSTRIDE_SLOTS_SPEED_LOOP,
+  [ROBSTRIDE_MODE_CURRENT] = ROBSTRIDE_SLOTS_CURRENT_LOOP,
+};
 
 struct robstride_motor_data;
 
@@ -149,6 +240,8 @@ struct robstride_tx_ctx
 {
   struct robstride_motor_data * data;
   enum robstride_tx_stage stage;
+  /* Which parameter a PARAM_WRITE frame carried. Unused by the other stages. */
+  enum robstride_param_slot slot;
 };
 
 struct robstride_motor_data
@@ -161,20 +254,42 @@ struct robstride_motor_data
   float target;
   struct robstride_motion_target motion;
   struct robstride_limits limits;
-  struct robstride_gains gains;
-  /* Set once robstride_set_gains() has supplied gains of our own. Until then
-   * the motor runs on the gains in its own memory and we write none. */
-  bool gains_overridden;
+  struct robstride_mode_params mode_params[ROBSTRIDE_MODE_COUNT];
+  /* Modes robstride_set_mode_params() has supplied values for. A mode outside
+   * this runs on what the motor holds in its own memory, and we write none. */
+  uint8_t mode_params_set;
 
   /*
-   * Handshake progress. Every flag is cleared whenever the motor has to be
-   * configured again, which is on enable, on a mode change and after a fault,
-   * because in all three cases the motor may have dropped what we wrote.
+   * Handshake progress, reset whenever the motor has to be configured again:
+   * on enable, on a mode change, after a fault and after a failed attempt,
+   * because in each case the motor may have dropped what we wrote.
+   *
+   * A parameter slot is in at most one of the two masks. param_to_write holds
+   * the ones still to be sent, param_to_verify the ones sent and not yet read
+   * back with the value we wrote. A slot in neither is in the motor.
    */
-  bool configured;
-  bool limits_applied;
-  bool gains_applied;
+  uint16_t param_to_write;
+  uint16_t param_to_verify;
+  /* The reads for param_to_verify have gone out, and verify_deadline_ms is
+   * when to stop waiting for their replies. */
+  bool verify_sent;
+  int64_t verify_deadline_ms;
+  /* Writes of the batch being verified, against
+   * CONFIG_MOTOR_ROBSTRIDE_VERIFY_RETRIES. */
+  uint8_t verify_attempts;
+  bool ref_sent;
   bool enable_sent;
+  /* A feedback frame has reported running, with no error, since the enable.
+   * Commands are held back until then. */
+  bool running_confirmed;
+  int64_t running_deadline_ms;
+  /* Nothing is sent to configure the motor before this, after a failure. */
+  int64_t configure_after_ms;
+  uint32_t configure_failures;
+  /* Set from a failure until the motor next runs, so a motor that keeps
+   * failing, such as one without power, is reported once rather than on
+   * every attempt. */
+  bool configure_failing;
   /* A stop frame the immediate send could not queue, re-sent by the work. */
   bool stop_pending;
   /*
@@ -184,7 +299,11 @@ struct robstride_motor_data
    * most recently. Set from the completion callback, drained by the work.
    */
   uint32_t tx_failed_stages;
+  /* The same for parameter writes, one bit per slot, so a late failure undoes
+   * the parameter it carried rather than whichever batch is current. */
+  uint16_t param_tx_failed;
   struct robstride_tx_ctx tx_ctx[ROBSTRIDE_TX_STAGE_COUNT];
+  struct robstride_tx_ctx param_tx_ctx[ROBSTRIDE_SLOT_COUNT];
 
   /* What the motor reported. */
   bool has_last_position;
@@ -335,6 +454,86 @@ static uint32_t robstride_run_mode(enum robstride_mode mode)
   }
 }
 
+/* Every slot the handshake has to get into the motor for the current mode. */
+static uint16_t robstride_required_slots(const struct robstride_motor_data * data)
+{
+  uint16_t slots = ROBSTRIDE_SLOTS_COMMON;
+
+  if ((data->mode_params_set & BIT(data->mode)) != 0U) {
+    slots |= robstride_mode_slots[data->mode];
+  }
+
+  return slots;
+}
+
+/* The value a slot is written with, and compared against when read back. */
+static float robstride_slot_value(
+  const struct robstride_motor_data * data, enum robstride_param_slot slot)
+{
+  const struct robstride_mode_params * params = &data->mode_params[data->mode];
+
+  switch (slot) {
+    case ROBSTRIDE_SLOT_RUN_MODE:
+      return (float)robstride_run_mode(data->mode);
+    case ROBSTRIDE_SLOT_LIMIT_CUR:
+      return data->limits.current;
+    case ROBSTRIDE_SLOT_LIMIT_SPD:
+      /* CSP has no velocity cap of its own; robstride_actuator_bridge_ros2
+       * puts its max velocity here. It may narrow the limit, never widen it. */
+      if (
+        (data->mode == ROBSTRIDE_MODE_POSITION_CSP) &&
+        ((data->mode_params_set & BIT(ROBSTRIDE_MODE_POSITION_CSP)) != 0U)) {
+        return MIN(params->max_velocity, data->limits.velocity);
+      }
+      return data->limits.velocity;
+    case ROBSTRIDE_SLOT_LIMIT_TORQUE:
+      return data->limits.torque;
+    case ROBSTRIDE_SLOT_VEL_MAX:
+      return params->max_velocity;
+    case ROBSTRIDE_SLOT_ACC_SET:
+    case ROBSTRIDE_SLOT_ACC_RAD:
+      return params->acceleration;
+    case ROBSTRIDE_SLOT_LOC_KP:
+      return params->position_kp;
+    case ROBSTRIDE_SLOT_SPD_KP:
+      return params->velocity_kp;
+    case ROBSTRIDE_SLOT_SPD_KI:
+      return params->velocity_ki;
+    case ROBSTRIDE_SLOT_CUR_KP:
+      return params->current_kp;
+    case ROBSTRIDE_SLOT_CUR_KI:
+    default:
+      return params->current_ki;
+  }
+}
+
+static bool robstride_slot_matches(
+  const struct robstride_motor_data * data, enum robstride_param_slot slot, uint32_t raw)
+{
+  const float expected = robstride_slot_value(data, slot);
+  const float tolerance = robstride_slot_tolerance[slot];
+  float actual;
+
+  if (slot == ROBSTRIDE_SLOT_RUN_MODE) {
+    return raw == robstride_run_mode(data->mode);
+  }
+
+  memcpy(&actual, &raw, sizeof(actual));
+
+  /* Written as two comparisons so that NaN, which fails both, never matches. */
+  return ((actual - expected) <= tolerance) && ((expected - actual) <= tolerance);
+}
+
+/*
+ * Make slots be written again, whatever state they were in. A slot already
+ * waiting to be written is unaffected.
+ */
+static void robstride_requeue_slots(struct robstride_motor_data * data, uint16_t slots)
+{
+  data->param_to_verify &= (uint16_t)~slots;
+  data->param_to_write |= slots;
+}
+
 static int robstride_find_can_bus(
   const struct robstride_bus_config * config, const struct device * can_dev)
 {
@@ -384,7 +583,13 @@ static void robstride_tx_done(const struct device * can_dev, int error, void * u
   }
 
   key = k_spin_lock(&data->lock);
-  data->tx_failed_stages |= BIT(ctx->stage);
+
+  if (ctx->stage == ROBSTRIDE_TX_STAGE_PARAM_WRITE) {
+    data->param_tx_failed |= (uint16_t)BIT(ctx->slot);
+  } else {
+    data->tx_failed_stages |= BIT(ctx->stage);
+  }
+
   k_spin_unlock(&data->lock, key);
 }
 
@@ -397,9 +602,9 @@ static void robstride_tx_done(const struct device * can_dev, int error, void * u
  * transmit work, and every caller below it, on a controller that cannot
  * transmit. Delivery is reported through robstride_tx_done() instead.
  */
-static int robstride_motor_send(
+static int robstride_motor_send_ctx(
   const struct device * motor_dev, const struct can_frame * frame,
-  enum robstride_tx_stage stage)
+  struct robstride_tx_ctx * ctx)
 {
   const struct robstride_motor_config * config = motor_dev->config;
   const struct robstride_bus_config * bus_config = config->bus->config;
@@ -425,8 +630,7 @@ static int robstride_motor_send(
 
     attempted = true;
 
-    const int sent =
-      can_send(bus_config->can_devs[i], frame, K_NO_WAIT, robstride_tx_done, &data->tx_ctx[stage]);
+    const int sent = can_send(bus_config->can_devs[i], frame, K_NO_WAIT, robstride_tx_done, ctx);
 
     if (sent != 0) {
       /*
@@ -442,24 +646,52 @@ static int robstride_motor_send(
   return attempted ? ret : -EIO;
 }
 
+static int robstride_motor_send(
+  const struct device * motor_dev, const struct can_frame * frame,
+  enum robstride_tx_stage stage)
+{
+  struct robstride_motor_data * data = motor_dev->data;
+
+  return robstride_motor_send_ctx(motor_dev, frame, &data->tx_ctx[stage]);
+}
+
 /*
  * Make the motor run the whole handshake again. Used wherever the motor may
  * have dropped what we wrote, or may never have received it.
  */
 static void robstride_restart_handshake(struct robstride_motor_data * data)
 {
-  data->configured = false;
-  data->limits_applied = false;
+  /* Only what we have values for: a mode left to the motor's own memory is
+   * not overwritten. */
+  data->param_to_write = robstride_required_slots(data);
+  data->param_to_verify = 0U;
+  data->verify_sent = false;
+  data->verify_attempts = 0U;
+  data->ref_sent = false;
   data->enable_sent = false;
+  data->running_confirmed = false;
+}
 
-  /*
-   * Leaving gains_applied set is what keeps the driver off a motor that is
-   * meant to run on its own stored gains; only an override of ours has to be
-   * written again.
-   */
-  if (data->gains_overridden) {
-    data->gains_applied = false;
+/*
+ * Give up on this attempt and start over once CONFIG_MOTOR_ROBSTRIDE_CONFIGURE_BACKOFF_MS
+ * has passed, as robstride_actuator_bridge_ros2 does. Starting over rather than
+ * retrying the step that failed is deliberate: a motor that will not take a
+ * write or will not run may have reset underneath us.
+ */
+static void robstride_configure_failed(
+  struct robstride_motor_data * data, uint8_t motor_id, int64_t now, const char * what)
+{
+  data->configure_failures++;
+  data->configure_after_ms = now + CONFIG_MOTOR_ROBSTRIDE_CONFIGURE_BACKOFF_MS;
+  robstride_restart_handshake(data);
+
+  if (!data->configure_failing) {
+    LOG_WRN(
+      "Motor %u: %s, configuring again every %d ms until it runs", (unsigned int)motor_id, what,
+      CONFIG_MOTOR_ROBSTRIDE_CONFIGURE_BACKOFF_MS);
   }
+
+  data->configure_failing = true;
 }
 
 /*
@@ -522,14 +754,42 @@ static void robstride_bus_retry_start(const struct device * dev)
   }
 }
 
+/* The target frame of a parameter-referenced mode. Operation control has a
+ * frame type of its own and no reference parameter. */
+static void robstride_build_ref(
+  struct can_frame * frame, uint8_t master, uint8_t motor_id,
+  const struct robstride_motor_data * data)
+{
+  uint16_t index;
+
+  switch (data->mode) {
+    case ROBSTRIDE_MODE_POSITION:
+    case ROBSTRIDE_MODE_POSITION_CSP:
+      index = ROBSTRIDE_PARAM_LOC_REF;
+      break;
+    case ROBSTRIDE_MODE_VELOCITY:
+      index = ROBSTRIDE_PARAM_SPD_REF;
+      break;
+    case ROBSTRIDE_MODE_CURRENT:
+    default:
+      index = ROBSTRIDE_PARAM_IQ_REF;
+      break;
+  }
+
+  (void)robstride_build_set_param(frame, master, motor_id, index, data->target);
+}
+
 /*
- * Produce the frames this motor owes the bus in this interval. One handshake
- * stage per interval keeps the burst short; the motor is ready a few intervals
- * after it is enabled.
+ * Produce the frames this motor owes the bus in this interval, and the
+ * completion context of each. One handshake step per interval keeps the burst
+ * short, and keeps a frame from overtaking the one it depends on: a controller
+ * sends the lower identifier first, which would put a read (type 0x11) ahead
+ * of the write it checks (0x12) and the enable (0x03) ahead of the target it
+ * should follow.
  */
 static size_t robstride_build_tx(
-  const struct device * motor_dev, struct can_frame * frames, int64_t now,
-  enum robstride_tx_stage * stage)
+  const struct device * motor_dev, struct can_frame * frames, struct robstride_tx_ctx ** ctxs,
+  int64_t now, enum robstride_tx_stage * stage, uint16_t * slots)
 {
   const struct robstride_motor_config * config = motor_dev->config;
   const struct robstride_bus_config * bus_config = config->bus->config;
@@ -539,10 +799,12 @@ static size_t robstride_build_tx(
   size_t count = 0;
 
   *stage = ROBSTRIDE_TX_STAGE_NONE;
+  *slots = 0U;
 
   /* A stop the API could not get out takes priority over everything else,
    * including the handshake a later enable may already have restarted. */
   if (data->stop_pending) {
+    ctxs[count] = &data->tx_ctx[ROBSTRIDE_TX_STAGE_STOP];
     robstride_frame_init(&frames[count++], ROBSTRIDE_TYPE_STOP, master, motor_id);
     data->stop_pending = false;
     *stage = ROBSTRIDE_TX_STAGE_STOP;
@@ -555,78 +817,148 @@ static size_t robstride_build_tx(
     }
 
     data->last_probe_ms = now;
+    ctxs[count] = &data->tx_ctx[ROBSTRIDE_TX_STAGE_PROBE];
     robstride_frame_init(&frames[count++], ROBSTRIDE_TYPE_GET_ID, master, motor_id);
     *stage = ROBSTRIDE_TX_STAGE_PROBE;
     return count;
   }
 
-  if (!data->configured) {
-    /* The motor only accepts a new run mode while it is stopped. */
-    robstride_frame_init(&frames[count++], ROBSTRIDE_TYPE_STOP, master, motor_id);
-    robstride_build_set_param(
-      &frames[count++], master, motor_id, ROBSTRIDE_PARAM_RUN_MODE,
-      (float)robstride_run_mode(data->mode));
-    data->configured = true;
-    data->enable_sent = false;
-    *stage = ROBSTRIDE_TX_STAGE_CONFIGURE;
+  if (now < data->configure_after_ms) {
+    return 0;
+  }
+
+  if (data->param_to_verify != 0U) {
+    if (!data->verify_sent) {
+      for (int slot = 0; slot < ROBSTRIDE_SLOT_COUNT; ++slot) {
+        if ((data->param_to_verify & BIT(slot)) == 0U) {
+          continue;
+        }
+
+        ctxs[count] = &data->tx_ctx[ROBSTRIDE_TX_STAGE_PARAM_VERIFY];
+        robstride_build_get_param(&frames[count++], master, motor_id, robstride_slot_index[slot]);
+      }
+
+      data->verify_sent = true;
+      data->verify_deadline_ms = now + ROBSTRIDE_VERIFY_TIMEOUT_MS;
+      *stage = ROBSTRIDE_TX_STAGE_PARAM_VERIFY;
+      return count;
+    }
+
+    if (now < data->verify_deadline_ms) {
+      return 0;
+    }
+
+    /*
+     * A reply that never came and one that carried another value are treated
+     * alike: either way the motor has not shown it holds what we wrote.
+     * Mismatches are not acted on as they arrive, because a reply to an
+     * earlier read of the same index is indistinguishable from this one's.
+     */
+    if (++data->verify_attempts >= ROBSTRIDE_VERIFY_RETRIES) {
+      robstride_configure_failed(data, motor_id, now, "parameters not confirmed");
+      return 0;
+    }
+
+    robstride_requeue_slots(data, data->param_to_verify);
+  } else if (data->verify_sent) {
+    /* Every read of the batch came back with the value written. */
+    data->verify_sent = false;
+    data->verify_attempts = 0U;
+  }
+
+  if (data->param_to_write != 0U) {
+    uint16_t batch = 0U;
+
+    if ((data->param_to_write & BIT(ROBSTRIDE_SLOT_RUN_MODE)) != 0U) {
+      /*
+       * The motor only accepts a new run mode while it is stopped. The stop
+       * shares the run mode's context, so losing either one writes both
+       * again. Stopping drops the enable, and the target with it.
+       */
+      ctxs[count] = &data->param_tx_ctx[ROBSTRIDE_SLOT_RUN_MODE];
+      robstride_frame_init(&frames[count++], ROBSTRIDE_TYPE_STOP, master, motor_id);
+      ctxs[count] = &data->param_tx_ctx[ROBSTRIDE_SLOT_RUN_MODE];
+      (void)robstride_build_set_param(
+        &frames[count++], master, motor_id, ROBSTRIDE_PARAM_RUN_MODE,
+        robstride_slot_value(data, ROBSTRIDE_SLOT_RUN_MODE));
+      batch = BIT(ROBSTRIDE_SLOT_RUN_MODE);
+      data->ref_sent = false;
+      data->enable_sent = false;
+      data->running_confirmed = false;
+    } else {
+      for (int slot = 0; (slot < ROBSTRIDE_SLOT_COUNT) && (count < ROBSTRIDE_TX_BURST); ++slot) {
+        if ((data->param_to_write & BIT(slot)) == 0U) {
+          continue;
+        }
+
+        ctxs[count] = &data->param_tx_ctx[slot];
+        (void)robstride_build_set_param(
+          &frames[count++], master, motor_id, robstride_slot_index[slot],
+          robstride_slot_value(data, (enum robstride_param_slot)slot));
+        batch |= (uint16_t)BIT(slot);
+      }
+    }
+
+    data->param_to_write &= (uint16_t)~batch;
+
+    if (IS_ENABLED(CONFIG_MOTOR_ROBSTRIDE_VERIFY)) {
+      data->param_to_verify |= batch;
+      data->verify_sent = false;
+    }
+
+    *stage = ROBSTRIDE_TX_STAGE_PARAM_WRITE;
+    *slots = batch;
     return count;
   }
 
-  if (!data->limits_applied) {
-    robstride_build_set_param(
-      &frames[count++], master, motor_id, ROBSTRIDE_PARAM_LIMIT_CUR, data->limits.current);
-    robstride_build_set_param(
-      &frames[count++], master, motor_id, ROBSTRIDE_PARAM_LIMIT_SPD, data->limits.velocity);
-    robstride_build_set_param(
-      &frames[count++], master, motor_id, ROBSTRIDE_PARAM_LIMIT_TORQUE, data->limits.torque);
-    data->limits_applied = true;
-    *stage = ROBSTRIDE_TX_STAGE_LIMITS;
-    return count;
-  }
+  /*
+   * The target goes in before the enable, so the motor does not start towards
+   * whatever reference it held from before. Operation control carries its
+   * target in the command frame and has nothing to write here.
+   */
+  if (!data->ref_sent) {
+    data->ref_sent = true;
 
-  if (!data->gains_applied) {
-    robstride_build_set_param(
-      &frames[count++], master, motor_id, ROBSTRIDE_PARAM_LOC_KP, data->gains.position_kp);
-    robstride_build_set_param(
-      &frames[count++], master, motor_id, ROBSTRIDE_PARAM_SPD_KP, data->gains.velocity_kp);
-    robstride_build_set_param(
-      &frames[count++], master, motor_id, ROBSTRIDE_PARAM_SPD_KI, data->gains.velocity_ki);
-    robstride_build_set_param(
-      &frames[count++], master, motor_id, ROBSTRIDE_PARAM_CUR_KP, data->gains.current_kp);
-    robstride_build_set_param(
-      &frames[count++], master, motor_id, ROBSTRIDE_PARAM_CUR_KI, data->gains.current_ki);
-    data->gains_applied = true;
-    *stage = ROBSTRIDE_TX_STAGE_GAINS;
-    return count;
+    if (data->mode != ROBSTRIDE_MODE_OPERATION) {
+      ctxs[count] = &data->tx_ctx[ROBSTRIDE_TX_STAGE_REF];
+      robstride_build_ref(&frames[count++], master, motor_id, data);
+      *stage = ROBSTRIDE_TX_STAGE_REF;
+      return count;
+    }
   }
 
   if (!data->enable_sent) {
+    ctxs[count] = &data->tx_ctx[ROBSTRIDE_TX_STAGE_ENABLE];
     robstride_frame_init(&frames[count++], ROBSTRIDE_TYPE_ENABLE, master, motor_id);
     data->enable_sent = true;
+    data->running_confirmed = false;
+    data->running_deadline_ms = now + CONFIG_MOTOR_ROBSTRIDE_RUNNING_TIMEOUT_MS;
     *stage = ROBSTRIDE_TX_STAGE_ENABLE;
     return count;
   }
 
-  switch (data->mode) {
-    case ROBSTRIDE_MODE_OPERATION:
-      robstride_build_operation_control(
-        &frames[count++], motor_id, &robstride_model_limits[config->model], &data->motion);
-      break;
-    case ROBSTRIDE_MODE_POSITION:
-    case ROBSTRIDE_MODE_POSITION_CSP:
-      robstride_build_set_param(
-        &frames[count++], master, motor_id, ROBSTRIDE_PARAM_LOC_REF, data->target);
-      break;
-    case ROBSTRIDE_MODE_VELOCITY:
-      robstride_build_set_param(
-        &frames[count++], master, motor_id, ROBSTRIDE_PARAM_SPD_REF, data->target);
-      break;
-    case ROBSTRIDE_MODE_CURRENT:
-      robstride_build_set_param(
-        &frames[count++], master, motor_id, ROBSTRIDE_PARAM_IQ_REF, data->target);
-      break;
-    default:
-      break;
+  if (!data->running_confirmed) {
+    if (now < data->running_deadline_ms) {
+      return 0;
+    }
+
+    /* Calibrating is the motor working towards running, not refusing to. */
+    if (data->run_state == ROBSTRIDE_RUN_STATE_CALIBRATION) {
+      data->running_deadline_ms = now + CONFIG_MOTOR_ROBSTRIDE_RUNNING_TIMEOUT_MS;
+      return 0;
+    }
+
+    robstride_configure_failed(data, motor_id, now, "not running after enable");
+    return 0;
+  }
+
+  ctxs[count] = &data->tx_ctx[ROBSTRIDE_TX_STAGE_COMMAND];
+
+  if (data->mode == ROBSTRIDE_MODE_OPERATION) {
+    robstride_build_operation_control(
+      &frames[count++], motor_id, &robstride_model_limits[config->model], &data->motion);
+  } else {
+    robstride_build_ref(&frames[count++], master, motor_id, data);
   }
 
   *stage = ROBSTRIDE_TX_STAGE_COMMAND;
@@ -635,25 +967,51 @@ static size_t robstride_build_tx(
 }
 
 /*
- * Undo what robstride_build_tx() marked done, so the stage is built again on
+ * Make parameter writes that did not reach the motor go out again. With
+ * readback on, a slot already confirmed is left alone: the read proves the
+ * motor holds the value, so the failure belonged to an earlier copy of the
+ * write. Without it the failure is all there is to go on.
+ */
+static void robstride_retry_param_writes(struct robstride_motor_data * data, uint16_t slots)
+{
+  if (IS_ENABLED(CONFIG_MOTOR_ROBSTRIDE_VERIFY)) {
+    slots &= data->param_to_verify;
+  } else {
+    slots &= robstride_required_slots(data);
+  }
+
+  if (slots == 0U) {
+    return;
+  }
+
+  robstride_requeue_slots(data, slots);
+
+  if ((slots & BIT(ROBSTRIDE_SLOT_RUN_MODE)) != 0U) {
+    /* Rewriting the run mode stops the motor again. */
+    data->ref_sent = false;
+    data->enable_sent = false;
+    data->running_confirmed = false;
+  }
+}
+
+/*
+ * Undo what robstride_build_tx() marked done, so the step is built again on
  * the next interval. The command repeats on its own and the probe comes round
- * again on its own interval, so neither has anything to take back.
+ * again on its own interval, so neither has anything to take back. A lost read
+ * is left to the readback timeout, which writes the batch again.
  */
 static void robstride_retry_tx_stage(
-  struct robstride_motor_data * data, enum robstride_tx_stage stage)
+  struct robstride_motor_data * data, enum robstride_tx_stage stage, uint16_t slots)
 {
   switch (stage) {
     case ROBSTRIDE_TX_STAGE_STOP:
       data->stop_pending = true;
       break;
-    case ROBSTRIDE_TX_STAGE_CONFIGURE:
-      data->configured = false;
+    case ROBSTRIDE_TX_STAGE_PARAM_WRITE:
+      robstride_retry_param_writes(data, slots);
       break;
-    case ROBSTRIDE_TX_STAGE_LIMITS:
-      data->limits_applied = false;
-      break;
-    case ROBSTRIDE_TX_STAGE_GAINS:
-      data->gains_applied = false;
+    case ROBSTRIDE_TX_STAGE_REF:
+      data->ref_sent = false;
       break;
     case ROBSTRIDE_TX_STAGE_ENABLE:
       data->enable_sent = false;
@@ -680,7 +1038,9 @@ static void robstride_bus_tx_work_handler(struct k_work * work)
 
     struct robstride_motor_data * data = motor_dev->data;
     struct can_frame frames[ROBSTRIDE_TX_BURST];
+    struct robstride_tx_ctx * ctxs[ROBSTRIDE_TX_BURST];
     enum robstride_tx_stage stage;
+    uint16_t slots;
     k_spinlock_key_t key;
     size_t count;
     bool queued = true;
@@ -688,7 +1048,7 @@ static void robstride_bus_tx_work_handler(struct k_work * work)
     key = k_spin_lock(&data->lock);
 
     /* Frames the controller took but could not transmit are reported here, an
-     * interval or more late, and each undoes its own stage before the next one
+     * interval or more late, and each undoes its own step before the next one
      * is built. */
     uint32_t failed = data->tx_failed_stages;
 
@@ -698,14 +1058,17 @@ static void robstride_bus_tx_work_handler(struct k_work * work)
       const int bit = find_lsb_set(failed) - 1;
 
       failed &= ~BIT(bit);
-      robstride_retry_tx_stage(data, (enum robstride_tx_stage)bit);
+      robstride_retry_tx_stage(data, (enum robstride_tx_stage)bit, 0U);
     }
 
-    count = robstride_build_tx(motor_dev, frames, now, &stage);
+    robstride_retry_param_writes(data, data->param_tx_failed);
+    data->param_tx_failed = 0U;
+
+    count = robstride_build_tx(motor_dev, frames, ctxs, now, &stage, &slots);
     k_spin_unlock(&data->lock, key);
 
     for (size_t f = 0; f < count; ++f) {
-      if (robstride_motor_send(motor_dev, &frames[f], stage) != 0) {
+      if (robstride_motor_send_ctx(motor_dev, &frames[f], ctxs[f]) != 0) {
         queued = false;
       }
     }
@@ -715,13 +1078,13 @@ static void robstride_bus_tx_work_handler(struct k_work * work)
     }
 
     /*
-     * Taking the stage back rather than confirming it after a successful send
+     * Taking the step back rather than confirming it after a successful send
      * is what keeps this correct against the API calls that clear the same
      * flags: re-clearing a flag another thread has just cleared is a no-op,
      * whereas setting one would swallow the request it stands for.
      */
     key = k_spin_lock(&data->lock);
-    robstride_retry_tx_stage(data, stage);
+    robstride_retry_tx_stage(data, stage, slots);
     k_spin_unlock(&data->lock, key);
   }
 }
@@ -786,13 +1149,21 @@ static void robstride_handle_feedback(
    * calibrating has lost nothing, and re-sending enable every interval would
    * add traffic without changing anything.
    */
+  const uint8_t error_code = (uint8_t)((id >> 16) & 0x3FU);
+
   if ((data->run_state == ROBSTRIDE_RUN_STATE_RUNNING) &&
       (run_state != ROBSTRIDE_RUN_STATE_RUNNING)) {
+    data->ref_sent = false;
     data->enable_sent = false;
+    data->running_confirmed = false;
+  } else if (
+    data->enable_sent && (run_state == ROBSTRIDE_RUN_STATE_RUNNING) && (error_code == 0U)) {
+    data->running_confirmed = true;
+    data->configure_failing = false;
   }
 
   data->run_state = run_state;
-  data->error_code = (uint8_t)((id >> 16) & 0x3FU);
+  data->error_code = error_code;
   data->timestamp_ms = k_uptime_get();
 
   robstride_mark_seen(data, can_bus);
@@ -830,6 +1201,14 @@ static void robstride_handle_param(
   k_spinlock_key_t key;
 
   key = k_spin_lock(&data->lock);
+
+  for (int slot = 0; slot < ROBSTRIDE_SLOT_COUNT; ++slot) {
+    if (
+      ((data->param_to_verify & BIT(slot)) != 0U) && (robstride_slot_index[slot] == index) &&
+      robstride_slot_matches(data, (enum robstride_param_slot)slot, raw)) {
+      data->param_to_verify &= (uint16_t)~BIT(slot);
+    }
+  }
 
   /* The slot stays taken; only the waiting caller gives it up. */
   if (data->param_armed && (data->param_index == index)) {
@@ -1014,6 +1393,9 @@ static int robstride_motor_enable(const struct device * dev)
      * assuming it still holds what we wrote.
      */
     robstride_restart_handshake(data);
+    /* An enable asked for is a retry asked for, so it does not wait out the
+     * pause after an earlier failure. */
+    data->configure_after_ms = 0;
     /* The handshake opens with a stop of its own, so a stop still owed from an
      * earlier disable has nothing left to do. */
     data->stop_pending = false;
@@ -1162,6 +1544,12 @@ static int robstride_motor_init(const struct device * dev)
     data->tx_ctx[i].stage = (enum robstride_tx_stage)i;
   }
 
+  for (size_t i = 0; i < ARRAY_SIZE(data->param_tx_ctx); ++i) {
+    data->param_tx_ctx[i].data = data;
+    data->param_tx_ctx[i].stage = ROBSTRIDE_TX_STAGE_PARAM_WRITE;
+    data->param_tx_ctx[i].slot = (enum robstride_param_slot)i;
+  }
+
   data->can_bus = ROBSTRIDE_CANBUS_UNKNOWN;
   data->mode = ROBSTRIDE_MODE_CURRENT;
   /* Held to the same range as robstride_set_limits(), so the devicetree cannot
@@ -1169,9 +1557,6 @@ static int robstride_motor_init(const struct device * dev)
   data->limits.current = robstride_resolve_limit(config->limits.current, model->current);
   data->limits.velocity = robstride_resolve_limit(config->limits.velocity, model->velocity);
   data->limits.torque = robstride_resolve_limit(config->limits.torque, model->torque);
-  /* The motor keeps the gains in its own memory unless the application
-   * overrides them, so nothing is written until robstride_set_gains(). */
-  data->gains_applied = true;
   k_sem_init(&data->param_sem, 0, 1);
 
   return robstride_bus_register_motor(config->bus, dev, config->motor_id);
@@ -1206,10 +1591,9 @@ static int robstride_set_target(const struct device * dev, enum robstride_mode m
 
   if (data->mode != mode) {
     data->mode = mode;
-    /* A run mode is only accepted while the motor is stopped, so the
-     * handshake has to run again. */
-    data->configured = false;
-    data->enable_sent = false;
+    /* A run mode is only accepted while the motor is stopped, and the limits
+     * and gains belong to the mode, so the handshake has to run again. */
+    robstride_restart_handshake(data);
   }
 
   switch (mode) {
@@ -1273,8 +1657,7 @@ int robstride_set_motion_target(
 
   if (data->mode != ROBSTRIDE_MODE_OPERATION) {
     data->mode = ROBSTRIDE_MODE_OPERATION;
-    data->configured = false;
-    data->enable_sent = false;
+    robstride_restart_handshake(data);
   }
 
   /* Every field is clamped again when the frame is encoded, against the
@@ -1318,6 +1701,9 @@ int robstride_get_feedback(const struct device * dev, struct robstride_feedback 
   feedback->warning_bits = data->warning_bits;
   feedback->online = data->online;
   feedback->timestamp_ms = data->timestamp_ms;
+  feedback->configured = data->enabled && (data->param_to_write == 0U) &&
+                         (data->param_to_verify == 0U) && data->running_confirmed;
+  feedback->configure_failures = data->configure_failures;
 
   if (!data->online) {
     ret = -ENODATA;
@@ -1357,7 +1743,7 @@ int robstride_set_limits(const struct device * dev, const struct robstride_limit
   data->limits.current = CLAMP(limits->current, 0.0F, model->current);
   data->limits.velocity = CLAMP(limits->velocity, 0.0F, model->velocity);
   data->limits.torque = CLAMP(limits->torque, 0.0F, model->torque);
-  data->limits_applied = false;
+  robstride_requeue_slots(data, ROBSTRIDE_SLOTS_LIMITS);
   k_spin_unlock(&data->lock, key);
 
   return 0;
@@ -1381,21 +1767,43 @@ int robstride_get_limits(const struct device * dev, struct robstride_limits * li
   return 0;
 }
 
-int robstride_set_gains(const struct device * dev, const struct robstride_gains * gains)
+int robstride_set_mode_params(
+  const struct device * dev, enum robstride_mode mode, const struct robstride_mode_params * params)
 {
+  const struct robstride_motor_config * config;
   struct robstride_motor_data * data;
   k_spinlock_key_t key;
 
-  if (!robstride_is_motor(dev) || (gains == NULL)) {
+  if (!robstride_is_motor(dev) || ((unsigned int)mode >= ROBSTRIDE_MODE_COUNT) || (params == NULL)) {
     return -EINVAL;
   }
 
+  const float fields[] = {
+    params->max_velocity, params->acceleration, params->position_kp, params->velocity_kp,
+    params->velocity_ki,  params->current_kp,   params->current_ki,
+  };
+
+  for (size_t i = 0; i < ARRAY_SIZE(fields); ++i) {
+    /* NaN fails the comparison, so it is rejected with the negatives. */
+    if (!(fields[i] >= 0.0F)) {
+      return -EINVAL;
+    }
+  }
+
+  config = dev->config;
   data = dev->data;
 
   key = k_spin_lock(&data->lock);
-  data->gains = *gains;
-  data->gains_overridden = true;
-  data->gains_applied = false;
+  data->mode_params[mode] = *params;
+  data->mode_params[mode].max_velocity =
+    MIN(params->max_velocity, robstride_model_limits[config->model].velocity);
+  data->mode_params_set |= (uint8_t)BIT(mode);
+
+  /* Another mode's values go in when the motor is switched to it. */
+  if (data->mode == mode) {
+    robstride_requeue_slots(data, robstride_mode_slots[mode]);
+  }
+
   k_spin_unlock(&data->lock, key);
 
   return 0;
