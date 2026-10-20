@@ -18,9 +18,10 @@ options:
   allocation: static
 
 limits:
-  # Six valves and one actuator carry 12 topics with the CAN diagnostics,
-  # against 8 and 6 on rc26-air and rc26-robstride, which run with 16. This
-  # keeps about the same room for the master's frame planner.
+  # The bridge's default plan needs 14 frames at the codegen's max-count
+  # basis (eight valves, eight actuators), against 13 for rc26-robstride on
+  # 16. 24 leaves the planner room for a machine that splits topics by
+  # period.
   max_frames: 24
   max_copy_entries: 128
   # Every Solenoid and RobstrideMotor service fits a single frame, so
