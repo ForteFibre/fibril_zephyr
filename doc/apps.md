@@ -36,7 +36,7 @@ west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
 | 層 | 決めるもの | 例 |
 | --- | --- | --- |
 | トランスポート | 基板がバスに出る経路 | `rc26-mainair-usb`、`miniv4-can`、`miniv4-usb` |
-| デプロイ | ノード名、どの機能をどのピンに出すか（ID スイッチの無い基板では node_id も） | `rc26-air`、`rc26-robstride`、`miniv4-md-qdec4` |
+| デプロイ | ノード名、どの機能をどのピンに出すか（ID スイッチの無い基板では node_id も） | `rc26-air`、`rc26-robstride`、`rc26-main`、`miniv4-md-qdec4` |
 
 RC26 MainAir には必ず USB の CAN が載り、電磁弁やエンコーダは搭載の有無が変わる。
 経路を別の層に括り出しておくと、機能の増減がデプロイ snippet 1 つの中で閉じる。
@@ -62,6 +62,7 @@ overlay は `#include <fibril/...>` で取り込み、`fibril,fcan-*` のノー�
 | `dts/fibril/robomaster_miniv4/qdec-enc0.dtsi`〜`qdec-enc5.dtsi` | 入力 1 本ずつ（`enc0`〜`enc5`）。timer は基板の文書の表の割り当てで、その timer を確保する |
 | `dts/fibril/robomaster_miniv4/qdec.dtsi` | 上の 6 本をすべて取り込む |
 | `dts/fibril/robomaster_miniv4/adc.dtsi` | ADC1 と ADC2 を有効にする（チャネルは基板の DTS が定義する） |
+| `dts/fibril/rc26_mainair_v01/robstride.dtsi` | CAN1（FDCAN2）を classic CAN の 1 Mbps で有効にし、RobStride のバス `robstride0` を載せる。モータは載せない。応答を待つデバイスなので、デプロイが繋いだものだけを足す |
 | `dts/fibril/robomaster_miniv4/amt21.dtsi` | RS485（USART3、2 Mbps、DMA）の AMT21 バス `amt21_bus`。エンコーダは載せない。応答を待つデバイスなので、デプロイが繋いだものだけを足す |
 
 **未接続を許し、空回りのコストが小さいデバイスは、最大の構成で定義する。**
@@ -105,7 +106,7 @@ overlay はすべて 1 回のプリプロセッサの実行に並ぶので、`-S
 
 | 確保する名前 | 確保する側 |
 | --- | --- |
-| `NODE_ROLE` | `CONFIG_FIBRIL_NODE_SCHEMA` を決めるデプロイ snippet（`*-md-*`、`rc26-air`、`rc26-robstride`） |
+| `NODE_ROLE` | `CONFIG_FIBRIL_NODE_SCHEMA` を決めるデプロイ snippet（`*-md-*`、`rc26-air`、`rc26-robstride`、`rc26-main`） |
 | `FCAN_MD_MOTOR`、`FCAN_ADC_PORT`、`FCAN_SOLENOID`、`FCAN_ROBSTRIDE` | その `fibril,fcan-*` のノードを書く snippet |
 | `TIM<n>` | qdec の入力の断片（`qdec-encN.dtsi`）。PWM などで timer を使う断片も確保する |
 | `FDCAN<n>` | CAN コントローラを使う断片と snippet（RoboMaster のバス、経路、RobStride） |
@@ -131,8 +132,14 @@ snippets/rc26/air/
 snippets/rc26/robstride/
 ├── snippet.yml
 ├── robstride.conf                     CONFIG_FIBRIL_NODE_SCHEMA と node_id
-├── fibril_rc26_mainair_v01.overlay    CAN1、robstride バス、アクチュエータ
+├── fibril_rc26_mainair_v01.overlay    アクチュエータと fcan-robstride ノード
 └── schema/robstride.yaml              node と limits
+
+snippets/rc26/main/                    rc26-air と rc26-robstride を 1 つのノードにしたもの
+├── snippet.yml
+├── main.conf                          CONFIG_FIBRIL_NODE_SCHEMA と node_id
+├── fibril_rc26_mainair_v01.overlay    電磁弁、アクチュエータ、両方の機能ノード
+└── schema/main.yaml                   node と limits
 
 snippets/miniv4/can/
 ├── snippet.yml
@@ -164,6 +171,11 @@ snippets/miniv4/adc/
 ├── snippet.yml
 └── fibril_robomaster_miniv4.overlay   adc_port ノード（基板で固定の 13 ポート）
 ```
+
+`rc26-main` は、`rc26-air` の電磁弁と `rc26-robstride` のアクチュエータを、1 つのノード `rc26_main{i}`（node_id 0x00）に載せる。
+1 つのイメージが名乗れるノードは 1 つなので、2 つのデプロイ snippet は重ねられない。両方を載せるときは、両方の `fibril,fcan-*` ノードを書いた 3 つ目の snippet を選ぶ。
+3 つとも `NODE_ROLE` を確保するので、どれか 1 つだけを選ぶ。
+RobStride のバスは `dts/fibril/rc26_mainair_v01/robstride.dtsi` の断片を共有し、電磁弁の配線とモータは各 overlay に書く。
 
 miniv4 の経路は 2 つある。
 `miniv4-can` は外部 CAN（FDCAN1）に直接繋ぐ。
