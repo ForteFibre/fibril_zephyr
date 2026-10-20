@@ -186,7 +186,7 @@ struct robstride_feedback
    *        current mode and has reported running since it was enabled.
    *
    * Each value is read back from the motor before it counts as written (unless
-   * @kconfig{CONFIG_MOTOR_ROBSTRIDE_VERIFY} is off). Commands are only sent
+   * @c CONFIG_MOTOR_ROBSTRIDE_VERIFY is off). Commands are only sent
    * while this is true.
    */
   bool configured;
