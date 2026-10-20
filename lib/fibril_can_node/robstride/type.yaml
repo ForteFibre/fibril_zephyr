@@ -61,20 +61,53 @@ types:
       motion/kp: { type: f32, default: 0.0, min: 0.0, max: 500.0 }
       motion/kd: { type: f32, default: 0.0, min: 0.0, max: 5.0 }
 
-      # The motor's internal loops. Defaults are the factory values, the same
-      # ones the ROS 2 original writes, so a motor that has had its gains
-      # edited over USB comes back to a known state on the first boot of this
-      # node rather than behaving differently from its neighbour.
+      # What the driver writes into the motor for each run mode, under the
+      # names and defaults of the ROS 2 original, so a tuned value moves
+      # between the two unchanged. A mode is written in full, and read back,
+      # every time the motor is configured for it; changing the values of the
+      # mode the motor is in rewrites them without stopping it.
       #
-      # One set, not one per run mode. The driver carries a single
-      # robstride_gains, and splitting them per mode here would mean
-      # rewriting gains on every mode switch — see doc/apps.md for what that
-      # costs.
-      gains/position_kp: { type: f32, default: 10.0, min: 0.0 }
-      gains/velocity_kp: { type: f32, default: 1.0, min: 0.0 }
-      gains/velocity_ki: { type: f32, default: 0.0, min: 0.0 }
-      gains/current_kp: { type: f32, default: 0.125, min: 0.0 }
-      gains/current_ki: { type: f32, default: 0.0158, min: 0.0 }
+      # max_vel and acc are joint-side and get scaled by gear_ratio like every
+      # other joint quantity. The loop gains are motor-side and do not, the
+      # same asymmetry as motion/kp and motion/kd above.
+      #
+      # Defaults are the factory values, so a motor whose values were edited
+      # over its own USB link comes back to a known state on the first boot of
+      # this node rather than behaving differently from its neighbour.
+      # Operation control: motion_target and `target` TORQUE.
+      motion/cur_kp: { type: f32, default: 0.125, min: 0.0 }
+      motion/cur_ki: { type: f32, default: 0.0158, min: 0.0 }
+
+      # CSP (`target` POSITION). max_vel is applied as the motor's velocity
+      # limit, which it may narrow but never raise above max-velocity-mrad-s.
+      # acc has no CSP parameter to go to; it is kept so the names match.
+      position/max_vel: { type: f32, default: 10.0, min: 0.0 }
+      position/acc: { type: f32, default: 10.0, min: 0.0 }
+      position/pos_kp: { type: f32, default: 10.0, min: 0.0 }
+      position/spd_kp: { type: f32, default: 1.0, min: 0.0 }
+      position/spd_ki: { type: f32, default: 0.0, min: 0.0 }
+      position/cur_kp: { type: f32, default: 0.125, min: 0.0 }
+      position/cur_ki: { type: f32, default: 0.0158, min: 0.0 }
+
+      # PP (`target` TRAJECTORY): the motor's own trajectory generator cruises
+      # at max_vel and accelerates at acc.
+      trajectory/max_vel: { type: f32, default: 10.0, min: 0.0 }
+      trajectory/acc: { type: f32, default: 10.0, min: 0.0 }
+      trajectory/pos_kp: { type: f32, default: 10.0, min: 0.0 }
+      trajectory/spd_kp: { type: f32, default: 1.0, min: 0.0 }
+      trajectory/spd_ki: { type: f32, default: 0.0, min: 0.0 }
+      trajectory/cur_kp: { type: f32, default: 0.125, min: 0.0 }
+      trajectory/cur_ki: { type: f32, default: 0.0158, min: 0.0 }
+
+      velocity/acc: { type: f32, default: 10.0, min: 0.0 }
+      velocity/spd_kp: { type: f32, default: 1.0, min: 0.0 }
+      velocity/spd_ki: { type: f32, default: 0.01, min: 0.0 }
+      velocity/cur_kp: { type: f32, default: 0.125, min: 0.0 }
+      velocity/cur_ki: { type: f32, default: 0.0158, min: 0.0 }
+
+      # `target` DUTY. TORQUE runs in operation control and takes motion/.
+      current/cur_kp: { type: f32, default: 0.125, min: 0.0 }
+      current/cur_ki: { type: f32, default: 0.0158, min: 0.0 }
 
     topics:
       # The repository-wide actuator command. `type` selects the domain and
@@ -144,6 +177,10 @@ types:
           fault_bits: u32
           warning_bits: u32
           temperature: f32
+          # Whether the motor holds everything written for its mode and runs,
+          # and how many times configuring it has been given up on since boot.
+          configured: bool
+          configure_failures: u32
 
     services:
       # Enabling also clears a latched software trip, which is what makes it
