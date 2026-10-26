@@ -36,6 +36,13 @@ extern "C" {
  * shows closed loop, so a frame that is refused or lost does not leave the
  * axis running.
  *
+ * @ref motor_enable drops the stored target. Nothing is commanded after
+ * arming until a target is given again through @ref odrive_set_position,
+ * @ref odrive_set_velocity or @ref odrive_set_torque, so an axis re-armed
+ * after a fault or a re-zero does not head for a target set before it. With
+ * the ODrive's @c enable_watchdog set, give the target promptly after
+ * enabling.
+ *
  * **Units are the ones on the wire: rev, rev/s, Nm and A.** The ODrive's own
  * limits and gains are in the same units, so a value passed here reads the
  * same in odrivetool.
@@ -268,7 +275,9 @@ int odrive_set_feedback_callback(
  * @param feedback Destination for the snapshot.
  * @retval 0 Success.
  * @retval -EINVAL @p dev is not an ODrive axis, or @p feedback is NULL.
- * @retval -ENODATA The axis has not sent a heartbeat yet.
+ * @retval -ENODATA No heartbeat has arrived within @c heartbeat-timeout-ms,
+ *         either because the axis has not been seen yet or because it went
+ *         silent.
  * @retval -EAGAIN The estimates are older than @c estimate-timeout-ms.
  */
 int odrive_get_feedback(const struct device * dev, struct odrive_feedback * feedback);
@@ -282,8 +291,10 @@ int odrive_get_feedback(const struct device * dev, struct odrive_feedback * feed
  *
  * @param dev ODrive axis device instance.
  * @param position Position in rev.
- * @param velocity_ff Velocity feed-forward in rev/s, quantised to 0.001.
- * @param torque_ff Torque feed-forward in Nm, quantised to 0.001.
+ * @param velocity_ff Velocity feed-forward in rev/s, quantised to 0.001 and
+ *        clamped to +/-32.767, the range of the int16 on the wire.
+ * @param torque_ff Torque feed-forward in Nm, quantised to 0.001 and clamped
+ *        to +/-32.767.
  * @retval 0 Success.
  * @retval -EINVAL @p dev is not an ODrive axis, or a value is not finite.
  */

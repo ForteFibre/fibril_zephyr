@@ -67,6 +67,9 @@ LOG_MODULE_REGISTER(motor_odrive, CONFIG_MOTOR_LOG_LEVEL);
  */
 #define ODRIVE_FF_SCALE 1000.0F
 
+/* Arrival time of a message that has not arrived. 0 is a real uptime. */
+#define ODRIVE_NEVER INT64_MIN
+
 #define ODRIVE_PENDING_FEEDBACK BIT(0)
 #define ODRIVE_PENDING_STATE BIT(1)
 
@@ -149,6 +152,8 @@ struct odrive_axis_data
    * target must not be re-sent in that mode.
    */
   bool setpoint_dirty;
+  /* A target has been given since the last enable. */
+  bool has_target;
 
   /*
    * Arming progress. Cleared on enable and whenever the commanded mode
@@ -168,8 +173,12 @@ struct odrive_axis_data
    */
   bool idle_pending;
   int64_t idle_sent_ms;
-  /* The last idle or estop request has been queued but not reported sent. */
-  bool idle_in_flight;
+  /*
+   * Idle and estop requests queued but not yet reported sent. A count, because
+   * they share one completion context and a late report for an older one must
+   * not clear a newer one.
+   */
+  uint8_t idle_in_flight;
   struct odrive_tx_ctx tx_ctx[ODRIVE_TX_STAGE_COUNT];
 
   /* What the axis reported. */
@@ -275,6 +284,14 @@ static const struct device * odrive_find_axis(struct odrive_bus_data * bus, uint
   return NULL;
 }
 
+/* One idle or estop request is no longer queued. Caller holds the axis lock. */
+static void odrive_idle_settled(struct odrive_axis_data * data)
+{
+  if (data->idle_in_flight > 0U) {
+    data->idle_in_flight--;
+  }
+}
+
 /*
  * Undo a stage whose frame never reached the bus, so the command interval
  * builds it again. Caller holds the axis lock. Each case re-checks that the
@@ -306,7 +323,7 @@ static void odrive_tx_failed(struct odrive_axis_data * data, enum odrive_tx_stag
       break;
     case ODRIVE_TX_STAGE_IDLE:
       /* Due again at once rather than after a full retry interval. */
-      data->idle_in_flight = false;
+      odrive_idle_settled(data);
       data->idle_sent_ms -= CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS;
       break;
     default:
@@ -332,7 +349,7 @@ static void odrive_tx_done(const struct device * can_dev, int error, void * user
   k_spinlock_key_t key = k_spin_lock(&ctx->data->lock);
 
   if (error == 0) {
-    ctx->data->idle_in_flight = false;
+    odrive_idle_settled(ctx->data);
   } else {
     odrive_tx_failed(ctx->data, ctx->stage);
   }
@@ -463,7 +480,7 @@ static enum odrive_tx_stage odrive_build_tx(
         ((now - data->idle_sent_ms) >= CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS)) {
       odrive_build_set_axis_state(frame, node_id, ODRIVE_AXIS_STATE_IDLE);
       data->idle_sent_ms = now;
-      data->idle_in_flight = true;
+      data->idle_in_flight++;
       return ODRIVE_TX_STAGE_IDLE;
     }
 
@@ -476,7 +493,7 @@ static enum odrive_tx_stage odrive_build_tx(
    * after the request below it would arm the axis. Bounded, because a bus
    * nobody acknowledges never reports the frame sent.
    */
-  if (data->idle_in_flight &&
+  if ((data->idle_in_flight > 0U) &&
       ((now - data->idle_sent_ms) < CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS)) {
     return ODRIVE_TX_STAGE_NONE;
   }
@@ -510,6 +527,10 @@ static enum odrive_tx_stage odrive_build_tx(
       data->mode_sent = false;
     }
 
+    return ODRIVE_TX_STAGE_NONE;
+  }
+
+  if (!data->has_target) {
     return ODRIVE_TX_STAGE_NONE;
   }
 
@@ -622,6 +643,16 @@ static void odrive_bus_tx_timer_handler(struct k_timer * timer)
   k_work_submit(&bus->tx_work);
 }
 
+/* A timeout of 0 means the value never expires. */
+static bool odrive_is_recent(int64_t stamp, uint32_t timeout, int64_t now)
+{
+  if (stamp == ODRIVE_NEVER) {
+    return false;
+  }
+
+  return (timeout == 0U) || ((now - stamp) <= (int64_t)timeout);
+}
+
 /* Caller holds the axis lock. */
 static void odrive_fill_feedback(
   const struct device * axis_dev, struct odrive_feedback * out, int64_t now)
@@ -661,24 +692,29 @@ static void odrive_fill_feedback(
    * The estimates have a timeout of their own because they also decide
    * whether the snapshot is stale.
    */
-#define ODRIVE_MARK_VALID(stamp, bit, timeout)                                            \
-  if ((stamp != 0) && ((timeout == 0U) || ((now - stamp) <= (int64_t)timeout))) {         \
-    out->valid_mask |= (bit);                                                             \
-  }
-
   const uint32_t estimate_timeout = bus_config->estimate_timeout_ms;
   const uint32_t measurement_timeout = bus_config->measurement_timeout_ms;
+  const struct {
+    int64_t stamp;
+    uint32_t bit;
+    uint32_t timeout;
+  } fields[] = {
+    {data->estimates_ms, ODRIVE_FEEDBACK_ESTIMATES, estimate_timeout},
+    {data->iq_ms, ODRIVE_FEEDBACK_IQ, measurement_timeout},
+    {data->temperature_ms, ODRIVE_FEEDBACK_TEMPERATURE, measurement_timeout},
+    {data->torques_ms, ODRIVE_FEEDBACK_TORQUES, measurement_timeout},
+    {data->bus_ms, ODRIVE_FEEDBACK_BUS, measurement_timeout},
+    {data->error_ms, ODRIVE_FEEDBACK_ERROR, measurement_timeout},
+  };
 
-  ODRIVE_MARK_VALID(data->estimates_ms, ODRIVE_FEEDBACK_ESTIMATES, estimate_timeout)
-  ODRIVE_MARK_VALID(data->iq_ms, ODRIVE_FEEDBACK_IQ, measurement_timeout)
-  ODRIVE_MARK_VALID(data->temperature_ms, ODRIVE_FEEDBACK_TEMPERATURE, measurement_timeout)
-  ODRIVE_MARK_VALID(data->torques_ms, ODRIVE_FEEDBACK_TORQUES, measurement_timeout)
-  ODRIVE_MARK_VALID(data->bus_ms, ODRIVE_FEEDBACK_BUS, measurement_timeout)
-  ODRIVE_MARK_VALID(data->error_ms, ODRIVE_FEEDBACK_ERROR, measurement_timeout)
+  for (size_t i = 0; i < ARRAY_SIZE(fields); ++i) {
+    if (odrive_is_recent(fields[i].stamp, fields[i].timeout, now)) {
+      out->valid_mask |= fields[i].bit;
+    }
+  }
 
-#undef ODRIVE_MARK_VALID
-
-  out->stale = (data->estimates_ms != 0) && ((out->valid_mask & ODRIVE_FEEDBACK_ESTIMATES) == 0U);
+  out->stale = (data->estimates_ms != ODRIVE_NEVER) &&
+               ((out->valid_mask & ODRIVE_FEEDBACK_ESTIMATES) == 0U);
 }
 
 static void odrive_bus_dispatch_work_handler(struct k_work * work)
@@ -1032,6 +1068,9 @@ static int odrive_axis_enable(const struct device * dev)
    * Restart the whole sequence even if the axis is already enabled. This is
    * the only path that clears errors, and it is what an application calls to
    * recover an axis that disarmed on its own.
+   *
+   * The stored target is dropped: it may predate a fault, a re-zero or the
+   * axis being moved by hand, and the axis would head for it at full gain.
    */
   data->enabled = true;
   data->armed = false;
@@ -1039,7 +1078,7 @@ static int odrive_axis_enable(const struct device * dev)
   data->clear_errors_pending = true;
   data->mode_sent = false;
   data->state_sent = false;
-  data->setpoint_dirty = true;
+  data->has_target = false;
 
   k_spin_unlock(&data->lock, key);
 
@@ -1062,7 +1101,7 @@ static int odrive_axis_stop(const struct device * dev, const struct can_frame * 
   data->armed = false;
   data->idle_pending = true;
   data->idle_sent_ms = k_uptime_get();
-  data->idle_in_flight = true;
+  data->idle_in_flight++;
   data->clear_errors_pending = false;
   data->mode_sent = false;
   data->state_sent = false;
@@ -1148,7 +1187,7 @@ static int odrive_axis_get_feedback(const struct device * dev, void * feedback)
    */
   out->online = snapshot.online;
   out->stale = snapshot.online && ((out->valid_mask & MOTOR_FEEDBACK_POSITION) == 0U);
-  out->timestamp_ms = (estimates_ms != 0) ? estimates_ms : snapshot.timestamp_ms;
+  out->timestamp_ms = (estimates_ms != ODRIVE_NEVER) ? estimates_ms : snapshot.timestamp_ms;
 
   /*
    * Without a thermistor the ODrive reports a motor temperature of 0, which
@@ -1180,6 +1219,12 @@ static int odrive_axis_init(const struct device * dev)
 
   data->control_mode = ODRIVE_CONTROL_MODE_TORQUE;
   data->input_mode = ODRIVE_INPUT_MODE_PASSTHROUGH;
+  data->estimates_ms = ODRIVE_NEVER;
+  data->iq_ms = ODRIVE_NEVER;
+  data->temperature_ms = ODRIVE_NEVER;
+  data->torques_ms = ODRIVE_NEVER;
+  data->bus_ms = ODRIVE_NEVER;
+  data->error_ms = ODRIVE_NEVER;
 
   for (size_t i = 0; i < ARRAY_SIZE(data->tx_ctx); ++i) {
     data->tx_ctx[i].data = data;
@@ -1201,24 +1246,33 @@ static bool odrive_is_axis(const struct device * dev)
   return (dev != NULL) && (dev->api == &odrive_axis_api);
 }
 
+/* The ODrive has to be told the new mode before the setpoint means it. */
+static void odrive_mode_changed(struct odrive_axis_data * data)
+{
+  data->mode_sent = false;
+  data->setpoint_dirty = true;
+}
+
 /*
  * Selecting a target also selects the mode it belongs to. An unchanged target
  * in an unchanged mode leaves nothing to send, which is what keeps a control
  * loop re-applying the same TRAP_TRAJ target from re-planning the trajectory.
+ * The first target after an enable counts as changed even if it repeats the
+ * dropped one.
  */
 static void odrive_select_mode(
   struct odrive_axis_data * data, enum odrive_control_mode mode, bool target_changed)
 {
   if (data->control_mode != mode) {
     data->control_mode = mode;
-    /* The ODrive has to be told the new mode before the setpoint means it. */
-    data->mode_sent = false;
+    odrive_mode_changed(data);
+  }
+
+  if (target_changed || !data->has_target) {
     data->setpoint_dirty = true;
   }
 
-  if (target_changed) {
-    data->setpoint_dirty = true;
-  }
+  data->has_target = true;
 }
 
 int odrive_set_position(
@@ -1306,8 +1360,7 @@ int odrive_set_input_mode(const struct device * dev, enum odrive_input_mode mode
 
   if (data->input_mode != mode) {
     data->input_mode = mode;
-    data->mode_sent = false;
-    data->setpoint_dirty = true;
+    odrive_mode_changed(data);
   }
 
   k_spin_unlock(&data->lock, key);
