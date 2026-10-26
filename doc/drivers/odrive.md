@@ -10,6 +10,9 @@ ODrive 3.x はメッセージ集合が違うので対応しない。
 共通のモータインタフェース [include/drivers/motor.h](../../include/drivers/motor.h) からは、有効化と無効化と feedback スナップショットだけが使える。
 この分け方の理由は [ADR 0022](../adr/0022-odrive-control-api-layering.md) にある。
 
+fibril_can のバスから使うときは、このドライバの上にブロック型 `ODriveMotor` を載せる（[doc/apps.md](../apps.md) の「ODrive（ODriveMotor）」）。
+キャリブレーション、指令が来てからの有効化、故障からの復帰は、そちらの状態機械（`lib/odrive_sequencer`）が受け持つ。
+
 ## バスの要件
 
 CANSimple は **11 bit 標準 ID の classic CAN** で、データ長は 8 byte である。

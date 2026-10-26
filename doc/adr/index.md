@@ -55,6 +55,7 @@
 | [0020](0020-imu-driver-class.md) | ジャイロを、SI 単位と連続した yaw のスナップショットを返す IMU クラスで見せる | Proposed |
 | [0021](0021-odometry-block-type.md) | 自己位置推定の入力を、PCMainFW の host が出していた topic と同じ形のブロック型にする | Proposed |
 | [0022](0022-odrive-control-api-layering.md) | ODrive の制御 API を push 型 feedback と機種固有ヘッダで載せる | Proposed |
+| [0023](0023-odrive-adapter-block-type.md) | ODrive を fibril_odrive_adapter の後継のブロック型として載せる | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -82,4 +83,5 @@
 0020-imu-driver-class
 0021-odometry-block-type
 0022-odrive-control-api-layering
+0023-odrive-adapter-block-type
 ```
