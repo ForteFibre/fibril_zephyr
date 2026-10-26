@@ -24,6 +24,7 @@
 
 #define CMD_HEARTBEAT 0x001U
 #define CMD_ESTOP 0x002U
+#define CMD_GET_ERROR 0x003U
 #define CMD_SET_AXIS_STATE 0x007U
 #define CMD_GET_ENCODER_ESTIMATES 0x009U
 #define CMD_SET_CONTROLLER_MODE 0x00BU
@@ -32,6 +33,10 @@
 #define CMD_SET_INPUT_TORQUE 0x00EU
 #define CMD_GET_TEMPERATURE 0x015U
 #define CMD_CLEAR_ERRORS 0x018U
+#define CMD_SET_LIMITS 0x00FU
+#define CMD_SET_TRAJ_VEL_LIMIT 0x011U
+#define CMD_SET_ABSOLUTE_POSITION 0x019U
+#define CMD_SET_POS_GAIN 0x01AU
 
 #define NODE_SHIFT 5U
 #define CMD_MASK 0x1FU
@@ -62,6 +67,11 @@ static size_t refuse_count;
 /* Frames with this command are queued but reported lost on the wire. */
 static uint16_t lose_cmd;
 static size_t lose_count;
+/* Frames with this command are queued but not reported sent until released. */
+static uint16_t hold_cmd;
+static size_t hold_count;
+static can_tx_callback_t held_callback;
+static void * held_user_data;
 /*
  * TX mailboxes the fake has, or 0 for unlimited. A command interval runs
  * within one tick of native_sim's clock, so a mailbox is freed by the next
@@ -132,6 +142,14 @@ static int test_fake_can_send(
   captured_count++;
 
   zassert_not_null(callback, "can_send() without a completion callback waits for the wire");
+
+  if ((hold_count > 0U) && (cmd == hold_cmd)) {
+    hold_count--;
+    held_callback = callback;
+    held_user_data = user_data;
+    return 0;
+  }
+
   callback(dev, error, user_data);
 
   return 0;
@@ -276,6 +294,26 @@ static void inject_estimates(uint8_t node_id, float position, float velocity)
   inject(node_id, CMD_GET_ENCODER_ESTIMATES, data, 8U);
 }
 
+static void release_held_frame(void)
+{
+  zassert_not_null(held_callback, "no frame is being held");
+
+  const can_tx_callback_t callback = held_callback;
+
+  held_callback = NULL;
+  callback(test_can, 0, held_user_data);
+}
+
+static void inject_error(uint8_t node_id, uint32_t active_errors, uint32_t disarm_reason)
+{
+  uint8_t data[8] = {0};
+
+  sys_put_le32(active_errors, &data[0]);
+  sys_put_le32(disarm_reason, &data[4]);
+
+  inject(node_id, CMD_GET_ERROR, data, 8U);
+}
+
 static void inject_temperature(uint8_t node_id, float fet, float motor)
 {
   uint8_t data[8] = {0};
@@ -353,12 +391,18 @@ static void odrive_before(void * fixture)
   fake_can_start_fake.custom_fake = test_fake_can_start;
   refuse_count = 0;
   lose_count = 0;
+  hold_count = 0;
+  held_callback = NULL;
   mailboxes = 0;
 
   (void)motor_disable(axis0);
   (void)motor_disable(axis1);
   (void)odrive_set_state_callback(axis0, NULL, NULL);
   (void)odrive_set_feedback_callback(axis0, NULL, NULL);
+
+  /* Ends the idle requests the disables above leave behind. */
+  inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U);
+  inject_heartbeat(AXIS1_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U);
 
   memset(&state_record, 0, sizeof(state_record));
   memset(&feedback_record, 0, sizeof(feedback_record));
@@ -911,4 +955,180 @@ ZTEST(odrive, test_slow_measurements_outlive_the_estimate_timeout)
   (void)odrive_get_feedback(axis0, &feedback);
   zassert_equal(feedback.valid_mask & ODRIVE_FEEDBACK_TEMPERATURE, 0U,
                 "a measurement that stopped arriving is still valid");
+}
+
+ZTEST(odrive, test_idle_lost_on_the_wire_is_repeated_while_the_axis_stays_in_closed_loop)
+{
+  arm(axis0, AXIS0_NODE_ID);
+  clear_captures();
+
+  lose_cmd = CMD_SET_AXIS_STATE;
+  lose_count = 1;
+  zassert_ok(motor_disable(axis0));
+  sleep_armed(AXIS0_NODE_ID, TICK_MS * 2);
+
+  zassert_true(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE) >= 2U,
+               "a lost idle request was not repeated, leaving the axis running");
+
+  clear_captures();
+  sleep_alive(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS + (TICK_MS * 2));
+
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_AXIS_STATE), 0U,
+                "the idle request went on after the axis reported idle");
+}
+
+ZTEST(odrive, test_idle_still_reported_in_closed_loop_is_asked_for_again)
+{
+  arm(axis0, AXIS0_NODE_ID);
+  zassert_ok(motor_disable(axis0));
+  clear_captures();
+
+  sleep_armed(AXIS0_NODE_ID, CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS + (TICK_MS * 2));
+
+  zassert_true(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE) > 0U,
+               "an axis still in closed loop after a disable was not asked again");
+}
+
+ZTEST(odrive, test_refused_estop_is_followed_by_idle_requests)
+{
+  arm(axis0, AXIS0_NODE_ID);
+  clear_captures();
+
+  refuse_cmd = CMD_ESTOP;
+  refuse_count = 1;
+  zassert_not_ok(odrive_estop(axis0), "a refused estop reported success");
+  sleep_armed(AXIS0_NODE_ID, TICK_MS * 2);
+
+  zassert_true(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE) > 0U,
+               "a refused estop left the axis in closed loop with nothing following it");
+}
+
+ZTEST(odrive, test_disable_keeps_the_idle_request_a_timeout_started)
+{
+  arm(axis0, AXIS0_NODE_ID);
+  k_sleep(K_MSEC(DT_PROP(DT_NODELABEL(odrive_test), heartbeat_timeout_ms) + DISPATCH_MS + 40));
+
+  lose_cmd = CMD_SET_AXIS_STATE;
+  lose_count = 1;
+  zassert_ok(motor_disable(axis0));
+  clear_captures();
+
+  sleep_armed(AXIS0_NODE_ID, CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS + (TICK_MS * 2));
+
+  zassert_true(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE) > 0U,
+               "a disable with a lost frame cancelled the idle requests");
+}
+
+ZTEST(odrive, test_enable_waits_for_the_preceding_idle_to_reach_the_wire)
+{
+  arm(axis0, AXIS0_NODE_ID);
+
+  hold_cmd = CMD_SET_AXIS_STATE;
+  hold_count = 1;
+  zassert_ok(motor_disable(axis0));
+  zassert_ok(motor_enable(axis0));
+  clear_captures();
+
+  /* The ODrive has not seen the idle, so it goes on reporting closed loop. */
+  sleep_armed(AXIS0_NODE_ID, ARM_MS);
+
+  zassert_equal(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL),
+                0U, "closed loop was requested while the idle was still queued");
+
+  struct odrive_feedback feedback;
+
+  (void)odrive_get_feedback(axis0, &feedback);
+  zassert_true(feedback.enabled, "the enable was cancelled while waiting");
+
+  release_held_frame();
+  sleep_alive(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, ARM_MS);
+
+  zassert_true(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL) >
+                 0U,
+               "arming did not go on once the idle was sent");
+}
+
+ZTEST(odrive, test_error_change_reported_by_get_error_reaches_the_state_callback)
+{
+  zassert_ok(odrive_set_state_callback(axis0, record_state, &state_record));
+  inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U);
+  k_sleep(K_MSEC(DISPATCH_MS));
+  state_record.count = 0;
+
+  inject_error(AXIS0_NODE_ID, 0x40U, 0x40U);
+  k_sleep(K_MSEC(DISPATCH_MS));
+
+  zassert_true(state_record.count > 0U, "an error change from Get_Error was not reported");
+  zassert_equal(state_record.last.active_errors, 0x40U, "the reported errors are wrong");
+  zassert_equal(state_record.last.disarm_reason, 0x40U, "the disarm reason is wrong");
+}
+
+ZTEST(odrive, test_online_axis_without_estimates_has_no_position_for_the_class)
+{
+  inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U);
+
+  struct motor_feedback feedback;
+
+  zassert_equal(motor_get_feedback(axis0, &feedback), -EAGAIN,
+                "an axis with no estimates returned a position of 0 as a measurement");
+  zassert_true(feedback.stale, "an axis with no estimates is not stale");
+  zassert_equal(feedback.valid_mask & MOTOR_FEEDBACK_POSITION, 0U,
+                "an axis with no estimates published a position");
+}
+
+ZTEST(odrive, test_non_finite_estimate_is_not_published_as_a_position)
+{
+  struct motor_feedback feedback;
+
+  inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U);
+
+  inject_estimates(AXIS0_NODE_ID, NAN, 0.0F);
+  zassert_equal(motor_get_feedback(axis0, &feedback), -EAGAIN, "a NaN estimate became a position");
+  zassert_equal(feedback.valid_mask & MOTOR_FEEDBACK_POSITION, 0U,
+                "a NaN estimate was marked valid");
+
+  inject_estimates(AXIS0_NODE_ID, INFINITY, 0.0F);
+  zassert_equal(motor_get_feedback(axis0, &feedback), -EAGAIN,
+                "an infinite estimate became a position");
+}
+
+ZTEST(odrive, test_class_timestamp_is_when_the_estimates_arrived)
+{
+  struct motor_feedback feedback;
+
+  inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U);
+  inject_estimates(AXIS0_NODE_ID, 1.0F, 0.0F);
+  zassert_ok(motor_get_feedback(axis0, &feedback));
+
+  const int64_t estimated = feedback.timestamp_ms;
+
+  k_sleep(K_MSEC(CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS));
+  inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U);
+
+  (void)motor_get_feedback(axis0, &feedback);
+  zassert_equal(feedback.timestamp_ms, estimated,
+                "heartbeats moved the timestamp of a position that did not change");
+}
+
+ZTEST(odrive, test_input_mode_outside_the_enum_is_refused)
+{
+  zassert_equal(odrive_set_input_mode(axis0, (enum odrive_input_mode)0), -EINVAL);
+  zassert_equal(odrive_set_input_mode(axis0, (enum odrive_input_mode)4), -EINVAL);
+  zassert_equal(odrive_set_input_mode(axis0, (enum odrive_input_mode)7), -EINVAL);
+}
+
+ZTEST(odrive, test_non_finite_limits_gains_and_positions_are_refused_without_sending)
+{
+  zassert_equal(odrive_set_limits(axis0, NAN, 10.0F), -EINVAL);
+  zassert_equal(odrive_set_traj_limits(axis0, 1.0F, INFINITY, 1.0F), -EINVAL);
+  zassert_equal(odrive_set_gains(axis0, 1.0F, 1.0F, NAN), -EINVAL);
+  zassert_equal(odrive_set_absolute_position(axis0, -INFINITY), -EINVAL);
+
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_LIMITS), 0U, "a NaN limit reached the wire");
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_TRAJ_VEL_LIMIT), 0U,
+                "half of a refused trajectory limit reached the wire");
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_POS_GAIN), 0U,
+                "half of a refused gain set reached the wire");
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_ABSOLUTE_POSITION), 0U,
+                "an infinite absolute position reached the wire");
 }
