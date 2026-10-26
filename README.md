@@ -74,6 +74,7 @@ west flash
 | `rc26-air` | デプロイ | RC26 MainAir V01 | 6 系統の電磁弁を ROS Service で駆動する |
 | `rc26-robstride` | デプロイ | RC26 MainAir V01 | CAN1 の RobStride アクチュエータを ROS から駆動する |
 | `rc26-main` | デプロイ | RC26 MainAir V01 | `rc26-air` の電磁弁と `rc26-robstride` のアクチュエータを、1 つのノード（`rc26_main0`）で駆動する |
+| `rc26-odom` | デプロイ | RC26 MainAir V01 | 接地エンコーダ 2 本（J11、J12）と R6093U（J25）を、自己位置推定の入力として出す（PCMainFW の後継）。`rc26-main`、`rc26-air`、`rc26-robstride` のどれにも重ねられる |
 | `miniv4-can` | トランスポート | RoboMaster Mini V4 | 外部 CAN（FDCAN1）に直接つなぐ |
 | `miniv4-usb` | トランスポート | RoboMaster Mini V4 | 外部 CAN（FDCAN1）を gs_usb で PC に見せ、自ノードを同じ論理バスに載せる。FDCAN1 には fibril_can のデバイスだけを繋ぐ |
 | `miniv4-md-qdec4` | デプロイ | RoboMaster Mini V4 | RoboMaster 4 台を基板の qdec で閉ループ制御する（CanMotorMbed の後継） |

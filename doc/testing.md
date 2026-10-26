@@ -36,6 +36,7 @@ west twister -T apps --integration
 | `app.node.rc26_air` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-air` |
 | `app.node.rc26_robstride` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-robstride` |
 | `app.node.rc26_main` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-main` |
+| `app.node.rc26_main_odom` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-main`、`rc26-odom` |
 | `app.node.miniv4_md_qdec4` | `fibril_robomaster_miniv4` | `miniv4-can`、`miniv4-md-qdec4` |
 | `app.node.miniv4_md_rotor8` | `fibril_robomaster_miniv4` | `miniv4-can`、`miniv4-md-rotor8` |
 

@@ -63,6 +63,8 @@ overlay は `#include <fibril/...>` で取り込み、`fibril,fcan-*` のノー�
 | `dts/fibril/robomaster_miniv4/qdec.dtsi` | 上の 6 本をすべて取り込む |
 | `dts/fibril/robomaster_miniv4/adc.dtsi` | ADC1 と ADC2 を有効にする（チャネルは基板の DTS が定義する） |
 | `dts/fibril/rc26_mainair_v01/robstride.dtsi` | CAN1（FDCAN2）を classic CAN の 1 Mbps で有効にし、RobStride のバス `robstride0` を載せる。モータは載せない。応答を待つデバイスなので、デプロイが繋いだものだけを足す |
+| `dts/fibril/rc26_mainair_v01/qdec-enc3.dtsi`、`qdec-enc4.dtsi` | J11（Encoder3、TIM3）と J12（Encoder4、TIM4）の入力を 1 本ずつ（`enc3`、`enc4`）。その timer を確保する |
+| `dts/fibril/rc26_mainair_v01/r6093u.dtsi` | J25 のジャイロソケット（UART5、38400 bps）の R6093U（`gyro`）。UART5 を確保するので、J15 は同時に使えない |
 | `dts/fibril/robomaster_miniv4/amt21.dtsi` | RS485（USART3、2 Mbps、DMA）の AMT21 バス `amt21_bus`。エンコーダは載せない。応答を待つデバイスなので、デプロイが繋いだものだけを足す |
 
 **未接続を許し、空回りのコストが小さいデバイスは、最大の構成で定義する。**
@@ -107,10 +109,10 @@ overlay はすべて 1 回のプリプロセッサの実行に並ぶので、`-S
 | 確保する名前 | 確保する側 |
 | --- | --- |
 | `NODE_ROLE` | `CONFIG_FIBRIL_NODE_SCHEMA` を決めるデプロイ snippet（`*-md-*`、`rc26-air`、`rc26-robstride`、`rc26-main`） |
-| `FCAN_MD_MOTOR`、`FCAN_ADC_PORT`、`FCAN_SOLENOID`、`FCAN_ROBSTRIDE` | その `fibril,fcan-*` のノードを書く snippet |
-| `TIM<n>` | qdec の入力の断片（`qdec-encN.dtsi`）。PWM などで timer を使う断片も確保する |
+| `FCAN_MD_MOTOR`、`FCAN_ADC_PORT`、`FCAN_SOLENOID`、`FCAN_ROBSTRIDE`、`FCAN_ODOMETRY` | その `fibril,fcan-*` のノードを書く snippet |
+| `TIM<n>` | qdec の入力の断片（miniv4 と rc26_mainair_v01 の `qdec-encN.dtsi`）。PWM などで timer を使う断片も確保する |
 | `FDCAN<n>` | CAN コントローラを使う断片と snippet（RoboMaster のバス、経路、RobStride） |
-| `USART<n>`、`DMA1_CH<n>` | UART と DMA のチャネルを使う断片（AMT21 のバス） |
+| `USART<n>`、`UART<n>`、`DMA1_CH<n>` | UART と DMA のチャネルを使う断片（AMT21 のバス、R6093U） |
 
 確保は約束であり、強制ではない。
 排他の資源に触れる断片や snippet を足すときは、確保を書く。
@@ -140,6 +142,10 @@ snippets/rc26/main/                    rc26-air と rc26-robstride を 1 つの�
 ├── main.conf                          CONFIG_FIBRIL_NODE_SCHEMA と node_id
 ├── fibril_rc26_mainair_v01.overlay    電磁弁、アクチュエータ、両方の機能ノード
 └── schema/main.yaml                   node と limits
+
+snippets/rc26/odom/                    デプロイ snippet に重ねる自己位置推定の入力
+├── snippet.yml
+└── fibril_rc26_mainair_v01.overlay    odometry ノード（J11、J12 と J25）
 
 snippets/miniv4/can/
 ├── snippet.yml
@@ -176,6 +182,11 @@ snippets/miniv4/adc/
 1 つのイメージが名乗れるノードは 1 つなので、2 つのデプロイ snippet は重ねられない。両方を載せるときは、両方の `fibril,fcan-*` ノードを書いた 3 つ目の snippet を選ぶ。
 3 つとも `NODE_ROLE` を確保するので、どれか 1 つだけを選ぶ。
 RobStride のバスは `dts/fibril/rc26_mainair_v01/robstride.dtsi` の断片を共有し、電磁弁の配線とモータは各 overlay に書く。
+
+`rc26-odom` は、自己位置推定の入力（`Odometry`）を足すデプロイ snippet で、`rc26-main`、`rc26-air`、`rc26-robstride` のどれとも重ねられる。
+`NODE_ROLE` を確保しないので、ノードの名前と node_id は、重ねた側のものになる。
+PCMainFW が担っていた、接地エンコーダ 2 本（J11、J12）と R6093U（J25）の読み出しを、そのノードに足す。
+重ねる側のスキーマの `max_frames` はそのままにしてある。`Odometry` の 2 本の topic（29 B と 40 B、どちらも 10 ms）は、1 本ずつフレームを使う見込みで、`rc26-main` では 24 に対して約 16、`rc26-robstride` では 16 に対して約 15 になる。
 
 miniv4 の経路は 2 つある。
 `miniv4-can` は外部 CAN（FDCAN1）に直接繋ぐ。
@@ -303,6 +314,7 @@ RAM の少ない基板では、デプロイ snippet の `.conf` でこれを下�
 | `RobstrideMotor` | `fibril,fcan-robstride` | RobStride アクチュエータ。指令、feedback、診断、再ゼロ |
 | `MdMotor` | `fibril,fcan-md-motor` | エンコーダで閉ループにした電流指令のモータ。CanMotorMbed の後継 |
 | `AdcPort` | `fibril,fcan-adc-port` | `MdMotor` のキャリブレーションが見る入力。ADC のチャネルか、モータが報告する電流 |
+| `Odometry` | `fibril,fcan-odometry` | 接地エンコーダ 2 本とジャイロ。PCMainFW が自己位置推定のために送っていた値。下の「自己位置推定の入力（Odometry）」 |
 | `CanPortDiag`、`CanHubDiag` | なし（トランスポートから決まる） | この基板の CAN コントローラと hub の健全性。下の「CAN の健全性（can_diag）」 |
 
 `RobstrideMotor` は `robstride_actuator_bridge_ros2` が ROS グラフに出していたインタフェースをそのまま名乗る。
@@ -334,6 +346,34 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 
 `encoders` には、基板のエンコーダ入力（`fibril,stm32-qdec`、`cui,amt21-encoder`）のほか、RoboMaster のロータ角（`dji,robomaster-encoder`）を置ける。
 ロータ角のカウントは減速前の 8192 counts/rev なので、`encoder/gain` に減速比を含める。
+
+### 自己位置推定の入力（Odometry）
+
+`Odometry` は、PCMainFW と PC の `pc_main_interface` が fibril_localization に渡していた 2 本の topic を、同じ型と同じ中身で出す。
+判断の理由と、再現しない点は [ADR 0021](adr/0021-odometry-block-type.md) にある。
+
+| topic | 型 | 中身 |
+| --- | --- | --- |
+| `/<node>/odom/encoder` | `fibril_localization/msg/OdometryEncoder` | `encoder0`、`encoder1`（生のカウント、起動時に 0）、roll、pitch、yaw（rad、yaw は折り返さない）、`is_connecting` |
+| `/<node>/odom/imu` | `sensor_msgs/msg/Imu` | orientation、角速度、加速度。ジャイロの軸のまま。covariance は 0 |
+
+- どちらも 10 ms ごと（PCMainFW と同じ）。値は tick（約 1 ms）ごとに読み直す。
+- `fibril,fcan-odometry` は `encoders` に 2 つのエンコーダを、`imu` に IMU クラスの device を指す。`encoders` の 1 つ目が `encoder0` になる。
+- カウントはエンコーダの `position` を差分で追う。エンコーダが積算をやり直しても（`position_epoch`）、カウントは跳ばずに続く。読めない間は最後の値のまま。
+- yaw はジャイロの向きのままである。R6093U は機体と逆向きなので、`basic_deadreckoning` は今と同じく `-yaw` で使う。
+- `is_connecting` は、ジャイロの値が新しい（`imu_get_feedback()` が 0 を返す）ときに true になる。PCMainFW の host は 100 ms 以内にフレームが届いたかで決めていた。ここでは R6093U の `stale-timeout-ms`（既定 50 ms）で決まる。
+- ジャイロから 1 度も値が来ていない間は、roll、pitch、yaw が 0 で、orientation は回転なし（w = 1）になる。PCMainFW は全成分が 0 のクオータニオンを出していた。
+- orientation は roll、pitch、折り返さない yaw から作る（固定軸の roll、pitch、yaw の順。PCMainFW と同じ式）。
+- Imu の covariance は 0 のまま出す。fibril_localization の `imu_covariance` が `imu/raw_data` を受けて covariance と `frame_id` を埋めるので、そこへ remap する。
+
+ROS 側は、`pc_main_interface` の driver を外し、bridge の topic を remap でつなぐ。
+
+| bridge の topic | つなぎ先 |
+| --- | --- |
+| `/<node>/odom/encoder` | `encoder`（`basic_deadreckoning`） |
+| `/<node>/odom/imu` | `imu/raw_data`（`imu_covariance`） |
+
+> **header はまだ使えない。** fibril_can の bridge は、`header.stamp` を埋めない（2026-10-26 時点の v0.4.2）。`basic_deadreckoning` は受けた `header.stamp` を TF の時刻にするので、このままでは TF の時刻が 0 になる。bridge が stamp を埋めるまでは、この topic で TF を出す構成にしない。
 
 ### CAN の健全性（can_diag）
 
