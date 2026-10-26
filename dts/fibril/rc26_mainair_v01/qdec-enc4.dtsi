@@ -1,0 +1,40 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The RC26 MainAir V01's encoder input J12 (Encoder4, PB6/PB7) on TIM4, as
+ * enc4.
+ *
+ * The prescaler is zero because it divides encoder counts as well.
+ * counts-per-revolution is informational and depends on the encoder fitted;
+ * 2048 is a placeholder until a robot names its encoders. A deployment that
+ * knows better overrides it:
+ *
+ *     &enc4 {
+ *         counts-per-revolution = <4096>;
+ *         invert-direction;
+ *     };
+ */
+
+#ifndef FIBRIL_RC26_MAINAIR_V01_QDEC_ENC4_DTSI
+#define FIBRIL_RC26_MAINAIR_V01_QDEC_ENC4_DTSI
+
+#ifdef FIBRIL_CLAIM_TIM4
+#error "TIM4 claimed twice; Encoder4 is one claimant"
+#endif
+#define FIBRIL_CLAIM_TIM4 1
+
+&timers4 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc4: encoder4 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim4_ch1_pb6 &tim4_ch2_pb7>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+#endif /* FIBRIL_RC26_MAINAIR_V01_QDEC_ENC4_DTSI */
