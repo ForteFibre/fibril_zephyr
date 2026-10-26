@@ -181,7 +181,7 @@ struct odrive_axis_data
    * they share one completion context and a late report for an older one must
    * not clear a newer one.
    */
-  uint8_t idle_in_flight;
+  uint32_t idle_in_flight;
   /* When the newest of them was queued, which bounds how long arming waits. */
   int64_t stop_queued_ms;
   struct odrive_tx_ctx tx_ctx[ODRIVE_TX_STAGE_COUNT];
@@ -292,10 +292,8 @@ static const struct device * odrive_find_axis(struct odrive_bus_data * bus, uint
 /* An idle or estop request is being queued. Caller holds the axis lock. */
 static void odrive_idle_queued(struct odrive_axis_data * data, int64_t now)
 {
-  if (data->idle_in_flight < UINT8_MAX) {
-    data->idle_in_flight++;
-  }
-
+  /* Bounded by the controller's TX queue, so it cannot wrap. */
+  data->idle_in_flight++;
   data->stop_queued_ms = now;
 }
 
@@ -507,12 +505,7 @@ static enum odrive_tx_stage odrive_build_tx(
     return ODRIVE_TX_STAGE_NONE;
   }
 
-  /*
-   * Wait for the stop that preceded this enable to reach the wire. A heartbeat
-   * the ODrive sent before acting on it still shows closed loop, and arriving
-   * after the request below it would arm the axis. Bounded, because a bus
-   * nobody acknowledges never reports the frame sent.
-   */
+  /* Bounded: a bus nobody acknowledges never reports the stop sent. */
   if ((data->idle_in_flight > 0U) &&
       ((now - data->stop_queued_ms) < CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS)) {
     return ODRIVE_TX_STAGE_NONE;
@@ -814,12 +807,7 @@ static bool odrive_handle_heartbeat(
   data->timestamp_ms = now;
 
   if (axis_state == ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL) {
-    /*
-     * Only a heartbeat after this enable's request reached the wire counts.
-     * One still showing the closed loop from before a quick disable and enable
-     * would otherwise arm the axis, and the idle that follows would read as a
-     * fault.
-     */
+    /* doc/drivers/odrive.md, under recovery, says why state_on_wire. */
     if (data->enabled && data->state_on_wire) {
       data->armed = true;
     }
@@ -1585,6 +1573,8 @@ int odrive_request_axis_state(const struct device * dev, enum odrive_axis_state 
   struct can_frame frame;
   k_spinlock_key_t key = k_spin_lock(&data->lock);
   const bool busy = data->enabled;
+  const bool idle_was_pending = data->idle_pending;
+  int ret;
 
   /* The application has taken the axis state over from the driver. */
   if (!busy) {
@@ -1600,7 +1590,20 @@ int odrive_request_axis_state(const struct device * dev, enum odrive_axis_state 
 
   odrive_build_set_axis_state(&frame, config->node_id, state);
 
-  return odrive_axis_send(dev, &frame, NULL);
+  ret = odrive_axis_send(dev, &frame, NULL);
+
+  /* Nothing was taken over, so the axis is still owed its idle request. */
+  if ((ret != 0) && idle_was_pending) {
+    key = k_spin_lock(&data->lock);
+
+    if (!data->enabled) {
+      data->idle_pending = true;
+    }
+
+    k_spin_unlock(&data->lock, key);
+  }
+
+  return ret;
 }
 
 #define DT_DRV_COMPAT odrive_bus
