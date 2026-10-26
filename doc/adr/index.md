@@ -54,6 +54,7 @@
 | [0019](0019-robstride-mode-params-readback.md) | RobStride の設定をモードごとに書き、読み戻して確かめてから有効化する | Proposed |
 | [0020](0020-imu-driver-class.md) | ジャイロを、SI 単位と連続した yaw のスナップショットを返す IMU クラスで見せる | Proposed |
 | [0021](0021-odometry-block-type.md) | 自己位置推定の入力を、PCMainFW の host が出していた topic と同じ形のブロック型にする | Proposed |
+| [0022](0022-odrive-control-api-layering.md) | ODrive の制御 API を push 型 feedback と機種固有ヘッダで載せる | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -80,4 +81,5 @@
 0019-robstride-mode-params-readback
 0020-imu-driver-class
 0021-odometry-block-type
+0022-odrive-control-api-layering
 ```

@@ -113,6 +113,7 @@ deb の codegen は版が runtime とずれることがある（`west.yml` は f
 | エンコーダ | DJI RoboMaster のロータ角 | [doc/drivers/robomaster_encoder.md](doc/drivers/robomaster_encoder.md) |
 | IMU | CruizCore R6093U ジャイロ（UART） | [doc/drivers/r6093u.md](doc/drivers/r6093u.md) |
 | モータ | DJI RoboMaster C610 / C620（CAN） | [doc/drivers/robomaster.md](doc/drivers/robomaster.md) |
+| モータ | ODrive Pro / S1 / Micro（CAN） | [doc/drivers/odrive.md](doc/drivers/odrive.md) |
 | モータ | RobStride アクチュエータ（CAN） | [doc/drivers/robstride.md](doc/drivers/robstride.md) |
 
 ## サンプル

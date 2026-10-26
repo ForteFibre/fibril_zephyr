@@ -1,0 +1,347 @@
+# ODrive モータコントローラ（`odrive,bus`）
+
+ODrive を CANSimple で駆動するドライバ。
+軸 1 つが 1 つの device として現れる。
+
+対象は **ODrive Pro / S1 / Micro のファームウェア 0.6 系**である。
+ODrive 3.x はメッセージ集合が違うので対応しない。
+
+指令はこのドライバに固有の公開 API [include/drivers/motor/odrive.h](../../include/drivers/motor/odrive.h) にある。
+共通のモータインタフェース [include/drivers/motor.h](../../include/drivers/motor.h) からは、有効化と無効化と feedback スナップショットだけが使える。
+この分け方の理由は [ADR 0022](../adr/0022-odrive-control-api-layering.md) にある。
+
+## バスの要件
+
+CANSimple は **11 bit 標準 ID の classic CAN** で、データ長は 8 byte である。
+**CAN FD とは同じコントローラを共有できない。**
+fibril_can と同じ基板に載せる場合は、ODrive 用と fibril_can 用に別の FDCAN コントローラを割り当てる。
+
+`fibril_robomaster_miniv4`（FDCAN1 / 2 / 3）と `fibril_rc26_mainair_v01`（FDCAN2 / 3）はこの条件を満たす。
+`fibril_robomaster_miniv1` と `fibril_robomaster_miniv3` は FDCAN1 のみ、
+`fibril_canmotor_tourobo2023` は MCP2517FD が 1 本なので、fibril_can とは併用できない。
+
+## ODrive 側に必要な設定
+
+**このドライバは ODrive の設定を書きにいかない。**
+ODrive は設定を自分の不揮発メモリに持ち、odrivetool で調整して `save_configuration()` で保存する運用が前提である。
+有効化のたびにファームウェアが上書きすると、odrivetool で見える値とどちらが効いているのか追えなくなる。
+
+そのぶん、**次の設定が正しくないとドライバは黙って期待どおりに動かない。**
+
+```python
+# 軸の CAN ノード ID。63 は未設定を表す予約値なので、0 から 62 を割り当てる。
+odrv0.axis0.config.can.node_id = 5
+
+# 周期メッセージの間隔。既定で有効なのは heartbeat と encoder estimates だけで、
+# 残りは 0（無効）である。有効にしない測定値は valid_mask が立たない。
+odrv0.axis0.config.can.heartbeat_msg_rate_ms = 100
+odrv0.axis0.config.can.encoder_msg_rate_ms = 10
+odrv0.axis0.config.can.iq_msg_rate_ms = 20          # odrive_feedback の iq_*
+odrv0.axis0.config.can.temperature_msg_rate_ms = 200 # 温度（クラスの温度もこれ）
+odrv0.axis0.config.can.torques_msg_rate_ms = 20      # torque_target / torque_estimate
+odrv0.axis0.config.can.bus_voltage_msg_rate_ms = 200 # bus_voltage / bus_current
+odrv0.axis0.config.can.error_msg_rate_ms = 200       # disarm_reason
+
+odrv0.can.config.baud_rate = 500000
+odrv0.save_configuration()
+```
+
+次の 3 つは**既定のままにする**。
+ドライバがこれらの既定値を前提に符号化・復号している。
+
+| 設定 | 既定 | 変えると |
+| --- | --- | --- |
+| `input_vel_scale` | 0.001 | `odrive_set_position()` の速度前置補償がずれる |
+| `input_torque_scale` | 0.001 | 同じくトルク前置補償がずれる |
+| `circular_setpoints` | 無効 | 位置が折り返し、`motor_feedback.position` が連続でなくなる |
+
+## デバイスの構成
+
+devicetree のノードは 2 段になる。
+
+**バスノード**（`odrive,bus`）が CAN コントローラを占有し、送信タイマーと受信フィルタを持つ。
+**軸ノード**（`odrive,axis`）はその子で、ODrive 1 台に対応する。
+
+```devicetree
+odrive0: odrive {
+        compatible = "odrive,bus";
+        #address-cells = <1>;
+        #size-cells = <0>;
+        can = <&fdcan2>;
+        heartbeat-timeout-ms = <300>;
+        estimate-timeout-ms = <100>;
+        measurement-timeout-ms = <500>;
+
+        wheel_left: axis@5 {
+                compatible = "odrive,axis";
+                reg = <5>;
+                has-motor-thermistor;
+        };
+};
+```
+
+`can` は **1 個**の CAN コントローラである。
+ODrive は `node_id` で宛先が決まりホスト側の識別子を持たないので、コントローラをまたいで軸を探す必要がない。
+コントローラを 2 本使うなら `odrive,bus` を 2 つ書く。
+
+`reg` が軸の CAN ノード ID で、範囲は 0 から 62 である。
+63 は未設定の ODrive が名乗る予約値なので、ビルド時に `BUILD_ASSERT` で弾く。
+
+`has-motor-thermistor` は、そのモータにサーミスタが**配線されていて ODrive 側で設定済み**のときだけ書く。
+設定されていない ODrive はモータ温度に 0 を返し、0 ℃ は「冷えている」と読めてしまうので、
+このプロパティがない軸では `MOTOR_FEEDBACK_TEMPERATURE` を立てない。
+
+上限とゲインのプロパティは意図的に持たせていない。
+ODrive 側の設定が正本であり、実行時に変えたいときだけ `odrive_set_limits()` と `odrive_set_gains()` を使う。
+
+## Kconfig
+
+`CONFIG_MOTOR` でモータドライバクラス全体を有効にする。
+`CONFIG_MOTOR_ODRIVE` は `CONFIG_CAN` と `odrive,bus` ノードの存在に依存し、条件が揃えば既定で有効になる。
+
+| Kconfig | 既定 | 内容 |
+| --- | --- | --- |
+| `CONFIG_MOTOR_ODRIVE_MAX_AXES` | 4 | バス 1 本に登録できる軸の数。軸ごとに受信フィルタを 1 本張るので、コントローラのフィルタ本数にも縛られる |
+| `CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS` | 10 | 指令の送信間隔 |
+| `CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` | 200 | closed loop の確認が来ないときに要求し直す間隔 |
+| `CONFIG_MOTOR_ODRIVE_WORKQ_STACK_SIZE` | 1024 | コールバックを走らせるスレッドのスタック |
+| `CONFIG_MOTOR_ODRIVE_WORKQ_PRIORITY` | 5 | 同スレッドの優先度 |
+
+## 受信
+
+受信フィルタは軸ごとに 1 本で、`id = node_id << 5`、`mask = 0x7E0` である。
+ID の上位 6 bit が `node_id`、下位 5 bit が `cmd_id` なので、これ 1 本でその軸のすべてのメッセージが取れる。
+
+**feedback は ODrive の放送を受けるだけで、こちらから取りにいかない。**
+RobStride のように指令への返信として返るのではないので、無効な軸でも測定値は更新され続ける。
+RTR は使わない。
+
+### 測定値の有無
+
+`odrive_feedback.valid_mask` が、どの測定値が現在有効かを示す。
+各ビットは、対応する周期メッセージが期限内に届いていれば立つ。
+期限は、encoder estimates が `estimate-timeout-ms`（既定 100）、それ以外が `measurement-timeout-ms`（既定 500）である。
+期限を分けているのは、上の推奨設定で 200 ms 周期にした温度、バス電圧、エラーが、100 ms の期限では受信の合間にビットが落ちるからである。
+`measurement-timeout-ms` は、有効にした周期のうち最も遅いものより長くする。
+**多くの周期メッセージは ODrive の既定で無効なので、ビットが立たない原因はたいてい通信ではなく設定漏れである。**
+
+### 位置のスケール
+
+`Pos_Estimate` は rev 単位の float32 で、**すでに多回転の連続値**である。
+ドライバは折り返しを解かず、倍率を掛けるだけである。
+
+**`motor_feedback.position` の単位は 1 rev = 65536 カウントである。**
+
+```
+rev = counts / 65536
+```
+
+float32 の刻み幅は値が 2^k のとき 2^(k-23) なので、1/65536 rev の刻みは 128 rev で float32 の刻みに追いつく。
+**128 rev まではカウントと `Pos_Estimate` が 1 対 1 に対応し、そこから 2 倍ごとにカウントが 2 段ずつ飛ぶ。**
+
+## 送信
+
+バスは `CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS` 周期のタイマーでワークを積み、そのワークが指令フレームを送る。
+`odrive_set_*()` は指令を保存するだけで CAN の送信を待たない。
+制御ループから呼んでよい。
+
+### 送れなかったフレーム
+
+`can_send()` に完了コールバックを渡さないと、**フレームが線路に出るまで `K_FOREVER` で待つ**。
+`K_NO_WAIT` が縛るのは送信メールボックスの空き待ちだけである。
+誰も ACK を返さないバスではこれが送信ワークを止め、システムワークキュー全体を巻き込む。
+そのためドライバは、`motor_disable()` などの直接送る経路も含めて、常に完了コールバックを渡す。
+
+有効化の段と TRAP_TRAJ の目標は、送れなかったら次の周期に作り直す。
+コントローラがキューに入れなかったとき（送信の返り値）と、キューには入ったが線路に出なかったとき（完了コールバック）の両方である。
+どの段だったかは送信時に決め、完了コールバックはその段を取り消す。
+`Clear_Errors` が届かなかったときは、`Set_Controller_Mode` 以降も含めてやり直す。
+エラーが残ったままの軸は closed loop を受け付けないからである。
+毎周期送る指令フレームは、次の周期に同じものが出るので取り消さない。
+
+### 軸の数が送信メールボックスより多いとき
+
+bxCAN と FDCAN の送信メールボックスは 3 つである。
+1 周期のフレームは数 µs のうちに続けて送るので、4 軸目からはキューに入らない。
+コントローラが 1 つ拒んだら、その周期の残りの軸には送らず、次の周期は拒まれた軸から始める。
+軸の順序が固定だと同じ軸が毎周期あふれるが、こうすれば周期ごとに入れ替わる。
+あふれた周期の分だけ指令の間隔が延びるので、軸の多いバスでは ODrive の watchdog の期限に余裕を持たせる。
+
+タイマーは**有効な軸が 1 つもなくても回り続ける**。
+heartbeat のタイムアウト判定も同じタイマーが行うので、有効化する前に軸が生きているかを確かめられる。
+
+### 有効化の手順
+
+`motor_enable()` を呼ぶと、1 周期に 1 段ずつ進む。
+
+1. `Clear_Errors`
+2. `Set_Controller_Mode`（現在の制御モードと input mode）
+3. `Set_Axis_State(CLOSED_LOOP_CONTROL)`
+4. heartbeat の `axis_state` が 8 になるまで、`CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` ごとに 2 と 3 をやり直す
+5. 確認できて、`motor_enable()` の後に目標が渡されていれば、以降は毎周期、現在のモードの指令フレーム
+
+**4 の再試行では `Clear_Errors` を送らない。**
+過電流で落ちた軸をループの中で自動的に復帰させると、原因が取り除かれないまま再投入を繰り返すことになる。
+
+**`motor_enable()` は保存していた目標を捨てる。**
+故障、`odrive_set_absolute_position()` による原点の付け直し、手で軸を動かしたことの後に、前の目標へ全ゲインで向かわないようにするためである。
+closed loop に入っても、`odrive_set_position()`、`odrive_set_velocity()`、`odrive_set_torque()` のどれかが呼ばれるまで指令フレームは送らない。
+前と同じ値を渡しても新しい目標として扱うので、TRAP_TRAJ でも 1 度送る。
+ODrive の `enable_watchdog` を使う構成では、有効化したらすぐに目標を渡す。
+
+### 故障からの復帰
+
+**有効化中に軸が closed loop から外れたら、ドライバは再投入しない。**
+ODrive が自分で disarm するのは故障したときであり、復帰には `Clear_Errors` が要る。
+ドライバは指令の送信を止め、自身の状態も無効に落とし、状態コールバックで知らせる。
+
+**heartbeat が `heartbeat-timeout-ms` を超えて途絶えたときも同じ扱いになる。**
+heartbeat が来ないということは closed loop にいる確認が取れないということであり、
+そのまま有効にしておくと、通信が戻った瞬間にドライバが黙って軸を再投入することになる。
+通信断からの復帰も上位が `motor_enable()` で明示的に行う。
+
+ただし自分で disarm した軸と違い、**途絶えた軸は最後の指令で回り続けているかもしれない。**
+`enable_watchdog` を使わない構成では、ドライバが指令を止めても ODrive は止まらない。
+そこでドライバは、最後に聞いた状態が closed loop である間、`Set_Axis_State(IDLE)` を `CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` ごとに送る。
+heartbeat が戻って closed loop 以外を報告したら止める。
+受信だけが途絶えている場合にも届くよう、offline の間も送る。
+`motor_enable()` と `odrive_request_axis_state()` を呼んだら、上位が軸を引き取ったものとして止める。
+ただし `odrive_request_axis_state()` のフレームがキューに入らなかったときは、何も引き取っていないので止めない。
+`motor_disable()` と `odrive_estop()` は止めずに引き継ぐ（次の節）。
+
+`motor_enable()` の直後に届いた heartbeat が closed loop を示していても、ドライバはその軸を armed とみなさない。
+armed とみなすのは、この有効化の `Set_Axis_State(CLOSED_LOOP_CONTROL)` が線路に出たと完了コールバックが報告した後の heartbeat だけである。
+フレームを組み立てた時点で数えると、送る前に割り込んだ heartbeat で armed になり、そのフレームが失われても取り消せない。
+`motor_disable()` の直後に `motor_enable()` を呼ぶと、ODrive が IDLE を処理する前の heartbeat が届くことがある。
+これを armed と数えると、続く IDLE の heartbeat を故障と取り違えて、有効化を黙って取り消すことになる。
+
+`Set_Axis_State(CLOSED_LOOP_CONTROL)` を送った後、という条件だけでは足りない。
+IDLE が送信メールボックスで待っている間に有効化の段が進むと、ODrive はまだ closed loop にいて、その heartbeat が要求の後に届く。
+そこで、**直前の IDLE（または `Estop`）が線路に出たと完了コールバックが報告するまで、有効化の手順 1 に進まない。**
+線路に出てから `Set_Axis_State(CLOSED_LOOP_CONTROL)` までは少なくとも 2 周期あり、ODrive が IDLE を処理するには足りる。
+ACK の無いバスでは完了が報告されないので、待つのは `CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` までとする。
+
+### 無効化と非常停止
+
+`motor_disable()` と `odrive_estop()` は、フレームを次の周期を待たずにその場で送る。
+**そのフレームがキューに入らなかったり線路で失われたりしても、軸は最後の指令で回り続けない。**
+どちらも通信断と同じ IDLE の要求を始め、最後に聞いた状態が closed loop である間は `Set_Axis_State(IDLE)` を `CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` ごとに送る。
+最初のフレームが送れなかったときは、次の周期にすぐ送る。
+通信断で始まった IDLE の要求も、`motor_disable()` は取り消さずに引き継ぐ。
+
+復帰させるかどうかは上位が決める。
+復帰は `motor_enable()` の 1 回で足りる（上の手順を最初からやり直すので、`odrive_clear_errors()` を先に呼ぶ必要はない）。
+ただし目標は捨てられるので、続けて目標を渡し直す。
+
+```c
+static void on_state(const struct device *dev, const struct odrive_feedback *fb, void *user_data)
+{
+        if (!fb->enabled && (fb->active_errors & RECOVERABLE_MASK)) {
+                motor_enable(dev);
+                odrive_set_velocity(dev, 0.0F, 0.0F);
+        }
+}
+
+odrive_set_state_callback(wheel_left, on_state, NULL);
+```
+
+### TRAP_TRAJ の制約
+
+`ODRIVE_INPUT_MODE_TRAP_TRAJ` は、**同じ値の `Set_Input_Pos` を受け取るたびに軌道を再計画する**。
+毎周期再送すると軌道が振り出しに戻り続け、`Trajectory_Done_Flag` が立たない。
+そのためこのモードだけは、目標が変わったときにしか送らない。
+`odrive_set_position()` を制御ループから毎周期同じ値で呼んでも、送るのは値が変わったときだけである。
+
+**その結果、このモードでは ODrive の watchdog に餌が届かない。**
+watchdog を戻すのは `Set_Input_*` と closed loop への遷移だけで、ほかに手段がない。
+`ODRIVE_INPUT_MODE_TRAP_TRAJ` と `axis.config.enable_watchdog` は併用できない。
+
+## コールバック
+
+軸ごとに 2 本登録できる。
+
+| 登録 | 呼ばれるとき |
+| --- | --- |
+| `odrive_set_state_callback()` | heartbeat の `axis_state` / `procedure_result` / `active_errors` / `trajectory_done` が変わったとき、`Get_Error` の `active_errors` / `disarm_reason` が変わったとき、online / offline が変わったとき、`motor_disable()` / `odrive_estop()` が有効な軸を止めたとき |
+| `odrive_set_feedback_callback()` | `Get_Encoder_Estimates` が届いたとき（既定 100 Hz） |
+
+2 本に分かれているのは、再投入の判断だけが欲しい上位が 100 Hz のコールバックを受けずに済むようにするためである。
+
+`Get_Error` を有効にしていると、エラーが変わったことは heartbeat より先に `Get_Error` で届くことがある。
+次の heartbeat はそれを書き込んだ後の値と比べるので、`Get_Error` の側で知らせないと変化は誰にも伝わらない。
+
+**コールバックはバスごとの専用ワークキューから呼ばれる。**
+CAN の受信コールバックは割り込みコンテキストで呼ばれるが、そこからは呼ばない。
+したがってコールバックの中から `motor_enable()` などこのドライバの API を呼んでよい。
+指令の送信はシステムワークキューで走るので、コールバックが長引いても watchdog の餌は遅れない。
+
+**呼び出しは合流することがある。**
+ワークが処理される前に次のフレームが届くと、呼び出しは 1 回にまとまり、渡されるのは常に最新のスナップショットである。
+イベントの列は保存しない。
+ODrive の `active_errors` は `Clear_Errors` まで残るので、途中の heartbeat を 1 つ落としても原因は読める。
+
+## API の振る舞い
+
+`motor_set_output()` は**どのモードでも `-ENOTSUP` を返す**。
+ODrive の指令範囲は ODrive 自身の設定で決まり、`enum motor_output_mode` に載せられる機種非依存の単位がない。
+指令は `odrive.h` を使う。
+
+`motor_get_feedback()` が `valid_mask` に立てるのは `MOTOR_FEEDBACK_POSITION` と、
+`has-motor-thermistor` がある軸での `MOTOR_FEEDBACK_TEMPERATURE` だけである。
+速度、電流、トルクは `odrive_get_feedback()` から rev/s、A、Nm で読む。
+
+どちらの feedback も、heartbeat が `heartbeat-timeout-ms` の間に届いていなければ `-ENODATA` を返す。
+`odrive_get_feedback()` は、encoder estimates が `estimate-timeout-ms` を超えていれば `stale` を立てて `-EAGAIN` を返す。
+**`motor_get_feedback()` は、位置を出せないときはいつも `stale` を立てて `-EAGAIN` を返す。**
+estimates が一度も届いていないとき（`encoder_msg_rate_ms` が 0 のときを含む）と、有限でない `Pos_Estimate` が届いたときもそうなる。
+機種共通の層は、返り値が 0 なら位置を使ってよいと読むからである。RobStride も同じように振る舞う。
+NaN や無限大の `Pos_Estimate` は、エンコーダの故障で届くことがある。`int64_t` への変換は未定義なので、カウントにしない。
+
+`motor_get_feedback()` の `timestamp_ms` は、estimates が届いた時刻である。
+`odrive_feedback.timestamp_ms` は heartbeat や遅い測定値でも進むので、位置の古さを測るのには使えない。
+
+`odrive_set_position()` などの指令はモードの選択を兼ねる。
+モードが変わると `Set_Controller_Mode` を送り直すので、切り替えには 1 周期余計にかかる。
+有限でない値（NaN、無限大）は `-EINVAL` で拒み、保存していた指令は変えない。
+`odrive_set_position()` の速度とトルクの前置補償は、線路上の `int16`（倍率 0.001）に収まるよう ±32.767 で頭打ちにする。エラーにはしない。
+`odrive_set_limits()`、`odrive_set_traj_limits()`、`odrive_set_gains()`、`odrive_set_absolute_position()` も、有限でない値は送らずに `-EINVAL` を返す。
+`odrive_set_input_mode()` は、`enum odrive_input_mode` に無い値を `-EINVAL` で拒む。
+
+`odrive_set_traj_limits()` と `odrive_set_gains()` は 2 つのフレームを続けて送る。
+2 つ目がキューに入らなければエラーを返すが、1 つ目はもう ODrive に届いている。
+どちらのフレームも値を書くだけなので、同じ引数でもう一度呼べば揃う。
+
+`odrive_feedback.enabled` は、`motor_enable()` から、無効化、disarm、通信断のどれかまでの間 true である。
+有効化の手順の途中も true なので、closed loop にいるかどうかは `axis_state` で見る。
+
+`odrive_request_axis_state()` は、ドライバが軸を握っている間は `-EBUSY` を返す。
+キャリブレーションを走らせるには先に `motor_disable()` を呼ぶ。
+`motor_disable()` は `Set_Axis_State(IDLE)` をその場で送るので、
+ODrive は IDLE の直後に要求した状態を受け取ることになる。
+キャリブレーションは IDLE から始める手順なので、これで問題ない。
+
+`odrive_estop()` は `Estop` フレームを送り、軸を `ESTOP_REQUESTED` として disarm させる。
+これはエラーとして残るので、`motor_disable()` とは復帰の手間が違う。
+次の `motor_enable()` が手順 1 で消す。
+`Estop` が届かなかったときに続く IDLE の要求は、「無効化と非常停止」に書いた。
+
+## テスト
+
+```shell
+west twister -T tests/drivers/motor/odrive --integration
+```
+
+`zephyr,fake-can` を使い、送信フレームを捕まえて内容を検証し、受信コールバックに任意のフレームを注入する。
+
+`can_fake` は ztest rule で各テストの前に FFF の fake を reset する。
+`custom_fake` は before hook で入れ直す。
+差し替えた `can_send()` は、完了コールバックが渡されなければ失敗する。
+特定のコマンドをキューに入れない、線路で失ったと報告する、完了の報告をテストが離すまで遅らせる、送信メールボックスの数を絞る、の 4 つを真似られる。
+各テストの前に両軸を無効化し、IDLE の heartbeat を流して、無効化が始めた IDLE の要求を止める。
+
+native_sim の `k_sleep()` は次の tick に切り上げるので、`CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS` ずつ数えて待つと、指定より長く待つ。
+2 つの期限の間に入れる必要があるテストは、`k_uptime_get()` で経過時間を測って待つ。
+
+コールバックは専用ワークキューで走るので、フレームを注入してから結果を検証するまでに `k_sleep()` を挟む必要がある。
+また、armed の状態を保つテストは heartbeat を注入し続ける必要がある。
+実機の ODrive が heartbeat を止めないのと同じで、止めるとドライバは軸を落とす。
