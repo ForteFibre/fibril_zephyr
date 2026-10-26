@@ -1,0 +1,51 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  The inputs of a dead reckoning, exposed on the CAN bus as the schema's
+  Odometry block type: two ground encoders and a gyro. This is what PCMainFW
+  sent its host for fibril_localization.
+
+  This node is what puts Odometry on the bus. The build reads it to emit the
+  schema's `instances:` entry, which always holds one instance.
+
+    fcan_odometry: fcan-odometry {
+        compatible = "fibril,fcan-odometry";
+        fcan-ns = "odom";
+        encoders = <&enc3 &enc4>;
+        imu = <&gyro>;
+        status = "okay";
+    };
+
+  This node carries no reg and there is no reason to have two of them.
+
+compatible: "fibril,fcan-odometry"
+
+include: base.yaml
+
+properties:
+  fcan-ns:
+    type: string
+    required: true
+    description: |
+      The instance namespace on the bus, which becomes the ROS name prefix.
+      There is one instance, so it needs no `{i}`.
+
+      Required rather than defaulted: a name that reaches the ROS graph
+      belongs to the robot, not to the binding.
+
+  encoders:
+    type: phandles
+    required: true
+    description: |
+      The two ground encoders, as encoder0 and encoder1 of OdometryEncoder in
+      that order. Any encoder class device will do. Their counts are
+      published raw; the scale to a distance belongs to the dead reckoning's
+      encoder_gain0 and encoder_gain1.
+
+  imu:
+    type: phandle
+    required: true
+    description: |
+      The gyro, any IMU class device. Its yaw is published with the device's
+      sign.

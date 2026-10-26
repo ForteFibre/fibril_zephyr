@@ -1,0 +1,17 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config FIBRIL_CAN_NODE_ODOMETRY
+	bool
+	default y
+	depends on DT_HAS_FIBRIL_FCAN_ODOMETRY_ENABLED
+	select ENCODER
+	select IMU
+	help
+	  Compiled whenever the devicetree names the ground encoders and the
+	  gyro under a fibril,fcan-odometry node, which is also what puts the
+	  Odometry instance into the schema.
+
+	  The leaf drivers are not selected here: they are on by default once
+	  their own devicetree nodes exist, and this function works with any
+	  encoder and IMU class device.

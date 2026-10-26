@@ -41,6 +41,7 @@ config FIBRIL_NODE_ID
 rsource "adc_port/Kconfig"
 rsource "can_diag/Kconfig"
 rsource "md_motor/Kconfig"
+rsource "odometry/Kconfig"
 rsource "robstride/Kconfig"
 rsource "solenoid/Kconfig"
 
