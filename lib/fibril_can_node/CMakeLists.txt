@@ -11,6 +11,7 @@ add_subdirectory(adc_port)
 add_subdirectory(can_diag)
 add_subdirectory(md_motor)
 add_subdirectory(odometry)
+add_subdirectory(odrive)
 add_subdirectory(robstride)
 add_subdirectory(solenoid)
 
