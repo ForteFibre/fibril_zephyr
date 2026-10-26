@@ -1302,3 +1302,20 @@ ZTEST(odrive, test_estop_reports_the_enabled_change_to_the_state_callback)
 {
   stop_and_expect_a_state_report(odrive_estop, "odrive_estop()");
 }
+
+ZTEST(odrive, test_refused_axis_state_request_keeps_the_idle_request_going)
+{
+  arm(axis0, AXIS0_NODE_ID);
+  zassert_ok(motor_disable(axis0));
+
+  refuse_cmd = CMD_SET_AXIS_STATE;
+  refuse_count = 1;
+  zassert_not_ok(odrive_request_axis_state(axis0, ODRIVE_AXIS_STATE_IDLE),
+                 "a refused request reported success");
+  clear_captures();
+
+  sleep_armed(AXIS0_NODE_ID, CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS + (TICK_MS * 2));
+
+  zassert_true(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE) > 0U,
+               "a request that never went out cancelled the idle requests");
+}
