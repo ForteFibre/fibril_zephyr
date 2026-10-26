@@ -1,7 +1,7 @@
 # fibril_zephyr
 
 ForteFibre のロボット用基板で動く Zephyr ファームウェアを、1 つの workspace にまとめたリポジトリ。
-自作ボードの定義、out-of-tree のモータドライバとエンコーダドライバ、CAN FD 通信フレームワーク [fibril_can](https://github.com/ForteFibre/fibril_can) を使ったサンプルが入っている。
+自作ボードの定義、out-of-tree のモータ、エンコーダ、IMU のドライバ、CAN FD 通信フレームワーク [fibril_can](https://github.com/ForteFibre/fibril_can) を使ったサンプルが入っている。
 
 Zephyr の [T2 topology][west_t2] に沿った **workspace application** で、このリポジトリ自身が west manifest（[west.yml](west.yml)）を提供し、Zephyr 本体と依存モジュールを取り込む。
 Zephyr のバージョンは `west.yml` で v4.4.1 に固定してある。
@@ -110,6 +110,7 @@ deb の codegen は版が runtime とずれることがある（`west.yml` は f
 | --- | --- | --- |
 | エンコーダ | AMT21x アブソリュートエンコーダ（RS485） | [doc/drivers/amt21.md](doc/drivers/amt21.md) |
 | エンコーダ | DJI RoboMaster のロータ角 | [doc/drivers/robomaster_encoder.md](doc/drivers/robomaster_encoder.md) |
+| IMU | CruizCore R6093U ジャイロ（UART） | [doc/drivers/r6093u.md](doc/drivers/r6093u.md) |
 | モータ | DJI RoboMaster C610 / C620（CAN） | [doc/drivers/robomaster.md](doc/drivers/robomaster.md) |
 | モータ | RobStride アクチュエータ（CAN） | [doc/drivers/robstride.md](doc/drivers/robstride.md) |
 

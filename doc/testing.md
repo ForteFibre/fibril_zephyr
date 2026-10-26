@@ -61,6 +61,7 @@ FCAN_CODEGEN_FROM_SOURCE=ON west twister -T apps --integration             # deb
 | --- | --- | --- |
 | `tests/drivers/encoder/accum` | 積算・速度・オフセットの共通コア | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/encoder/amt21` | AMT21x ドライバ | `native_sim`、`native_sim/native/64` |
+| `tests/drivers/imu/r6093u` | R6093U ドライバ | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/motor/robomaster` | RoboMaster ドライバ | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/motor/robomaster_start_retry` | 起動できない CAN バスからの復帰 | `native_sim`、`native_sim/native/64` |
 | `tests/lib/motor_control` | 制御のコア（モード、PID の入力の単位、FF と摩擦、失速ブレーカ） | `native_sim`、`native_sim/native/64` |

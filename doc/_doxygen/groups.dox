@@ -11,6 +11,9 @@
  * @ingroup encoder_interface
  * @brief Diagnostics specific to the Same Sky AMT21x driver
  *
+ * @defgroup imu_interface IMU driver class
+ * @brief Inertial measurement unit and attitude sensor interface
+ *
  * @defgroup motor_interface Motor driver class
  * @brief Generic motor interface
  *
