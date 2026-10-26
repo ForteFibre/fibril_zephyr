@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <math.h>
 #include <string.h>
 
 #include <zephyr/device.h>
@@ -55,6 +56,21 @@ static void * rx_user_data;
 static struct can_filter rx_filters[4];
 static size_t rx_filter_count;
 
+/* Frames with this command are refused at queueing, as a full controller does. */
+static uint16_t refuse_cmd;
+static size_t refuse_count;
+/* Frames with this command are queued but reported lost on the wire. */
+static uint16_t lose_cmd;
+static size_t lose_count;
+/*
+ * TX mailboxes the fake has, or 0 for unlimited. A command interval runs
+ * within one tick of native_sim's clock, so a mailbox is freed by the next
+ * tick.
+ */
+static size_t mailboxes;
+static int64_t mailbox_tick;
+static size_t mailbox_used;
+
 DEFINE_FFF_GLOBALS;
 
 static int test_fake_can_add_rx_filter(
@@ -79,7 +95,35 @@ static int test_fake_can_send(
   const struct device * dev, const struct can_frame * frame, k_timeout_t timeout,
   can_tx_callback_t callback, void * user_data)
 {
+  const uint16_t cmd = (uint16_t)(frame->id & 0x1FU);
+  int error = 0;
+
   ARG_UNUSED(timeout);
+
+  if ((refuse_count > 0U) && (cmd == refuse_cmd)) {
+    refuse_count--;
+    return -EAGAIN;
+  }
+
+  if (mailboxes != 0U) {
+    const int64_t tick = k_uptime_ticks();
+
+    if (tick != mailbox_tick) {
+      mailbox_tick = tick;
+      mailbox_used = 0;
+    }
+
+    if (mailbox_used >= mailboxes) {
+      return -EAGAIN;
+    }
+
+    mailbox_used++;
+  }
+
+  if ((lose_count > 0U) && (cmd == lose_cmd)) {
+    lose_count--;
+    error = -EIO;
+  }
 
   if (captured_count < CAPTURE_MAX) {
     captured[captured_count] = *frame;
@@ -87,9 +131,8 @@ static int test_fake_can_send(
 
   captured_count++;
 
-  if (callback != NULL) {
-    callback(dev, 0, user_data);
-  }
+  zassert_not_null(callback, "can_send() without a completion callback waits for the wire");
+  callback(dev, error, user_data);
 
   return 0;
 }
@@ -161,6 +204,21 @@ static size_t count_frames(uint8_t node_id, uint16_t cmd)
   return count;
 }
 
+static size_t count_axis_state_requests(uint8_t node_id, enum odrive_axis_state state)
+{
+  size_t count = 0;
+
+  for (size_t i = 0; i < MIN(captured_count, (size_t)CAPTURE_MAX); ++i) {
+    if ((frame_node_id(&captured[i]) == node_id) &&
+        (frame_cmd(&captured[i]) == CMD_SET_AXIS_STATE) &&
+        (sys_get_le32(&captured[i].data[0]) == (uint32_t)state)) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
 /* Index of the first frame matching cmd, or SIZE_MAX. Used to assert ordering. */
 static size_t index_of(uint8_t node_id, uint16_t cmd)
 {
@@ -187,15 +245,22 @@ static void inject(uint8_t node_id, uint16_t cmd, const uint8_t data[8], uint8_t
   rx_callback(test_can, &frame, rx_user_data);
 }
 
-static void inject_heartbeat(uint8_t node_id, enum odrive_axis_state state, uint32_t errors)
+static void inject_heartbeat_with_trajectory(
+  uint8_t node_id, enum odrive_axis_state state, uint32_t errors, bool trajectory_done)
 {
   uint8_t data[8] = {0};
 
   sys_put_le32(errors, &data[0]);
   data[4] = (uint8_t)state;
   data[5] = (uint8_t)ODRIVE_PROCEDURE_RESULT_SUCCESS;
+  data[6] = trajectory_done ? 0x01U : 0x00U;
 
   inject(node_id, CMD_HEARTBEAT, data, 8U);
+}
+
+static void inject_heartbeat(uint8_t node_id, enum odrive_axis_state state, uint32_t errors)
+{
+  inject_heartbeat_with_trajectory(node_id, state, errors, false);
 }
 
 static void inject_estimates(uint8_t node_id, float position, float velocity)
@@ -229,12 +294,17 @@ static void inject_temperature(uint8_t node_id, float fet, float motor)
  * heartbeating, so a test that spans several command intervals has to keep
  * sending them the way a real ODrive does.
  */
-static void sleep_armed(uint8_t node_id, int ms)
+static void sleep_alive(uint8_t node_id, enum odrive_axis_state state, int ms)
 {
   for (int elapsed = 0; elapsed < ms; elapsed += CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS) {
-    inject_heartbeat(node_id, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL, 0U);
+    inject_heartbeat(node_id, state, 0U);
     k_sleep(K_MSEC(CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS));
   }
+}
+
+static void sleep_armed(uint8_t node_id, int ms)
+{
+  sleep_alive(node_id, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL, ms);
 }
 
 /* Bring an axis to the point where the driver is sending setpoints. */
@@ -278,13 +348,12 @@ static void odrive_before(void * fixture)
 {
   ARG_UNUSED(fixture);
 
-  /*
-   * can_fake resets its fakes in a ztest rule before every test. Without
-   * reinstalling this one, can_send() without a completion callback waits
-   * K_FOREVER on the semaphore the CAN API set up for it.
-   */
+  /* can_fake resets its fakes in a ztest rule before every test. */
   fake_can_send_fake.custom_fake = test_fake_can_send;
   fake_can_start_fake.custom_fake = test_fake_can_start;
+  refuse_count = 0;
+  lose_count = 0;
+  mailboxes = 0;
 
   (void)motor_disable(axis0);
   (void)motor_disable(axis1);
@@ -529,8 +598,35 @@ ZTEST(odrive, test_losing_the_heartbeat_disables_the_axis_until_it_is_re_armed)
 
   zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_INPUT_TORQUE), 0U,
                 "the driver re-armed the axis on its own once frames resumed");
+  zassert_equal(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL),
+                0U, "the driver asked for closed loop again without being told to");
+}
+
+ZTEST(odrive, test_an_axis_left_in_closed_loop_by_a_timeout_is_told_to_go_idle)
+{
+  zassert_ok(odrive_set_velocity(axis0, 5.0F, 0.0F));
+  arm(axis0, AXIS0_NODE_ID);
+  clear_captures();
+
+  k_sleep(K_MSEC(DT_PROP(DT_NODELABEL(odrive_test), heartbeat_timeout_ms) + DISPATCH_MS + 40));
+
+  zassert_true(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE) > 0U,
+               "the axis was dropped without being told to go idle");
+
+  /* It comes back still running on its last setpoint. */
+  clear_captures();
+  sleep_armed(AXIS0_NODE_ID, CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS + (TICK_MS * 2));
+
+  zassert_true(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE) > 0U,
+               "an axis seen in closed loop again was not told to go idle");
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_INPUT_VEL), 0U,
+                "the driver commanded an axis it had dropped");
+
+  clear_captures();
+  sleep_alive(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS + (TICK_MS * 2));
+
   zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_AXIS_STATE), 0U,
-                "the driver asked for closed loop again without being told to");
+                "the idle request went on after the axis reported idle");
 }
 
 ZTEST(odrive, test_temperature_reaches_the_class_only_with_a_thermistor)
@@ -577,6 +673,38 @@ ZTEST(odrive, test_trap_traj_does_not_resend_an_unchanged_position)
 
   zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_INPUT_POS), 1U,
                 "a changed trap-traj target was not sent exactly once");
+}
+
+ZTEST(odrive, test_trap_traj_ignores_a_control_loop_repeating_the_same_target)
+{
+  zassert_ok(odrive_set_input_mode(axis0, ODRIVE_INPUT_MODE_TRAP_TRAJ));
+  zassert_ok(odrive_set_position(axis0, 1.0F, 0.0F, 0.0F));
+  arm(axis0, AXIS0_NODE_ID);
+  clear_captures();
+
+  for (int i = 0; i < 4; ++i) {
+    zassert_ok(odrive_set_position(axis0, 1.0F, 0.0F, 0.0F));
+    sleep_armed(AXIS0_NODE_ID, TICK_MS);
+  }
+
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_INPUT_POS), 0U,
+                "re-applying the same trap-traj target re-planned the trajectory");
+}
+
+ZTEST(odrive, test_trap_traj_target_lost_on_the_wire_is_sent_again)
+{
+  zassert_ok(odrive_set_input_mode(axis0, ODRIVE_INPUT_MODE_TRAP_TRAJ));
+  zassert_ok(odrive_set_position(axis0, 1.0F, 0.0F, 0.0F));
+  arm(axis0, AXIS0_NODE_ID);
+  clear_captures();
+
+  lose_cmd = CMD_SET_INPUT_POS;
+  lose_count = 1;
+  zassert_ok(odrive_set_position(axis0, 2.0F, 0.0F, 0.0F));
+  sleep_armed(AXIS0_NODE_ID, TICK_MS * 4);
+
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_INPUT_POS), 2U,
+                "a lost trap-traj target was not sent exactly once more");
 }
 
 ZTEST(odrive, test_passthrough_resends_an_unchanged_position_every_interval)
@@ -652,4 +780,135 @@ ZTEST(odrive, test_axis_state_request_is_refused_while_the_driver_owns_the_axis)
   zassert_not_null(frame, "no Set_Axis_State for the calibration request");
   zassert_equal(sys_get_le32(&frame->data[0]), (uint32_t)ODRIVE_AXIS_STATE_MOTOR_CALIBRATION,
                 "the requested state is wrong");
+}
+
+ZTEST(odrive, test_arming_frame_refused_by_the_controller_is_built_again)
+{
+  refuse_cmd = CMD_SET_CONTROLLER_MODE;
+  refuse_count = 1;
+
+  zassert_ok(motor_enable(axis0));
+  k_sleep(K_MSEC(ARM_MS));
+
+  const size_t mode = index_of(AXIS0_NODE_ID, CMD_SET_CONTROLLER_MODE);
+  const size_t state = index_of(AXIS0_NODE_ID, CMD_SET_AXIS_STATE);
+
+  zassert_not_equal(mode, SIZE_MAX, "the refused Set_Controller_Mode was never sent");
+  zassert_not_equal(state, SIZE_MAX, "arming stalled after a refused frame");
+  zassert_true(mode < state, "closed loop was requested before the mode reached the axis");
+}
+
+ZTEST(odrive, test_clear_errors_lost_on_the_wire_is_sent_again_before_the_mode)
+{
+  lose_cmd = CMD_CLEAR_ERRORS;
+  lose_count = 1;
+
+  zassert_ok(motor_enable(axis0));
+  k_sleep(K_MSEC(ARM_MS + TICK_MS));
+
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_CLEAR_ERRORS), 2U,
+                "a lost Clear_Errors was not sent exactly once more");
+  zassert_not_equal(index_of(AXIS0_NODE_ID, CMD_SET_AXIS_STATE), SIZE_MAX,
+                    "arming stalled after a lost frame");
+}
+
+ZTEST(odrive, test_axes_take_turns_when_the_controller_runs_out_of_mailboxes)
+{
+  mailboxes = 1;
+
+  zassert_ok(odrive_set_torque(axis0, 1.0F));
+  zassert_ok(odrive_set_torque(axis1, 2.0F));
+  zassert_ok(motor_enable(axis0));
+  zassert_ok(motor_enable(axis1));
+
+  for (int elapsed = 0; elapsed < (ARM_MS * 3); elapsed += CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS) {
+    inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL, 0U);
+    inject_heartbeat(AXIS1_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL, 0U);
+    k_sleep(K_MSEC(CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS));
+  }
+
+  zassert_true(count_frames(AXIS0_NODE_ID, CMD_SET_INPUT_TORQUE) > 0U,
+               "axis0 was starved of setpoints");
+  zassert_true(count_frames(AXIS1_NODE_ID, CMD_SET_INPUT_TORQUE) > 0U,
+               "axis1 was starved of setpoints");
+}
+
+ZTEST(odrive, test_closed_loop_heartbeat_from_before_the_enable_does_not_arm)
+{
+  zassert_ok(motor_enable(axis0));
+
+  /* Sent before the ODrive took the idle of a preceding disable. */
+  inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL, 0U);
+  inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U);
+
+  struct odrive_feedback feedback;
+
+  (void)odrive_get_feedback(axis0, &feedback);
+  zassert_true(feedback.enabled, "the enable was cancelled by a stale heartbeat");
+
+  k_sleep(K_MSEC(ARM_MS));
+
+  zassert_true(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL) >
+                 0U,
+               "the arming sequence did not go on");
+}
+
+ZTEST(odrive, test_trajectory_done_reaches_the_state_callback)
+{
+  zassert_ok(odrive_set_state_callback(axis0, record_state, &state_record));
+  inject_heartbeat_with_trajectory(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U, false);
+  k_sleep(K_MSEC(DISPATCH_MS));
+  state_record.count = 0;
+
+  inject_heartbeat_with_trajectory(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U, true);
+  k_sleep(K_MSEC(DISPATCH_MS));
+
+  zassert_true(state_record.count > 0U, "the end of the trajectory was not reported");
+  zassert_true(state_record.last.trajectory_done, "the callback did not carry the flag");
+}
+
+ZTEST(odrive, test_non_finite_targets_are_refused)
+{
+  zassert_equal(odrive_set_position(axis0, NAN, 0.0F, 0.0F), -EINVAL);
+  zassert_equal(odrive_set_position(axis0, 0.0F, INFINITY, 0.0F), -EINVAL);
+  zassert_equal(odrive_set_position(axis0, 0.0F, 0.0F, NAN), -EINVAL);
+  zassert_equal(odrive_set_velocity(axis0, NAN, 0.0F), -EINVAL);
+  zassert_equal(odrive_set_velocity(axis0, 0.0F, -INFINITY), -EINVAL);
+  zassert_equal(odrive_set_torque(axis0, NAN), -EINVAL);
+}
+
+/*
+ * Keeps the axis online for at least ms of uptime. sleep_alive() counts
+ * intervals, and each k_sleep() rounds up to the next tick, so it overshoots
+ * by too much for a test that has to land between two timeouts.
+ */
+static void stay_online_for(uint8_t node_id, int64_t ms)
+{
+  const int64_t start = k_uptime_get();
+
+  while ((k_uptime_get() - start) < ms) {
+    inject_heartbeat(node_id, ODRIVE_AXIS_STATE_IDLE, 0U);
+    k_sleep(K_MSEC(CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS));
+  }
+}
+
+ZTEST(odrive, test_slow_measurements_outlive_the_estimate_timeout)
+{
+  const int64_t estimate_timeout = DT_PROP(DT_NODELABEL(odrive_test), estimate_timeout_ms);
+  const int64_t measurement_timeout = DT_PROP(DT_NODELABEL(odrive_test), measurement_timeout_ms);
+  struct odrive_feedback feedback;
+
+  inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U);
+  inject_temperature(AXIS0_NODE_ID, 40.0F, 0.0F);
+  stay_online_for(AXIS0_NODE_ID, (estimate_timeout + measurement_timeout) / 2);
+
+  (void)odrive_get_feedback(axis0, &feedback);
+  zassert_true((feedback.valid_mask & ODRIVE_FEEDBACK_TEMPERATURE) != 0U,
+               "a measurement slower than the estimates dropped out between frames");
+
+  stay_online_for(AXIS0_NODE_ID, measurement_timeout);
+
+  (void)odrive_get_feedback(axis0, &feedback);
+  zassert_equal(feedback.valid_mask & ODRIVE_FEEDBACK_TEMPERATURE, 0U,
+                "a measurement that stopped arriving is still valid");
 }
