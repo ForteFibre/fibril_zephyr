@@ -66,6 +66,7 @@ FCAN_CODEGEN_FROM_SOURCE=ON west twister -T apps --integration             # deb
 | `tests/drivers/motor/robomaster` | RoboMaster ドライバ | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/motor/robomaster_start_retry` | 起動できない CAN バスからの復帰 | `native_sim`、`native_sim/native/64` |
 | `tests/lib/motor_control` | 制御のコア（モード、PID の入力の単位、FF と摩擦、失速ブレーカ） | `native_sim`、`native_sim/native/64` |
+| `tests/lib/odrive_sequencer` | ODrive の軸の状態機械（キャリブレーション、arm、IDLE を経由するモードの切り替え、エラーからの復帰、途絶） | `native_sim`、`native_sim/native/64` |
 | `tests/lib/custom` | `lib/custom` | 制限なし |
 
 いずれも実機を必要としない。

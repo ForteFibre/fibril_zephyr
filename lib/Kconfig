@@ -8,5 +8,6 @@ rsource "fibril_can_node/Kconfig"
 rsource "fcan_transport/Kconfig"
 rsource "motor_control/Kconfig"
 rsource "node_id/Kconfig"
+rsource "odrive_sequencer/Kconfig"
 
 endmenu

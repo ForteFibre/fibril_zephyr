@@ -81,7 +81,7 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 | `dts/bindings/` | 上記ドライバと機能の devicetree binding |
 | `dts/fibril/` | snippet の overlay が include するハードウェアの断片（基板に依存しないものと、`<board>/` の下の基板ごとのもの） |
 | `include/` | 公開ヘッダ。ドライバクラスの API はここが正本 |
-| `lib/` | out-of-tree ライブラリ。`lib/fibril_can_node/` にブロック型の実装、`lib/fcan_transport/` にバスへの繋ぎ方、`lib/motor_control/` にモータ 1 台ぶんの制御のコア、`lib/node_id/` に基板の ID スイッチから node_id を読む処理 |
+| `lib/` | out-of-tree ライブラリ。`lib/fibril_can_node/` にブロック型の実装、`lib/fcan_transport/` にバスへの繋ぎ方、`lib/motor_control/` にモータ 1 台ぶんの制御のコア、`lib/odrive_sequencer/` に ODrive の軸 1 つぶんの状態機械、`lib/node_id/` に基板の ID スイッチから node_id を読む処理 |
 | `samples/` | ドライバ単体および fibril_can と組み合わせたサンプル |
 | `tests/` | Twister から走る ztest |
 | `scripts/` | west の拡張コマンドと runner |
@@ -92,7 +92,8 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 
 `apps/node/` と `lib/fibril_can_node/` は C++17 で、codegen にも `LANGUAGE CXX` を渡している。
 `lib/motor_control/` も C++17 である。fibril_common の制御器（テンプレート）を使うためで、codegen とは関係しない。
-`drivers/`、`lib/fcan_transport/`、`app/`、`samples/`、`tests/` は C のままである（`tests/lib/motor_control/` だけは、試す対象に合わせて C++ で書く）。
+`lib/odrive_sequencer/` は、それを使う `ODriveMotor` に合わせて C++17 で書いた。fibril_can にもドライバの実装にも依存しないので、host でテストできる。
+`drivers/`、`lib/fcan_transport/`、`app/`、`samples/`、`tests/` は C のままである（`tests/lib/motor_control/` と `tests/lib/odrive_sequencer/` だけは、試す対象に合わせて C++ で書く）。
 理由と、C++ 標準ライブラリに要求が付く点は [ADR 0007](adr/0007-cpp-node-implementation.md) にある。
 
 ## ドライバ
