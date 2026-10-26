@@ -300,7 +300,8 @@ static void inject_estimates(uint8_t node_id, float position, float velocity)
   inject(node_id, CMD_GET_ENCODER_ESTIMATES, data, 8U);
 }
 
-static void release_held_frame(void)
+/* Report the oldest held frame sent, or lost with error. */
+static void complete_held_frame(int error)
 {
   zassert_true(held_count > 0U, "no frame is being held");
 
@@ -310,7 +311,12 @@ static void release_held_frame(void)
   held_count--;
   memmove(&held_callbacks[0], &held_callbacks[1], held_count * sizeof(held_callbacks[0]));
   memmove(&held_user_data[0], &held_user_data[1], held_count * sizeof(held_user_data[0]));
-  callback(test_can, 0, user_data);
+  callback(test_can, error, user_data);
+}
+
+static void release_held_frame(void)
+{
+  complete_held_frame(0);
 }
 
 static void inject_error(uint8_t node_id, uint32_t active_errors, uint32_t disarm_reason)
@@ -401,7 +407,11 @@ static void odrive_before(void * fixture)
   refuse_count = 0;
   lose_count = 0;
   hold_count = 0;
-  held_count = 0;
+
+  /* A frame a test left held would keep the next test's enable waiting. */
+  while (held_count > 0U) {
+    complete_held_frame(0);
+  }
   mailboxes = 0;
 
   (void)motor_disable(axis0);
@@ -1204,4 +1214,91 @@ ZTEST(odrive, test_late_report_for_an_older_idle_does_not_release_a_newer_stop)
   zassert_true(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL) >
                  0U,
                "arming did not go on once every stop was sent");
+}
+
+ZTEST(odrive, test_lost_older_idle_does_not_release_a_newer_stop)
+{
+  arm(axis0, AXIS0_NODE_ID);
+
+  hold_cmds = BIT(CMD_SET_AXIS_STATE) | BIT(CMD_ESTOP);
+  hold_count = 2;
+  zassert_ok(motor_disable(axis0));
+  zassert_ok(odrive_estop(axis0));
+  zassert_ok(motor_enable(axis0));
+  clear_captures();
+
+  /* The idle is lost; the estop is still queued. */
+  complete_held_frame(-EIO);
+  sleep_armed(AXIS0_NODE_ID, ARM_MS);
+
+  zassert_equal(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL),
+                0U, "a lost idle let arming go on while the estop was still queued");
+
+  release_held_frame();
+}
+
+ZTEST(odrive, test_heartbeat_before_the_closed_loop_request_is_sent_does_not_arm)
+{
+  zassert_ok(motor_enable(axis0));
+  zassert_ok(odrive_set_torque(axis0, 1.0F));
+
+  hold_cmds = BIT(CMD_SET_AXIS_STATE);
+  hold_count = 1;
+  k_sleep(K_MSEC(ARM_MS));
+  zassert_not_equal(index_of(AXIS0_NODE_ID, CMD_SET_AXIS_STATE), SIZE_MAX,
+                    "the closed loop request was never queued");
+
+  inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL, 0U);
+  k_sleep(K_MSEC(TICK_MS));
+
+  zassert_equal(count_frames(AXIS0_NODE_ID, CMD_SET_INPUT_TORQUE), 0U,
+                "a heartbeat ahead of the closed loop request armed the axis");
+
+  release_held_frame();
+  sleep_armed(AXIS0_NODE_ID, TICK_MS * 2);
+
+  zassert_true(count_frames(AXIS0_NODE_ID, CMD_SET_INPUT_TORQUE) > 0U,
+               "the axis did not arm once the request was sent");
+}
+
+ZTEST(odrive, test_closed_loop_request_lost_after_a_mode_change_is_sent_again)
+{
+  arm(axis0, AXIS0_NODE_ID);
+  zassert_ok(odrive_set_torque(axis0, 1.0F));
+  sleep_armed(AXIS0_NODE_ID, TICK_MS * 2);
+  clear_captures();
+
+  lose_cmd = CMD_SET_AXIS_STATE;
+  lose_count = 1;
+  zassert_ok(odrive_set_velocity(axis0, 3.0F, 0.0F));
+  sleep_armed(AXIS0_NODE_ID, TICK_MS * 4);
+
+  zassert_equal(count_axis_state_requests(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL),
+                2U, "a lost closed loop request on an armed axis was not sent exactly once more");
+}
+
+static void stop_and_expect_a_state_report(int (*stop)(const struct device *), const char * what)
+{
+  zassert_ok(odrive_set_state_callback(axis0, record_state, &state_record));
+  arm(axis0, AXIS0_NODE_ID);
+  sleep_armed(AXIS0_NODE_ID, DISPATCH_MS);
+  state_record.count = 0;
+
+  /* Fresh heartbeat, so the timeout cannot be what gets reported. */
+  inject_heartbeat(AXIS0_NODE_ID, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL, 0U);
+  zassert_ok(stop(axis0));
+  k_sleep(K_MSEC(DISPATCH_MS));
+
+  zassert_true(state_record.count > 0U, "%s was not reported", what);
+  zassert_false(state_record.last.enabled, "the callback still reported the axis as enabled");
+}
+
+ZTEST(odrive, test_disable_reports_the_enabled_change_to_the_state_callback)
+{
+  stop_and_expect_a_state_report(motor_disable, "motor_disable()");
+}
+
+ZTEST(odrive, test_estop_reports_the_enabled_change_to_the_state_callback)
+{
+  stop_and_expect_a_state_report(odrive_estop, "odrive_estop()");
 }
