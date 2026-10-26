@@ -206,6 +206,7 @@ heartbeat が来ないということは closed loop にいる確認が取れな
 heartbeat が戻って closed loop 以外を報告したら止める。
 受信だけが途絶えている場合にも届くよう、offline の間も送る。
 `motor_enable()` と `odrive_request_axis_state()` を呼んだら、上位が軸を引き取ったものとして止める。
+ただし `odrive_request_axis_state()` のフレームがキューに入らなかったときは、何も引き取っていないので止めない。
 `motor_disable()` と `odrive_estop()` は止めずに引き継ぐ（次の節）。
 
 `motor_enable()` の直後に届いた heartbeat が closed loop を示していても、ドライバはその軸を armed とみなさない。
