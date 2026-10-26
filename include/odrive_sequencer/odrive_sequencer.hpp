@@ -143,6 +143,7 @@ public:
    * @param running Whether the master is present. Calibration and arming wait
    *        for it, so a board powered on its own does not move the motor.
    * @param now_ms Uptime in milliseconds.
+   * @param port What to do to the axis.
    */
   void step(const struct odrive_feedback & feedback, bool running, int64_t now_ms, Port & port);
 
