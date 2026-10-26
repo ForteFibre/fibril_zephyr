@@ -57,9 +57,10 @@ void Sequencer::enter(State next)
 }
 
 /* The driver keeps the control mode across motor_enable() but drops the
- * value, so selecting the mode first arms the axis in the mode it is about to
- * be commanded in, and flush_pending() then sends the value without making
- * the driver re-arm for a mode change. */
+ * value. Selecting the mode first arms the axis in the mode it is about to be
+ * commanded in, so no later mode change sends the driver back to arming; the
+ * value goes in again straight after, so the driver has a setpoint to send,
+ * and to feed the ODrive's watchdog with, the moment the axis is armed. */
 void Sequencer::arm(int64_t now_ms, Port & port)
 {
   if (_has_pending) {
@@ -67,6 +68,11 @@ void Sequencer::arm(int64_t now_ms, Port & port)
   }
 
   (void)port.enable();
+
+  if (_has_pending) {
+    (void)port.apply(_pending);
+  }
+
   _request_ms = now_ms;
 }
 

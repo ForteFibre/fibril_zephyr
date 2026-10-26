@@ -221,15 +221,29 @@ ZTEST(odrive_sequencer, test_calibrated_axis_waits_for_a_command_to_arm)
   zassert_equal(port.enables, 0);
 }
 
-ZTEST(odrive_sequencer, test_command_selects_the_mode_before_arming_and_is_sent_once_ready)
+ZTEST(odrive_sequencer, test_command_selects_the_mode_before_arming_and_is_sent_right_after)
+{
+  Sequencer seq;
+  Recorder port;
+  const int64_t now = calibrate(seq, port);
+
+  seq.command(velocity(2.0f), now, port);
+  seq.step(heartbeat(AXIS_IDLE, RESULT_SUCCESS, now), true, now, port);
+
+  /* The driver drops the value on enable but keeps the mode. */
+  zassert_mem_equal(port.order, "aea", 3);
+  zassert_equal(port.applied.control_mode, ODRIVE_CONTROL_MODE_VELOCITY);
+  zassert_within(port.applied.value, 2.0f, 1e-6f);
+}
+
+ZTEST(odrive_sequencer, test_command_is_sent_again_once_ready)
 {
   Sequencer seq;
   Recorder port;
 
   bring_up(seq, port, velocity(2.0f));
 
-  /* apply, enable, then the value again once in closed loop. */
-  zassert_mem_equal(port.order, "aea", 3);
+  zassert_mem_equal(port.order, "aeaa", 4);
   zassert_equal(port.applied.control_mode, ODRIVE_CONTROL_MODE_VELOCITY);
   zassert_within(port.applied.value, 2.0f, 1e-6f);
 }
