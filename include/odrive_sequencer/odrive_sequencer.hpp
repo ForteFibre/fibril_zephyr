@@ -76,7 +76,7 @@ struct Setpoint
   uint8_t type;
   enum odrive_control_mode control_mode;
   enum odrive_input_mode input_mode;
-  /** rev, rev/s or Nm, depending on @ref control_mode. */
+  /** rev, rev/s or Nm, depending on the control mode. */
   float value;
 };
 
