@@ -123,7 +123,7 @@ ODrive が受け付けない指令を送り続けても意味がなく、watchdo
 `odrive_clear_errors()` は有効化を伴わずにエラーだけ消したいときのためにある。
 `odrive_estop()` のあとも同じで、`Estop` が残す `ESTOP_REQUESTED` は次の `motor_enable()` が消す。
 `drivers/motor/robstride.c` が run state の離脱でハンドシェイクをやり直すのとは、ここで分かれる。
-armed とみなすのは、その有効化で `Set_Axis_State(CLOSED_LOOP_CONTROL)` を送った後に closed loop を報告した heartbeat だけとする。無効化の直後に有効化すると IDLE を処理する前の heartbeat が届くことがあり、それで armed とすると、続く IDLE を故障と取り違えて有効化を取り消してしまう。
+armed とみなすのは、その有効化の `Set_Axis_State(CLOSED_LOOP_CONTROL)` が線路に出たと完了コールバックが報告した後に、closed loop を報告した heartbeat だけとする。無効化の直後に有効化すると IDLE を処理する前の heartbeat が届くことがあり、それで armed とすると、続く IDLE を故障と取り違えて有効化を取り消してしまう。
 送った後、という条件は、直前の IDLE が送信メールボックスで待っている間は効かない。ODrive がまだ closed loop にいる heartbeat が要求の後に届くからである。そのため、直前の IDLE または `Estop` が線路に出たと完了コールバックが報告するまで、有効化の手順を始めない。ACK の無いバスでは報告が来ないので、待つのは `CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` までとする。
 heartbeat の途絶でも有効を落とすが、こちらは軸が最後の指令で回り続けている可能性がある。最後に聞いた状態が closed loop である間は `Set_Axis_State(IDLE)` を `CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` ごとに送り、closed loop 以外の heartbeat が届くか、上位が `motor_enable()` か `odrive_request_axis_state()` を呼んだら止める。
 
@@ -150,7 +150,7 @@ watchdog を戻すのは `Set_Input_*` と closed loop への遷移だけなの�
 
 21. **`Set_Input_Pos` の前置補償は符号付き `int16`、倍率 0.001 で符号化する。** 実機で確かめた。参照実装が `int8` で書いているのは誤りである。倍率は ODrive 側の `input_vel_scale` と `input_torque_scale` が決めるもので、ドライバは既定の 0.001 を前提にする。決定 17 と同じく設定を書きにいかず、既定のままにしておくことを `doc/drivers/odrive.md` の要求設定に並べる。
 
-22. **軸ごとに 2 本のコールバックを実行時に登録できるようにする。** 状態コールバックは heartbeat が報告する `axis_state`、`procedure_result`、`active_errors`、`trajectory_done` のいずれかが変わったときと、`heartbeat-timeout-ms` による online / offline の遷移で呼ぶ。feedback コールバックは `Get_Encoder_Estimates` が届いたときに呼ぶ。2 本に分けるのは、**再投入の判断だけが欲しい上位が 100 Hz の feedback を受け取らずに済むようにする**ためである。iq、temperature、torques、bus、error はスナップショットを更新するだけで呼び出さない。ODrive 側の周期設定によって発火頻度が変わるコールバックを増やしても、上位が使える保証がない。
+22. **軸ごとに 2 本のコールバックを実行時に登録できるようにする。** 状態コールバックは heartbeat が報告する `axis_state`、`procedure_result`、`active_errors`、`trajectory_done` のいずれかが変わったときと、`heartbeat-timeout-ms` による online / offline の遷移、`motor_disable()` と `odrive_estop()` が有効な軸を止めたときに呼ぶ。feedback コールバックは `Get_Encoder_Estimates` が届いたときに呼ぶ。2 本に分けるのは、**再投入の判断だけが欲しい上位が 100 Hz の feedback を受け取らずに済むようにする**ためである。iq、temperature、torques、bus、error はスナップショットを更新するだけで呼び出さない。ODrive 側の周期設定によって発火頻度が変わるコールバックを増やしても、上位が使える保証がない。
 ただし `Get_Error` が `active_errors` か `disarm_reason` の変化を運んできたときは、状態コールバックを呼ぶ。`Get_Error` が先に値を書き換えると、次の heartbeat は変化を見つけられないからである。発火するのは値が変わったときだけなので、周期には依存しない。
 
 23. **コールバックは割り込みコンテキストではなく、バスごとの専用ワークキューから呼ぶ。** 受信経路は spinlock の下でスナップショットを更新して保留ビットを立て、ワークを submit するだけにする。ワークハンドラがロックの外でコールバックを呼ぶ。決定 12 の再投入は `motor_enable()` を呼ぶことであり、**これをコールバックの中から直接呼べる**ことがこの決定の目的である。**送信タイマーは有効な軸が 1 つもなくても回し続ける。** タイムアウトの判定とワークの submit もこのタイマーが行うので、止めると offline の遷移が通知されない。`drivers/motor/robstride.c` は stale と online を読み出しの時点で計算しているが、コールバックで知らせる以上、誰も読まなくても判定が進む必要がある。有効化する前に軸が生きているかを確かめる、という使い方がこれで成り立つ。

@@ -209,7 +209,8 @@ heartbeat が戻って closed loop 以外を報告したら止める。
 `motor_disable()` と `odrive_estop()` は止めずに引き継ぐ（次の節）。
 
 `motor_enable()` の直後に届いた heartbeat が closed loop を示していても、ドライバはその軸を armed とみなさない。
-armed とみなすのは、この有効化で `Set_Axis_State(CLOSED_LOOP_CONTROL)` を送った後の heartbeat だけである。
+armed とみなすのは、この有効化の `Set_Axis_State(CLOSED_LOOP_CONTROL)` が線路に出たと完了コールバックが報告した後の heartbeat だけである。
+フレームを組み立てた時点で数えると、送る前に割り込んだ heartbeat で armed になり、そのフレームが失われても取り消せない。
 `motor_disable()` の直後に `motor_enable()` を呼ぶと、ODrive が IDLE を処理する前の heartbeat が届くことがある。
 これを armed と数えると、続く IDLE の heartbeat を故障と取り違えて、有効化を黙って取り消すことになる。
 
@@ -260,7 +261,7 @@ watchdog を戻すのは `Set_Input_*` と closed loop への遷移だけで、�
 
 | 登録 | 呼ばれるとき |
 | --- | --- |
-| `odrive_set_state_callback()` | heartbeat の `axis_state` / `procedure_result` / `active_errors` / `trajectory_done` が変わったとき、`Get_Error` の `active_errors` / `disarm_reason` が変わったとき、online / offline が変わったとき |
+| `odrive_set_state_callback()` | heartbeat の `axis_state` / `procedure_result` / `active_errors` / `trajectory_done` が変わったとき、`Get_Error` の `active_errors` / `disarm_reason` が変わったとき、online / offline が変わったとき、`motor_disable()` / `odrive_estop()` が有効な軸を止めたとき |
 | `odrive_set_feedback_callback()` | `Get_Encoder_Estimates` が届いたとき（既定 100 Hz） |
 
 2 本に分かれているのは、再投入の判断だけが欲しい上位が 100 Hz のコールバックを受けずに済むようにするためである。
