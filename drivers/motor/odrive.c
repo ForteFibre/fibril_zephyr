@@ -163,6 +163,8 @@ struct odrive_axis_data
   bool mode_sent;
   bool state_sent;
   int64_t state_sent_ms;
+  /* The closed loop request built for state_sent was reported sent. */
+  bool state_on_wire;
   /* Set once the heartbeat has confirmed closed loop, so that a later drop
    * out of it is a fault rather than the arming still being in progress. */
   bool armed;
@@ -172,6 +174,7 @@ struct odrive_axis_data
    * request until the heartbeat shows it out of closed loop.
    */
   bool idle_pending;
+  /* Schedules the idle retries. Moved back when one fails, to retry at once. */
   int64_t idle_sent_ms;
   /*
    * Idle and estop requests queued but not yet reported sent. A count, because
@@ -179,6 +182,8 @@ struct odrive_axis_data
    * not clear a newer one.
    */
   uint8_t idle_in_flight;
+  /* When the newest of them was queued, which bounds how long arming waits. */
+  int64_t stop_queued_ms;
   struct odrive_tx_ctx tx_ctx[ODRIVE_TX_STAGE_COUNT];
 
   /* What the axis reported. */
@@ -284,6 +289,16 @@ static const struct device * odrive_find_axis(struct odrive_bus_data * bus, uint
   return NULL;
 }
 
+/* An idle or estop request is being queued. Caller holds the axis lock. */
+static void odrive_idle_queued(struct odrive_axis_data * data, int64_t now)
+{
+  if (data->idle_in_flight < UINT8_MAX) {
+    data->idle_in_flight++;
+  }
+
+  data->stop_queued_ms = now;
+}
+
 /* One idle or estop request is no longer queued. Caller holds the axis lock. */
 static void odrive_idle_settled(struct odrive_axis_data * data)
 {
@@ -314,8 +329,10 @@ static void odrive_tx_failed(struct odrive_axis_data * data, enum odrive_tx_stag
       }
       break;
     case ODRIVE_TX_STAGE_AXIS_STATE:
-      if (data->enabled && !data->armed) {
+      /* Also on an armed axis, which re-requests closed loop after a mode change. */
+      if (data->enabled) {
         data->state_sent = false;
+        data->state_on_wire = false;
       }
       break;
     case ODRIVE_TX_STAGE_SETPOINT:
@@ -341,17 +358,20 @@ static void odrive_tx_done(const struct device * can_dev, int error, void * user
     return;
   }
 
-  /* Arming waits for an idle request to be sent, so its success matters too. */
-  if ((error == 0) && (ctx->stage != ODRIVE_TX_STAGE_IDLE)) {
+  /* Arming waits on these two being sent, so their success matters too. */
+  if ((error == 0) && (ctx->stage != ODRIVE_TX_STAGE_IDLE) &&
+      (ctx->stage != ODRIVE_TX_STAGE_AXIS_STATE)) {
     return;
   }
 
   k_spinlock_key_t key = k_spin_lock(&ctx->data->lock);
 
-  if (error == 0) {
-    odrive_idle_settled(ctx->data);
-  } else {
+  if (error != 0) {
     odrive_tx_failed(ctx->data, ctx->stage);
+  } else if (ctx->stage == ODRIVE_TX_STAGE_IDLE) {
+    odrive_idle_settled(ctx->data);
+  } else if (ctx->data->state_sent) {
+    ctx->data->state_on_wire = true;
   }
 
   k_spin_unlock(&ctx->data->lock, key);
@@ -480,7 +500,7 @@ static enum odrive_tx_stage odrive_build_tx(
         ((now - data->idle_sent_ms) >= CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS)) {
       odrive_build_set_axis_state(frame, node_id, ODRIVE_AXIS_STATE_IDLE);
       data->idle_sent_ms = now;
-      data->idle_in_flight++;
+      odrive_idle_queued(data, now);
       return ODRIVE_TX_STAGE_IDLE;
     }
 
@@ -494,7 +514,7 @@ static enum odrive_tx_stage odrive_build_tx(
    * nobody acknowledges never reports the frame sent.
    */
   if ((data->idle_in_flight > 0U) &&
-      ((now - data->idle_sent_ms) < CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS)) {
+      ((now - data->stop_queued_ms) < CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS)) {
     return ODRIVE_TX_STAGE_NONE;
   }
 
@@ -508,6 +528,7 @@ static enum odrive_tx_stage odrive_build_tx(
     odrive_build_set_controller_mode(frame, node_id, data->control_mode, data->input_mode);
     data->mode_sent = true;
     data->state_sent = false;
+    data->state_on_wire = false;
     return ODRIVE_TX_STAGE_CONTROLLER_MODE;
   }
 
@@ -794,11 +815,12 @@ static bool odrive_handle_heartbeat(
 
   if (axis_state == ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL) {
     /*
-     * Only a heartbeat after this enable's request counts. One still showing
-     * the closed loop from before a quick disable and enable would otherwise
-     * arm the axis, and the idle that follows would read as a fault.
+     * Only a heartbeat after this enable's request reached the wire counts.
+     * One still showing the closed loop from before a quick disable and enable
+     * would otherwise arm the axis, and the idle that follows would read as a
+     * fault.
      */
-    if (data->enabled && data->state_sent) {
+    if (data->enabled && data->state_on_wire) {
       data->armed = true;
     }
   } else if (data->armed) {
@@ -1067,10 +1089,8 @@ static int odrive_axis_enable(const struct device * dev)
   /*
    * Restart the whole sequence even if the axis is already enabled. This is
    * the only path that clears errors, and it is what an application calls to
-   * recover an axis that disarmed on its own.
-   *
-   * The stored target is dropped: it may predate a fault, a re-zero or the
-   * axis being moved by hand, and the axis would head for it at full gain.
+   * recover an axis that disarmed on its own. The stored target is dropped;
+   * doc/drivers/odrive.md says why.
    */
   data->enabled = true;
   data->armed = false;
@@ -1078,6 +1098,7 @@ static int odrive_axis_enable(const struct device * dev)
   data->clear_errors_pending = true;
   data->mode_sent = false;
   data->state_sent = false;
+  data->state_on_wire = false;
   data->has_target = false;
 
   k_spin_unlock(&data->lock, key);
@@ -1093,20 +1114,33 @@ static int odrive_axis_enable(const struct device * dev)
  */
 static int odrive_axis_stop(const struct device * dev, const struct can_frame * frame)
 {
+  const struct odrive_axis_config * config = dev->config;
+  struct odrive_bus_data * bus = config->bus->data;
   struct odrive_axis_data * data = dev->data;
+  const int64_t now = k_uptime_get();
   k_spinlock_key_t key = k_spin_lock(&data->lock);
+  const bool was_enabled = data->enabled;
   int ret;
 
   data->enabled = false;
   data->armed = false;
   data->idle_pending = true;
-  data->idle_sent_ms = k_uptime_get();
-  data->idle_in_flight++;
+  data->idle_sent_ms = now;
+  odrive_idle_queued(data, now);
   data->clear_errors_pending = false;
   data->mode_sent = false;
   data->state_sent = false;
+  data->state_on_wire = false;
+
+  if (was_enabled) {
+    data->pending |= ODRIVE_PENDING_STATE;
+  }
 
   k_spin_unlock(&data->lock, key);
+
+  if (was_enabled) {
+    k_work_submit_to_queue(&bus->workq, &bus->dispatch_work);
+  }
 
   ret = odrive_axis_send(dev, frame, &data->tx_ctx[ODRIVE_TX_STAGE_IDLE]);
 

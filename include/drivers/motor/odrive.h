@@ -237,7 +237,8 @@ typedef void (*odrive_callback_t)(
  * Invoked when the heartbeat reports a different @c axis_state,
  * @c procedure_result, @c active_errors or @c trajectory_done, when
  * @c Get_Error reports a different @c active_errors or @c disarm_reason, and
- * when the axis goes online or offline. This is the cheap callback: the state of a healthy axis does not
+ * when the axis goes online or offline, and when @ref motor_disable or
+ * @ref odrive_estop stops an enabled axis. This is the cheap callback: the state of a healthy axis does not
  * change, so it does not fire in steady state.
  *
  * @param dev ODrive axis device instance.
