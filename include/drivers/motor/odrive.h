@@ -24,7 +24,17 @@ extern "C" {
  * What the generic class does carry is @ref motor_enable, @ref motor_disable
  * and @ref motor_get_feedback. The feedback snapshot reports the scaled
  * position and, when the axis has a motor thermistor, the temperature; the
- * remaining measurements are read through @ref odrive_get_feedback.
+ * remaining measurements are read through @ref odrive_get_feedback. Unlike
+ * @ref odrive_get_feedback, @ref motor_get_feedback returns @c -EAGAIN with
+ * @c stale set whenever it has no position to report, including before the
+ * first encoder estimates arrive, and its @c timestamp_ms is when the
+ * estimates arrived.
+ *
+ * @ref motor_disable and @ref odrive_estop send their frame at once, and the
+ * driver then repeats @c Set_Axis_State(IDLE) every
+ * @c CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS for as long as the heartbeat still
+ * shows closed loop, so a frame that is refused or lost does not leave the
+ * axis running.
  *
  * **Units are the ones on the wire: rev, rev/s, Nm and A.** The ODrive's own
  * limits and gains are in the same units, so a value passed here reads the
@@ -218,8 +228,9 @@ typedef void (*odrive_callback_t)(
  * @brief Register a callback for changes in the axis state.
  *
  * Invoked when the heartbeat reports a different @c axis_state,
- * @c procedure_result, @c active_errors or @c trajectory_done, and when the
- * axis goes online or offline. This is the cheap callback: the state of a healthy axis does not
+ * @c procedure_result, @c active_errors or @c trajectory_done, when
+ * @c Get_Error reports a different @c active_errors or @c disarm_reason, and
+ * when the axis goes online or offline. This is the cheap callback: the state of a healthy axis does not
  * change, so it does not fire in steady state.
  *
  * @param dev ODrive axis device instance.
@@ -309,7 +320,8 @@ int odrive_set_torque(const struct device * dev, float torque);
  * @param dev ODrive axis device instance.
  * @param mode Input shaping to apply.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not an ODrive axis.
+ * @retval -EINVAL @p dev is not an ODrive axis, or @p mode is not one of
+ *         @ref odrive_input_mode.
  */
 int odrive_set_input_mode(const struct device * dev, enum odrive_input_mode mode);
 
@@ -324,7 +336,7 @@ int odrive_set_input_mode(const struct device * dev, enum odrive_input_mode mode
  * @param velocity_limit Velocity limit in rev/s.
  * @param current_limit Current limit in A.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not an ODrive axis.
+ * @retval -EINVAL @p dev is not an ODrive axis, or a value is not finite.
  * @retval negative_errno The frame could not be queued.
  */
 int odrive_set_limits(const struct device * dev, float velocity_limit, float current_limit);
@@ -334,12 +346,17 @@ int odrive_set_limits(const struct device * dev, float velocity_limit, float cur
  *
  * Only meaningful with @ref ODRIVE_INPUT_MODE_TRAP_TRAJ.
  *
+ * The limits go out as two frames, velocity first. When the second cannot be
+ * queued the first has already been, so the ODrive may run with the new
+ * velocity limit and the old acceleration limits. Each frame only writes its
+ * values, so calling again with the same arguments is safe.
+ *
  * @param dev ODrive axis device instance.
  * @param velocity_limit Cruise velocity in rev/s.
  * @param accel_limit Acceleration limit in rev/s^2.
  * @param decel_limit Deceleration limit in rev/s^2.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not an ODrive axis.
+ * @retval -EINVAL @p dev is not an ODrive axis, or a value is not finite.
  * @retval negative_errno A frame could not be queued.
  */
 int odrive_set_traj_limits(
@@ -351,12 +368,16 @@ int odrive_set_traj_limits(
  * As with @ref odrive_set_limits, the driver writes nothing until this is
  * called, and the values are not persisted.
  *
+ * The gains go out as two frames, the position gain first. As with
+ * @ref odrive_set_traj_limits, a failure on the second leaves the first
+ * applied, and calling again with the same arguments is safe.
+ *
  * @param dev ODrive axis device instance.
  * @param pos_gain Position loop gain, in (rev/s)/rev.
  * @param vel_gain Velocity loop gain, in Nm/(rev/s).
  * @param vel_integrator_gain Velocity loop integrator gain, in Nm/rev.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not an ODrive axis.
+ * @retval -EINVAL @p dev is not an ODrive axis, or a value is not finite.
  * @retval negative_errno A frame could not be queued.
  */
 int odrive_set_gains(
@@ -368,7 +389,7 @@ int odrive_set_gains(
  * @param dev ODrive axis device instance.
  * @param position Position in rev to assign to where the axis is now.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not an ODrive axis.
+ * @retval -EINVAL @p dev is not an ODrive axis, or @p position is not finite.
  * @retval negative_errno The frame could not be queued.
  */
 int odrive_set_absolute_position(const struct device * dev, float position);
@@ -397,6 +418,8 @@ int odrive_clear_errors(const struct device * dev);
  * @ref motor_enable clears it as part of arming.
  *
  * The frame is sent immediately rather than at the next command interval.
+ * If the axis still reports closed loop afterwards, the driver follows up
+ * with idle requests as it does after @ref motor_disable.
  *
  * @param dev ODrive axis device instance.
  * @retval 0 Success.
