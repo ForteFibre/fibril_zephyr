@@ -1,0 +1,42 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# What dead reckoning reads from the board: two ground encoders and a gyro, as
+# seen from the bus. Paired with odometry.cpp, which implements the handlers
+# this generates.
+#
+# The topics are the two PCMainFW's host driver (pc_main_interface) published,
+# with the same message types and field meanings, so fibril_localization's
+# nodes read them unchanged once remapped (doc/adr/0021).
+
+types:
+  Odometry:
+    topics:
+      # fibril_localization/msg/OdometryEncoder, field for field. The counts
+      # are raw and start at 0 at boot; the yaw is continuous and has the
+      # gyro's sign, which basic_deadreckoning negates. is_connecting is
+      # whether the gyro's reading is fresh. 100 Hz, PCMainFW's rate.
+      encoder:
+        dir: s2m
+        period_us: 10000
+        fields:
+          encoder0: i64
+          encoder1: i64
+          is_connecting: bool
+          roll: f32
+          pitch: f32
+          yaw: f32
+        ros: { type: fibril_localization/msg/OdometryEncoder }
+
+      # sensor_msgs/msg/Imu in the gyro's axes, for imu_covariance, which
+      # fills in the covariances and the frame. The orientation is built
+      # from roll, pitch and the continuous yaw, as PCMainFW built it. The
+      # header is left to the bridge.
+      imu:
+        dir: s2m
+        period_us: 10000
+        fields:
+          orientation: { type: f32, len: 4 }
+          angular_velocity: { type: f32, len: 3 }
+          linear_acceleration: { type: f32, len: 3 }
+        ros: { type: sensor_msgs/msg/Imu }

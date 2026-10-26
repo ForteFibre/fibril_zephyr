@@ -53,6 +53,7 @@
 | [0018](0018-md-motor-trigger-in-firmware.md) | MdMotor の trigger をファームウェアに入れる | Proposed |
 | [0019](0019-robstride-mode-params-readback.md) | RobStride の設定をモードごとに書き、読み戻して確かめてから有効化する | Proposed |
 | [0020](0020-imu-driver-class.md) | ジャイロを、SI 単位と連続した yaw のスナップショットを返す IMU クラスで見せる | Proposed |
+| [0021](0021-odometry-block-type.md) | 自己位置推定の入力を、PCMainFW の host が出していた topic と同じ形のブロック型にする | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -78,4 +79,5 @@
 0018-md-motor-trigger-in-firmware
 0019-robstride-mode-params-readback
 0020-imu-driver-class
+0021-odometry-block-type
 ```
