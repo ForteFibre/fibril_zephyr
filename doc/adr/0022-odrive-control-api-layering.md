@@ -104,6 +104,7 @@ ODrive 側で `circular_setpoints` を有効にすると `Pos_Estimate` が折�
 8. **周期メッセージが届いているかは `odrive_feedback.valid_mask` で示す。** 既定で無効な周期メッセージが多く、設定漏れは「値が 0 のまま」という形で静かに現れる。フィールドごとに「一度も届いていない」と「届いたが古い」を区別できるようにする。
 
 9. **`online` は heartbeat、`stale` は encoder estimates で判定する。** heartbeat は既定で有効な唯一のメッセージなので死活監視の鍵に適する。位置と速度の鮮度は encoder estimates の到着時刻で測る。binding は `heartbeat-timeout-ms`（既定 300）と `estimate-timeout-ms`（既定 100）を別々に持つ。
+`motor_get_feedback()` は、位置を出せないときはいつも `stale` を立てて `-EAGAIN` を返す。estimates が一度も届いていないときもそうする。機種共通の層は返り値が 0 なら位置を使ってよいと読み、RobStride も同じ振る舞いである。`timestamp_ms` も estimates の到着時刻にする。`odrive_get_feedback()` は `valid_mask` で一度も届いていないことを区別できるので、従来どおり古くなったときだけ `stale` にする。
 encoder estimates 以外の測定値（iq、温度、トルク、バス、エラー）の `valid_mask` には、さらに別の `measurement-timeout-ms`（既定 500）を使う。これらの周期は ODrive 側で個別に設定し、推奨の 200 ms は `estimate-timeout-ms` より長いので、同じ期限では受信の合間にビットが落ちる。
 
 10. **送信タイマーが送るのは指令フレームだけとする。ただし `INPUT_MODE_TRAP_TRAJ` では値が変わったときだけ送る。** ODrive の watchdog は `Set_Input_*` の到着で再始動するので、有効な軸には `CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS` ごとに現在のモードの指令フレームを 1 通送る。`INPUT_MODE_TRAP_TRAJ` だけは、同じ値を再送すると軌道が毎回振り出しに戻って `Trajectory_Done_Flag` が立たないので再送しない。feedback の取得には送信が要らないので、無効な軸には何も送らない。`odrive_set_*()` は指令を保存するだけで CAN の送信を待たず、制御ループから呼んでよい。
@@ -122,9 +123,11 @@ ODrive が受け付けない指令を送り続けても意味がなく、watchdo
 `odrive_estop()` のあとも同じで、`Estop` が残す `ESTOP_REQUESTED` は次の `motor_enable()` が消す。
 `drivers/motor/robstride.c` が run state の離脱でハンドシェイクをやり直すのとは、ここで分かれる。
 armed とみなすのは、その有効化で `Set_Axis_State(CLOSED_LOOP_CONTROL)` を送った後に closed loop を報告した heartbeat だけとする。無効化の直後に有効化すると IDLE を処理する前の heartbeat が届くことがあり、それで armed とすると、続く IDLE を故障と取り違えて有効化を取り消してしまう。
-heartbeat の途絶でも有効を落とすが、こちらは軸が最後の指令で回り続けている可能性がある。最後に聞いた状態が closed loop である間は `Set_Axis_State(IDLE)` を `CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` ごとに送り、closed loop 以外の heartbeat が届くか、上位が軸を操作したら止める。
+送った後、という条件は、直前の IDLE が送信メールボックスで待っている間は効かない。ODrive がまだ closed loop にいる heartbeat が要求の後に届くからである。そのため、直前の IDLE または `Estop` が線路に出たと完了コールバックが報告するまで、有効化の手順を始めない。ACK の無いバスでは報告が来ないので、待つのは `CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` までとする。
+heartbeat の途絶でも有効を落とすが、こちらは軸が最後の指令で回り続けている可能性がある。最後に聞いた状態が closed loop である間は `Set_Axis_State(IDLE)` を `CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` ごとに送り、closed loop 以外の heartbeat が届くか、上位が `motor_enable()` か `odrive_request_axis_state()` を呼んだら止める。
 
 13. **`motor_disable()` は `Set_Axis_State(IDLE)` を次の送信周期を待たずにその場で送る。** `odrive_estop()` は別の関数として置き、`Estop`（0x002）を送る。`Estop` は `ESTOP_REQUESTED` をエラーとして残すので、`motor_disable()` とは復帰の手間が違う。同じ関数にまとめない。
+どちらも、その 1 通が届いたことを当てにしない。送信メールボックスが埋まっていたり線路で失われたりすると、ドライバは無効と報告するのに軸は回り続ける。そこで決定 12 の通信断と同じ IDLE の要求を始め、軸が closed loop を報告する間は送り直す。通信断で始まった要求も取り消さずに引き継ぐ。
 
 14. **指令とパラメータの読み書きは `include/drivers/motor/odrive.h` に置く。単位は線路上のものをそのまま使い、rev、rev/s、Nm、A とする。** ADR 0004 の決定 5 が `float` と SI を選んだのと同じ趣旨だが、ODrive の線路が rev であり、ゲインと上限の単位も rev 系である。rad に直すとヘッダの数値が odrivetool で設定した値と一致しなくなる。
 
@@ -147,6 +150,7 @@ watchdog を戻すのは `Set_Input_*` と closed loop への遷移だけなの�
 21. **`Set_Input_Pos` の前置補償は符号付き `int16`、倍率 0.001 で符号化する。** 実機で確かめた。参照実装が `int8` で書いているのは誤りである。倍率は ODrive 側の `input_vel_scale` と `input_torque_scale` が決めるもので、ドライバは既定の 0.001 を前提にする。決定 17 と同じく設定を書きにいかず、既定のままにしておくことを `doc/drivers/odrive.md` の要求設定に並べる。
 
 22. **軸ごとに 2 本のコールバックを実行時に登録できるようにする。** 状態コールバックは heartbeat が報告する `axis_state`、`procedure_result`、`active_errors`、`trajectory_done` のいずれかが変わったときと、`heartbeat-timeout-ms` による online / offline の遷移で呼ぶ。feedback コールバックは `Get_Encoder_Estimates` が届いたときに呼ぶ。2 本に分けるのは、**再投入の判断だけが欲しい上位が 100 Hz の feedback を受け取らずに済むようにする**ためである。iq、temperature、torques、bus、error はスナップショットを更新するだけで呼び出さない。ODrive 側の周期設定によって発火頻度が変わるコールバックを増やしても、上位が使える保証がない。
+ただし `Get_Error` が `active_errors` か `disarm_reason` の変化を運んできたときは、状態コールバックを呼ぶ。`Get_Error` が先に値を書き換えると、次の heartbeat は変化を見つけられないからである。発火するのは値が変わったときだけなので、周期には依存しない。
 
 23. **コールバックは割り込みコンテキストではなく、バスごとの専用ワークキューから呼ぶ。** 受信経路は spinlock の下でスナップショットを更新して保留ビットを立て、ワークを submit するだけにする。ワークハンドラがロックの外でコールバックを呼ぶ。決定 12 の再投入は `motor_enable()` を呼ぶことであり、**これをコールバックの中から直接呼べる**ことがこの決定の目的である。**送信タイマーは有効な軸が 1 つもなくても回し続ける。** タイムアウトの判定とワークの submit もこのタイマーが行うので、止めると offline の遷移が通知されない。`drivers/motor/robstride.c` は stale と online を読み出しの時点で計算しているが、コールバックで知らせる以上、誰も読まなくても判定が進む必要がある。有効化する前に軸が生きているかを確かめる、という使い方がこれで成り立つ。
 ワークキューを専用に持つのは、上位のコールバックが長引いても決定 10 の指令送信（watchdog の餌）を遅らせないためである。指令送信のワークは `drivers/motor/robstride.c` と同じくシステムワークキューに置く。スタックサイズと優先度は Kconfig で変えられるようにする。
