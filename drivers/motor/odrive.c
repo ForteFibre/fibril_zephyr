@@ -5,6 +5,7 @@
 
 #include <drivers/motor.h>
 #include <drivers/motor/odrive.h>
+#include <math.h>
 #include <string.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -69,6 +70,30 @@ LOG_MODULE_REGISTER(motor_odrive, CONFIG_MOTOR_LOG_LEVEL);
 #define ODRIVE_PENDING_FEEDBACK BIT(0)
 #define ODRIVE_PENDING_STATE BIT(1)
 
+/* Which frame of the command interval a transmission carried. */
+enum odrive_tx_stage {
+  ODRIVE_TX_STAGE_NONE = 0,
+  ODRIVE_TX_STAGE_CLEAR_ERRORS,
+  ODRIVE_TX_STAGE_CONTROLLER_MODE,
+  ODRIVE_TX_STAGE_AXIS_STATE,
+  ODRIVE_TX_STAGE_SETPOINT,
+  ODRIVE_TX_STAGE_IDLE,
+  ODRIVE_TX_STAGE_COUNT,
+};
+
+struct odrive_axis_data;
+
+/*
+ * Handed to can_send() as the completion context. One per axis and stage,
+ * filled once at init, because a completion may land after the next stage has
+ * already been built and has to name the stage it belonged to.
+ */
+struct odrive_tx_ctx
+{
+  struct odrive_axis_data * data;
+  enum odrive_tx_stage stage;
+};
+
 struct odrive_bus_config
 {
   const struct device * can_dev;
@@ -76,6 +101,7 @@ struct odrive_bus_config
   size_t workq_stack_size;
   uint32_t heartbeat_timeout_ms;
   uint32_t estimate_timeout_ms;
+  uint32_t measurement_timeout_ms;
 };
 
 struct odrive_bus_data
@@ -90,6 +116,12 @@ struct odrive_bus_data
   struct k_work dispatch_work;
   bool started;
   int64_t last_start_retry;
+  /*
+   * Axis the command interval starts from. It moves to the first axis the
+   * controller refused, so that with more axes than TX mailboxes the one left
+   * out changes from interval to interval.
+   */
+  size_t tx_start;
 };
 
 struct odrive_axis_config
@@ -129,6 +161,13 @@ struct odrive_axis_data
   /* Set once the heartbeat has confirmed closed loop, so that a later drop
    * out of it is a fault rather than the arming still being in progress. */
   bool armed;
+  /*
+   * The driver stopped commanding an axis it had armed without being asked
+   * to, on a heartbeat timeout, and still owes it an idle request.
+   */
+  bool idle_pending;
+  int64_t idle_sent_ms;
+  struct odrive_tx_ctx tx_ctx[ODRIVE_TX_STAGE_COUNT];
 
   /* What the axis reported. */
   enum odrive_axis_state axis_state;
@@ -216,7 +255,66 @@ static const struct device * odrive_find_axis(struct odrive_bus_data * bus, uint
   return NULL;
 }
 
-static int odrive_axis_send(const struct device * axis_dev, const struct can_frame * frame)
+/*
+ * Undo a stage whose frame never reached the bus, so the command interval
+ * builds it again. Caller holds the axis lock. Each case re-checks that the
+ * stage still applies: the failure may be reported after the application has
+ * moved the axis on.
+ */
+static void odrive_tx_failed(struct odrive_axis_data * data, enum odrive_tx_stage stage)
+{
+  switch (stage) {
+    case ODRIVE_TX_STAGE_CLEAR_ERRORS:
+      /* An axis whose errors were never cleared would refuse closed loop. */
+      if (data->enabled && !data->armed) {
+        data->clear_errors_pending = true;
+        data->mode_sent = false;
+      }
+      break;
+    case ODRIVE_TX_STAGE_CONTROLLER_MODE:
+      if (data->enabled) {
+        data->mode_sent = false;
+      }
+      break;
+    case ODRIVE_TX_STAGE_AXIS_STATE:
+      if (data->enabled && !data->armed) {
+        data->state_sent = false;
+      }
+      break;
+    case ODRIVE_TX_STAGE_SETPOINT:
+      data->setpoint_dirty = true;
+      break;
+    default:
+      /* An idle request is repeated until the heartbeat confirms it anyway. */
+      break;
+  }
+}
+
+static void odrive_tx_done(const struct device * can_dev, int error, void * user_data)
+{
+  const struct odrive_tx_ctx * ctx = user_data;
+
+  ARG_UNUSED(can_dev);
+
+  if ((error == 0) || (ctx == NULL)) {
+    return;
+  }
+
+  k_spinlock_key_t key = k_spin_lock(&ctx->data->lock);
+
+  odrive_tx_failed(ctx->data, ctx->stage);
+  k_spin_unlock(&ctx->data->lock, key);
+}
+
+/*
+ * The result covers queueing only. can_send() with no completion callback
+ * waits for the frame to reach the wire with K_FOREVER, which would park the
+ * transmit work, and the whole system work queue with it, on a bus nobody
+ * acknowledges. Delivery is reported through odrive_tx_done() instead; pass
+ * NULL for a frame whose loss needs no follow-up.
+ */
+static int odrive_axis_send(
+  const struct device * axis_dev, const struct can_frame * frame, struct odrive_tx_ctx * ctx)
 {
   const struct odrive_axis_config * config = axis_dev->config;
   const struct odrive_bus_config * bus_config = config->bus->config;
@@ -226,7 +324,7 @@ static int odrive_axis_send(const struct device * axis_dev, const struct can_fra
     return -EIO;
   }
 
-  return can_send(bus_config->can_dev, frame, K_NO_WAIT, NULL, NULL);
+  return can_send(bus_config->can_dev, frame, K_NO_WAIT, odrive_tx_done, ctx);
 }
 
 /*
@@ -310,36 +408,51 @@ static bool odrive_build_setpoint(
 /*
  * Produce the frame this axis owes the bus in this interval. One arming stage
  * per interval keeps the burst short; the axis is armed a few intervals after
- * it is enabled.
+ * it is enabled. The stage is marked done here, before the frame is sent, and
+ * odrive_tx_failed() takes it back if the frame does not go out.
  */
-static size_t odrive_build_tx(const struct device * axis_dev, struct can_frame * frame, int64_t now)
+static enum odrive_tx_stage odrive_build_tx(
+  const struct device * axis_dev, struct can_frame * frame, int64_t now)
 {
   const struct odrive_axis_config * config = axis_dev->config;
   struct odrive_axis_data * data = axis_dev->data;
   const uint8_t node_id = config->node_id;
 
   if (!data->enabled) {
-    return 0;
+    /*
+     * Only while the axis is still seen in closed loop. Once it reports
+     * anything else the idle request is done; while it is offline the last
+     * state it reported stands, so the request keeps going out in case only
+     * the receive side was lost.
+     */
+    if (data->idle_pending && (data->axis_state == ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL) &&
+        ((now - data->idle_sent_ms) >= CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS)) {
+      odrive_build_set_axis_state(frame, node_id, ODRIVE_AXIS_STATE_IDLE);
+      data->idle_sent_ms = now;
+      return ODRIVE_TX_STAGE_IDLE;
+    }
+
+    return ODRIVE_TX_STAGE_NONE;
   }
 
   if (data->clear_errors_pending) {
     odrive_build_clear_errors(frame, node_id);
     data->clear_errors_pending = false;
-    return 1;
+    return ODRIVE_TX_STAGE_CLEAR_ERRORS;
   }
 
   if (!data->mode_sent) {
     odrive_build_set_controller_mode(frame, node_id, data->control_mode, data->input_mode);
     data->mode_sent = true;
     data->state_sent = false;
-    return 1;
+    return ODRIVE_TX_STAGE_CONTROLLER_MODE;
   }
 
   if (!data->state_sent) {
     odrive_build_set_axis_state(frame, node_id, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL);
     data->state_sent = true;
     data->state_sent_ms = now;
-    return 1;
+    return ODRIVE_TX_STAGE_AXIS_STATE;
   }
 
   if (!data->armed) {
@@ -351,21 +464,21 @@ static size_t odrive_build_tx(const struct device * axis_dev, struct can_frame *
       data->mode_sent = false;
     }
 
-    return 0;
+    return ODRIVE_TX_STAGE_NONE;
   }
 
   if ((data->control_mode == ODRIVE_CONTROL_MODE_POSITION) &&
       (data->input_mode == ODRIVE_INPUT_MODE_TRAP_TRAJ) && !data->setpoint_dirty) {
-    return 0;
+    return ODRIVE_TX_STAGE_NONE;
   }
 
   if (!odrive_build_setpoint(frame, node_id, data)) {
-    return 0;
+    return ODRIVE_TX_STAGE_NONE;
   }
 
   data->setpoint_dirty = false;
 
-  return 1;
+  return ODRIVE_TX_STAGE_SETPOINT;
 }
 
 /* Drop an axis that stopped answering, and notice when it comes back. */
@@ -385,13 +498,21 @@ static void odrive_check_timeout(const struct device * axis_dev, int64_t now)
 
   data->online = false;
   data->armed = false;
+
   /*
    * Without a heartbeat there is no confirmation that the axis is still in
    * closed loop, so this is the same situation as a self-disarm: stop
    * commanding and let the application re-arm. Staying enabled would make the
-   * driver silently re-arm the axis as soon as frames resumed.
+   * driver silently re-arm the axis as soon as frames resumed. Unlike a
+   * self-disarm the axis may still be running on its last setpoint, so it is
+   * also told to go idle.
    */
-  data->enabled = false;
+  if (data->enabled) {
+    data->enabled = false;
+    data->idle_pending = true;
+    data->idle_sent_ms = now - CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS;
+  }
+
   data->pending |= ODRIVE_PENDING_STATE;
 }
 
@@ -399,11 +520,14 @@ static void odrive_bus_tx_work_handler(struct k_work * work)
 {
   struct odrive_bus_data * bus = CONTAINER_OF(work, struct odrive_bus_data, tx_work);
   const int64_t now = k_uptime_get();
+  const size_t start = bus->tx_start;
+  bool refused = false;
   bool notify = false;
 
   odrive_bus_retry_start(bus->dev);
 
-  for (size_t i = 0; i < ARRAY_SIZE(bus->axes); ++i) {
+  for (size_t n = 0; n < ARRAY_SIZE(bus->axes); ++n) {
+    const size_t i = (start + n) % ARRAY_SIZE(bus->axes);
     const struct device * axis_dev = bus->axes[i];
 
     if (axis_dev == NULL) {
@@ -413,17 +537,30 @@ static void odrive_bus_tx_work_handler(struct k_work * work)
     struct odrive_axis_data * data = axis_dev->data;
     struct can_frame frame;
     k_spinlock_key_t key;
-    size_t count;
+    enum odrive_tx_stage stage = ODRIVE_TX_STAGE_NONE;
 
     key = k_spin_lock(&data->lock);
     odrive_check_timeout(axis_dev, now);
-    count = odrive_build_tx(axis_dev, &frame, now);
+
+    /* Once the controller refuses one frame it refuses the rest of the burst. */
+    if (!refused) {
+      stage = odrive_build_tx(axis_dev, &frame, now);
+    }
+
     notify = notify || (data->pending != 0U);
     k_spin_unlock(&data->lock, key);
 
-    if (count != 0U) {
-      /* A frame lost to a busy bus is re-sent on the next interval. */
-      (void)odrive_axis_send(axis_dev, &frame);
+    if (stage == ODRIVE_TX_STAGE_NONE) {
+      continue;
+    }
+
+    if (odrive_axis_send(axis_dev, &frame, &data->tx_ctx[stage]) != 0) {
+      key = k_spin_lock(&data->lock);
+      odrive_tx_failed(data, stage);
+      k_spin_unlock(&data->lock, key);
+
+      refused = true;
+      bus->tx_start = i;
     }
   }
 
@@ -446,7 +583,6 @@ static void odrive_fill_feedback(
   const struct odrive_axis_config * config = axis_dev->config;
   const struct odrive_bus_config * bus_config = config->bus->config;
   const struct odrive_axis_data * data = axis_dev->data;
-  const uint32_t timeout = bus_config->estimate_timeout_ms;
 
   memset(out, 0, sizeof(*out));
 
@@ -476,22 +612,41 @@ static void odrive_fill_feedback(
    * A measurement counts as present while its own cyclic message keeps
    * arriving. Most of those messages are disabled in the ODrive's default
    * configuration, so a clear bit usually means a rate was never enabled.
+   * The estimates have a timeout of their own because they also decide
+   * whether the snapshot is stale.
    */
-#define ODRIVE_MARK_VALID(stamp, bit)                                                     \
+#define ODRIVE_MARK_VALID(stamp, bit, timeout)                                            \
   if ((stamp != 0) && ((timeout == 0U) || ((now - stamp) <= (int64_t)timeout))) {         \
     out->valid_mask |= (bit);                                                             \
   }
 
-  ODRIVE_MARK_VALID(data->estimates_ms, ODRIVE_FEEDBACK_ESTIMATES)
-  ODRIVE_MARK_VALID(data->iq_ms, ODRIVE_FEEDBACK_IQ)
-  ODRIVE_MARK_VALID(data->temperature_ms, ODRIVE_FEEDBACK_TEMPERATURE)
-  ODRIVE_MARK_VALID(data->torques_ms, ODRIVE_FEEDBACK_TORQUES)
-  ODRIVE_MARK_VALID(data->bus_ms, ODRIVE_FEEDBACK_BUS)
-  ODRIVE_MARK_VALID(data->error_ms, ODRIVE_FEEDBACK_ERROR)
+  const uint32_t estimate_timeout = bus_config->estimate_timeout_ms;
+  const uint32_t measurement_timeout = bus_config->measurement_timeout_ms;
+
+  ODRIVE_MARK_VALID(data->estimates_ms, ODRIVE_FEEDBACK_ESTIMATES, estimate_timeout)
+  ODRIVE_MARK_VALID(data->iq_ms, ODRIVE_FEEDBACK_IQ, measurement_timeout)
+  ODRIVE_MARK_VALID(data->temperature_ms, ODRIVE_FEEDBACK_TEMPERATURE, measurement_timeout)
+  ODRIVE_MARK_VALID(data->torques_ms, ODRIVE_FEEDBACK_TORQUES, measurement_timeout)
+  ODRIVE_MARK_VALID(data->bus_ms, ODRIVE_FEEDBACK_BUS, measurement_timeout)
+  ODRIVE_MARK_VALID(data->error_ms, ODRIVE_FEEDBACK_ERROR, measurement_timeout)
 
 #undef ODRIVE_MARK_VALID
 
   out->stale = (data->estimates_ms != 0) && ((out->valid_mask & ODRIVE_FEEDBACK_ESTIMATES) == 0U);
+}
+
+/* What both feedback readers return for a snapshot. */
+static int odrive_feedback_status(const struct odrive_feedback * feedback)
+{
+  if (!feedback->online) {
+    return -ENODATA;
+  }
+
+  if (feedback->stale) {
+    return -EAGAIN;
+  }
+
+  return 0;
 }
 
 static void odrive_bus_dispatch_work_handler(struct k_work * work)
@@ -558,7 +713,8 @@ static bool odrive_handle_heartbeat(
 
   const bool changed = !data->online || (data->axis_state != axis_state) ||
                        (data->procedure_result != procedure_result) ||
-                       (data->active_errors != active_errors);
+                       (data->active_errors != active_errors) ||
+                       (data->trajectory_done != trajectory_done);
 
   data->axis_state = axis_state;
   data->procedure_result = procedure_result;
@@ -569,7 +725,14 @@ static bool odrive_handle_heartbeat(
   data->timestamp_ms = now;
 
   if (axis_state == ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL) {
-    data->armed = true;
+    /*
+     * Only a heartbeat after this enable's request counts. One still showing
+     * the closed loop from before a quick disable and enable would otherwise
+     * arm the axis, and the idle that follows would read as a fault.
+     */
+    if (data->enabled && data->state_sent) {
+      data->armed = true;
+    }
   } else if (data->armed) {
     /*
      * The axis was armed and dropped out on its own, which means it tripped.
@@ -581,6 +744,10 @@ static bool odrive_handle_heartbeat(
     data->enabled = false;
     LOG_WRN("axis disarmed (state %u, errors 0x%08x)", (unsigned int)axis_state,
             (unsigned int)active_errors);
+  }
+
+  if (axis_state != ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL) {
+    data->idle_pending = false;
   }
 
   if (changed) {
@@ -596,63 +763,53 @@ static bool odrive_handle_frame(
   const struct device * axis_dev, uint16_t cmd, const struct can_frame * frame, int64_t now)
 {
   struct odrive_axis_data * data = axis_dev->data;
-  k_spinlock_key_t key;
+  const float first = odrive_get_float(&frame->data[0]);
+  const float second = odrive_get_float(&frame->data[4]);
+  k_spinlock_key_t key = k_spin_lock(&data->lock);
+  int64_t * stamp;
   bool notify = false;
 
   switch (cmd) {
     case ODRIVE_CMD_GET_ENCODER_ESTIMATES:
-      key = k_spin_lock(&data->lock);
-      data->position = odrive_get_float(&frame->data[0]);
-      data->velocity = odrive_get_float(&frame->data[4]);
-      data->estimates_ms = now;
-      data->timestamp_ms = now;
+      data->position = first;
+      data->velocity = second;
+      stamp = &data->estimates_ms;
       data->pending |= ODRIVE_PENDING_FEEDBACK;
-      k_spin_unlock(&data->lock, key);
       notify = true;
       break;
     case ODRIVE_CMD_GET_IQ:
-      key = k_spin_lock(&data->lock);
-      data->iq_setpoint = odrive_get_float(&frame->data[0]);
-      data->iq_measured = odrive_get_float(&frame->data[4]);
-      data->iq_ms = now;
-      data->timestamp_ms = now;
-      k_spin_unlock(&data->lock, key);
+      data->iq_setpoint = first;
+      data->iq_measured = second;
+      stamp = &data->iq_ms;
       break;
     case ODRIVE_CMD_GET_TEMPERATURE:
-      key = k_spin_lock(&data->lock);
-      data->fet_temperature = odrive_get_float(&frame->data[0]);
-      data->motor_temperature = odrive_get_float(&frame->data[4]);
-      data->temperature_ms = now;
-      data->timestamp_ms = now;
-      k_spin_unlock(&data->lock, key);
+      data->fet_temperature = first;
+      data->motor_temperature = second;
+      stamp = &data->temperature_ms;
       break;
     case ODRIVE_CMD_GET_TORQUES:
-      key = k_spin_lock(&data->lock);
-      data->torque_target = odrive_get_float(&frame->data[0]);
-      data->torque_estimate = odrive_get_float(&frame->data[4]);
-      data->torques_ms = now;
-      data->timestamp_ms = now;
-      k_spin_unlock(&data->lock, key);
+      data->torque_target = first;
+      data->torque_estimate = second;
+      stamp = &data->torques_ms;
       break;
     case ODRIVE_CMD_GET_BUS_VOLTAGE_CURRENT:
-      key = k_spin_lock(&data->lock);
-      data->bus_voltage = odrive_get_float(&frame->data[0]);
-      data->bus_current = odrive_get_float(&frame->data[4]);
-      data->bus_ms = now;
-      data->timestamp_ms = now;
-      k_spin_unlock(&data->lock, key);
+      data->bus_voltage = first;
+      data->bus_current = second;
+      stamp = &data->bus_ms;
       break;
     case ODRIVE_CMD_GET_ERROR:
-      key = k_spin_lock(&data->lock);
       data->active_errors = sys_get_le32(&frame->data[0]);
       data->disarm_reason = sys_get_le32(&frame->data[4]);
-      data->error_ms = now;
-      data->timestamp_ms = now;
-      k_spin_unlock(&data->lock, key);
+      stamp = &data->error_ms;
       break;
     default:
-      break;
+      k_spin_unlock(&data->lock, key);
+      return false;
   }
+
+  *stamp = now;
+  data->timestamp_ms = now;
+  k_spin_unlock(&data->lock, key);
 
   return notify;
 }
@@ -803,6 +960,18 @@ static int odrive_bus_register_axis(
 
   if (filter_id < 0) {
     LOG_ERR("Failed to add RX filter for node %u (%d)", (unsigned int)node_id, filter_id);
+
+    /* Otherwise the command interval would drive an axis it cannot hear. */
+    key = k_spin_lock(&bus->lock);
+
+    for (size_t i = 0; i < ARRAY_SIZE(bus->axes); ++i) {
+      if (bus->axes[i] == axis_dev) {
+        bus->axes[i] = NULL;
+      }
+    }
+
+    k_spin_unlock(&bus->lock, key);
+
     return filter_id;
   }
 
@@ -821,6 +990,7 @@ static int odrive_axis_enable(const struct device * dev)
    */
   data->enabled = true;
   data->armed = false;
+  data->idle_pending = false;
   data->clear_errors_pending = true;
   data->mode_sent = false;
   data->state_sent = false;
@@ -840,6 +1010,7 @@ static int odrive_axis_disable(const struct device * dev)
 
   data->enabled = false;
   data->armed = false;
+  data->idle_pending = false;
   data->clear_errors_pending = false;
   data->mode_sent = false;
   data->state_sent = false;
@@ -849,7 +1020,7 @@ static int odrive_axis_disable(const struct device * dev)
   /* Stopping should not wait for the next command interval. */
   odrive_build_set_axis_state(&frame, config->node_id, ODRIVE_AXIS_STATE_IDLE);
 
-  return odrive_axis_send(dev, &frame);
+  return odrive_axis_send(dev, &frame, NULL);
 }
 
 static int odrive_axis_set_output(
@@ -876,7 +1047,6 @@ static int odrive_axis_get_feedback(const struct device * dev, void * feedback)
   const int64_t now = k_uptime_get();
   struct odrive_feedback snapshot;
   k_spinlock_key_t key;
-  int ret = 0;
 
   if (out == NULL) {
     return -EINVAL;
@@ -913,13 +1083,7 @@ static int odrive_axis_get_feedback(const struct device * dev, void * feedback)
     out->temperature = (int16_t)snapshot.motor_temperature;
   }
 
-  if (!snapshot.online) {
-    ret = -ENODATA;
-  } else if (snapshot.stale) {
-    ret = -EAGAIN;
-  }
-
-  return ret;
+  return odrive_feedback_status(&snapshot);
 }
 
 static int odrive_axis_init(const struct device * dev)
@@ -934,6 +1098,11 @@ static int odrive_axis_init(const struct device * dev)
 
   data->control_mode = ODRIVE_CONTROL_MODE_TORQUE;
   data->input_mode = ODRIVE_INPUT_MODE_PASSTHROUGH;
+
+  for (size_t i = 0; i < ARRAY_SIZE(data->tx_ctx); ++i) {
+    data->tx_ctx[i].data = data;
+    data->tx_ctx[i].stage = (enum odrive_tx_stage)i;
+  }
 
   return odrive_bus_register_axis(config->bus, dev, config->node_id);
 }
@@ -950,32 +1119,43 @@ static bool odrive_is_axis(const struct device * dev)
   return (dev != NULL) && (dev->api == &odrive_axis_api);
 }
 
-/* Selecting a target also selects the mode it belongs to. */
-static void odrive_select_mode(struct odrive_axis_data * data, enum odrive_control_mode mode)
+/*
+ * Selecting a target also selects the mode it belongs to. An unchanged target
+ * in an unchanged mode leaves nothing to send, which is what keeps a control
+ * loop re-applying the same TRAP_TRAJ target from re-planning the trajectory.
+ */
+static void odrive_select_mode(
+  struct odrive_axis_data * data, enum odrive_control_mode mode, bool target_changed)
 {
   if (data->control_mode != mode) {
     data->control_mode = mode;
     /* The ODrive has to be told the new mode before the setpoint means it. */
     data->mode_sent = false;
+    data->setpoint_dirty = true;
   }
 
-  data->setpoint_dirty = true;
+  if (target_changed) {
+    data->setpoint_dirty = true;
+  }
 }
 
 int odrive_set_position(
   const struct device * dev, float position, float velocity_ff, float torque_ff)
 {
-  if (!odrive_is_axis(dev)) {
+  if (!odrive_is_axis(dev) || !isfinite(position) || !isfinite(velocity_ff) ||
+      !isfinite(torque_ff)) {
     return -EINVAL;
   }
 
   struct odrive_axis_data * data = dev->data;
   k_spinlock_key_t key = k_spin_lock(&data->lock);
+  const bool changed = (data->target_position != position) ||
+                       (data->velocity_ff != velocity_ff) || (data->torque_ff != torque_ff);
 
   data->target_position = position;
   data->velocity_ff = velocity_ff;
   data->torque_ff = torque_ff;
-  odrive_select_mode(data, ODRIVE_CONTROL_MODE_POSITION);
+  odrive_select_mode(data, ODRIVE_CONTROL_MODE_POSITION, changed);
 
   k_spin_unlock(&data->lock, key);
 
@@ -984,16 +1164,17 @@ int odrive_set_position(
 
 int odrive_set_velocity(const struct device * dev, float velocity, float torque_ff)
 {
-  if (!odrive_is_axis(dev)) {
+  if (!odrive_is_axis(dev) || !isfinite(velocity) || !isfinite(torque_ff)) {
     return -EINVAL;
   }
 
   struct odrive_axis_data * data = dev->data;
   k_spinlock_key_t key = k_spin_lock(&data->lock);
+  const bool changed = (data->target_velocity != velocity) || (data->torque_ff != torque_ff);
 
   data->target_velocity = velocity;
   data->torque_ff = torque_ff;
-  odrive_select_mode(data, ODRIVE_CONTROL_MODE_VELOCITY);
+  odrive_select_mode(data, ODRIVE_CONTROL_MODE_VELOCITY, changed);
 
   k_spin_unlock(&data->lock, key);
 
@@ -1002,15 +1183,16 @@ int odrive_set_velocity(const struct device * dev, float velocity, float torque_
 
 int odrive_set_torque(const struct device * dev, float torque)
 {
-  if (!odrive_is_axis(dev)) {
+  if (!odrive_is_axis(dev) || !isfinite(torque)) {
     return -EINVAL;
   }
 
   struct odrive_axis_data * data = dev->data;
   k_spinlock_key_t key = k_spin_lock(&data->lock);
+  const bool changed = data->target_torque != torque;
 
   data->target_torque = torque;
-  odrive_select_mode(data, ODRIVE_CONTROL_MODE_TORQUE);
+  odrive_select_mode(data, ODRIVE_CONTROL_MODE_TORQUE, changed);
 
   k_spin_unlock(&data->lock, key);
 
@@ -1087,15 +1269,7 @@ int odrive_get_feedback(const struct device * dev, struct odrive_feedback * feed
 
   k_spin_unlock(&data->lock, key);
 
-  if (!feedback->online) {
-    return -ENODATA;
-  }
-
-  if (feedback->stale) {
-    return -EAGAIN;
-  }
-
-  return 0;
+  return odrive_feedback_status(feedback);
 }
 
 int odrive_set_limits(const struct device * dev, float velocity_limit, float current_limit)
@@ -1111,7 +1285,7 @@ int odrive_set_limits(const struct device * dev, float velocity_limit, float cur
   odrive_put_float(&frame.data[0], velocity_limit);
   odrive_put_float(&frame.data[4], current_limit);
 
-  return odrive_axis_send(dev, &frame);
+  return odrive_axis_send(dev, &frame, NULL);
 }
 
 int odrive_set_traj_limits(
@@ -1128,7 +1302,7 @@ int odrive_set_traj_limits(
   odrive_frame_init(&frame, config->node_id, ODRIVE_CMD_SET_TRAJ_VEL_LIMIT, 4U);
   odrive_put_float(&frame.data[0], velocity_limit);
 
-  ret = odrive_axis_send(dev, &frame);
+  ret = odrive_axis_send(dev, &frame, NULL);
 
   if (ret != 0) {
     return ret;
@@ -1138,7 +1312,7 @@ int odrive_set_traj_limits(
   odrive_put_float(&frame.data[0], accel_limit);
   odrive_put_float(&frame.data[4], decel_limit);
 
-  return odrive_axis_send(dev, &frame);
+  return odrive_axis_send(dev, &frame, NULL);
 }
 
 int odrive_set_gains(
@@ -1155,7 +1329,7 @@ int odrive_set_gains(
   odrive_frame_init(&frame, config->node_id, ODRIVE_CMD_SET_POS_GAIN, 4U);
   odrive_put_float(&frame.data[0], pos_gain);
 
-  ret = odrive_axis_send(dev, &frame);
+  ret = odrive_axis_send(dev, &frame, NULL);
 
   if (ret != 0) {
     return ret;
@@ -1165,7 +1339,7 @@ int odrive_set_gains(
   odrive_put_float(&frame.data[0], vel_gain);
   odrive_put_float(&frame.data[4], vel_integrator_gain);
 
-  return odrive_axis_send(dev, &frame);
+  return odrive_axis_send(dev, &frame, NULL);
 }
 
 int odrive_set_absolute_position(const struct device * dev, float position)
@@ -1180,7 +1354,7 @@ int odrive_set_absolute_position(const struct device * dev, float position)
   odrive_frame_init(&frame, config->node_id, ODRIVE_CMD_SET_ABSOLUTE_POSITION, 4U);
   odrive_put_float(&frame.data[0], position);
 
-  return odrive_axis_send(dev, &frame);
+  return odrive_axis_send(dev, &frame, NULL);
 }
 
 int odrive_clear_errors(const struct device * dev)
@@ -1194,7 +1368,7 @@ int odrive_clear_errors(const struct device * dev)
 
   odrive_build_clear_errors(&frame, config->node_id);
 
-  return odrive_axis_send(dev, &frame);
+  return odrive_axis_send(dev, &frame, NULL);
 }
 
 int odrive_estop(const struct device * dev)
@@ -1210,6 +1384,7 @@ int odrive_estop(const struct device * dev)
 
   data->enabled = false;
   data->armed = false;
+  data->idle_pending = false;
   data->clear_errors_pending = false;
   data->mode_sent = false;
   data->state_sent = false;
@@ -1218,7 +1393,7 @@ int odrive_estop(const struct device * dev)
 
   odrive_frame_init(&frame, config->node_id, ODRIVE_CMD_ESTOP, 0U);
 
-  return odrive_axis_send(dev, &frame);
+  return odrive_axis_send(dev, &frame, NULL);
 }
 
 int odrive_request_axis_state(const struct device * dev, enum odrive_axis_state state)
@@ -1233,6 +1408,11 @@ int odrive_request_axis_state(const struct device * dev, enum odrive_axis_state 
   k_spinlock_key_t key = k_spin_lock(&data->lock);
   const bool busy = data->enabled;
 
+  /* The application has taken the axis state over from the driver. */
+  if (!busy) {
+    data->idle_pending = false;
+  }
+
   k_spin_unlock(&data->lock, key);
 
   /* Otherwise the command interval would immediately ask for closed loop. */
@@ -1242,7 +1422,7 @@ int odrive_request_axis_state(const struct device * dev, enum odrive_axis_state 
 
   odrive_build_set_axis_state(&frame, config->node_id, state);
 
-  return odrive_axis_send(dev, &frame);
+  return odrive_axis_send(dev, &frame, NULL);
 }
 
 #define DT_DRV_COMPAT odrive_bus
@@ -1257,6 +1437,7 @@ int odrive_request_axis_state(const struct device * dev, enum odrive_axis_state 
     .workq_stack_size = K_KERNEL_STACK_SIZEOF(odrive_workq_stack_##inst),                  \
     .heartbeat_timeout_ms = DT_INST_PROP(inst, heartbeat_timeout_ms),                      \
     .estimate_timeout_ms = DT_INST_PROP(inst, estimate_timeout_ms),                        \
+    .measurement_timeout_ms = DT_INST_PROP(inst, measurement_timeout_ms),                  \
   };                                                                                       \
   DEVICE_DT_INST_DEFINE(                                                                   \
     inst, odrive_bus_init, NULL, &odrive_bus_data_##inst, &odrive_bus_config_##inst,       \

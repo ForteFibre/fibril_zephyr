@@ -107,7 +107,8 @@ enum odrive_procedure_result {
  *
  * Each value corresponds to one cyclic message. A bit stays clear while its
  * message has never arrived, and is cleared again once the value is older than
- * the bus's @c estimate-timeout-ms. **Most of these messages are disabled in
+ * the bus's @c estimate-timeout-ms for @ref ODRIVE_FEEDBACK_ESTIMATES, or its
+ * @c measurement-timeout-ms for the others. **Most of these messages are disabled in
  * the ODrive's default configuration**, so a clear bit usually means the rate
  * was never enabled rather than that the bus is down.
  */
@@ -178,7 +179,11 @@ struct odrive_feedback
   enum odrive_control_mode control_mode;
   /** Input shaping the driver is currently commanding. */
   enum odrive_input_mode input_mode;
-  /** True when the driver considers the axis armed and is sending setpoints. */
+  /**
+   * True from @ref motor_enable until @ref motor_disable, @ref odrive_estop, a
+   * disarm or a heartbeat timeout. This covers the arming sequence, so it does
+   * not mean the axis is in closed loop: @ref axis_state says that.
+   */
   bool enabled;
 
   /** True when a heartbeat has arrived within @c heartbeat-timeout-ms. */
@@ -213,8 +218,8 @@ typedef void (*odrive_callback_t)(
  * @brief Register a callback for changes in the axis state.
  *
  * Invoked when the heartbeat reports a different @c axis_state,
- * @c procedure_result or @c active_errors, and when the axis goes online or
- * offline. This is the cheap callback: the state of a healthy axis does not
+ * @c procedure_result, @c active_errors or @c trajectory_done, and when the
+ * axis goes online or offline. This is the cheap callback: the state of a healthy axis does not
  * change, so it does not fire in steady state.
  *
  * @param dev ODrive axis device instance.
@@ -260,12 +265,16 @@ int odrive_get_feedback(const struct device * dev, struct odrive_feedback * feed
 /**
  * @brief Command a position, switching to @ref ODRIVE_CONTROL_MODE_POSITION.
  *
+ * May be called every control cycle. With @ref ODRIVE_INPUT_MODE_TRAP_TRAJ, a
+ * call that repeats the current target sends nothing, so the trajectory is not
+ * re-planned.
+ *
  * @param dev ODrive axis device instance.
  * @param position Position in rev.
  * @param velocity_ff Velocity feed-forward in rev/s, quantised to 0.001.
  * @param torque_ff Torque feed-forward in Nm, quantised to 0.001.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not an ODrive axis.
+ * @retval -EINVAL @p dev is not an ODrive axis, or a value is not finite.
  */
 int odrive_set_position(
   const struct device * dev, float position, float velocity_ff, float torque_ff);
@@ -277,7 +286,7 @@ int odrive_set_position(
  * @param velocity Velocity in rev/s.
  * @param torque_ff Torque feed-forward in Nm.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not an ODrive axis.
+ * @retval -EINVAL @p dev is not an ODrive axis, or a value is not finite.
  */
 int odrive_set_velocity(const struct device * dev, float velocity, float torque_ff);
 
@@ -287,7 +296,7 @@ int odrive_set_velocity(const struct device * dev, float velocity, float torque_
  * @param dev ODrive axis device instance.
  * @param torque Torque in Nm.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not an ODrive axis.
+ * @retval -EINVAL @p dev is not an ODrive axis, or @p torque is not finite.
  */
 int odrive_set_torque(const struct device * dev, float torque);
 

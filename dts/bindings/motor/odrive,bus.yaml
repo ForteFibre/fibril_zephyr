@@ -40,3 +40,13 @@ properties:
       Position and velocity are reported stale when no Get_Encoder_Estimates
       frame has arrived within this timeout. The ODrive sends one every
       encoder_msg_rate_ms, which defaults to 10.
+  measurement-timeout-ms:
+    type: int
+    default: 500
+    description: >
+      Every other cyclic measurement (Iq, temperature, torques, bus voltage
+      and current, errors) drops out of valid_mask when its frame has not
+      arrived within this timeout. These rates are set separately on the
+      ODrive and are slower than the estimates; the recommended 200 ms ones
+      would blink under estimate-timeout-ms, so this has to leave room for
+      the slowest rate enabled.

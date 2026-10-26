@@ -18,7 +18,9 @@ config MOTOR_ODRIVE_MAX_AXES
 	help
 	  Size of the registration table of one bus node. Each entry is a
 	  pointer. The driver adds one hardware receive filter per axis, so this
-	  is also bounded by what the controller offers.
+	  is also bounded by what the controller offers. Axes beyond the
+	  controller's TX mailboxes take turns being left out of a command
+	  interval.
 
 config MOTOR_ODRIVE_TX_INTERVAL_MS
 	int "Command interval in milliseconds"
