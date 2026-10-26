@@ -178,10 +178,16 @@ heartbeat のタイムアウト判定も同じタイマーが行うので、有�
 2. `Set_Controller_Mode`（現在の制御モードと input mode）
 3. `Set_Axis_State(CLOSED_LOOP_CONTROL)`
 4. heartbeat の `axis_state` が 8 になるまで、`CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` ごとに 2 と 3 をやり直す
-5. 確認できたら、以降は毎周期、現在のモードの指令フレーム
+5. 確認できて、`motor_enable()` の後に目標が渡されていれば、以降は毎周期、現在のモードの指令フレーム
 
 **4 の再試行では `Clear_Errors` を送らない。**
 過電流で落ちた軸をループの中で自動的に復帰させると、原因が取り除かれないまま再投入を繰り返すことになる。
+
+**`motor_enable()` は保存していた目標を捨てる。**
+故障、`odrive_set_absolute_position()` による原点の付け直し、手で軸を動かしたことの後に、前の目標へ全ゲインで向かわないようにするためである。
+closed loop に入っても、`odrive_set_position()`、`odrive_set_velocity()`、`odrive_set_torque()` のどれかが呼ばれるまで指令フレームは送らない。
+前と同じ値を渡しても新しい目標として扱うので、TRAP_TRAJ でも 1 度送る。
+ODrive の `enable_watchdog` を使う構成では、有効化したらすぐに目標を渡す。
 
 ### 故障からの復帰
 
@@ -223,12 +229,14 @@ ACK の無いバスでは完了が報告されないので、待つのは `CONFI
 
 復帰させるかどうかは上位が決める。
 復帰は `motor_enable()` の 1 回で足りる（上の手順を最初からやり直すので、`odrive_clear_errors()` を先に呼ぶ必要はない）。
+ただし目標は捨てられるので、続けて目標を渡し直す。
 
 ```c
 static void on_state(const struct device *dev, const struct odrive_feedback *fb, void *user_data)
 {
         if (!fb->enabled && (fb->active_errors & RECOVERABLE_MASK)) {
                 motor_enable(dev);
+                odrive_set_velocity(dev, 0.0F, 0.0F);
         }
 }
 
@@ -293,6 +301,7 @@ NaN や無限大の `Pos_Estimate` は、エンコーダの故障で届くこと
 `odrive_set_position()` などの指令はモードの選択を兼ねる。
 モードが変わると `Set_Controller_Mode` を送り直すので、切り替えには 1 周期余計にかかる。
 有限でない値（NaN、無限大）は `-EINVAL` で拒み、保存していた指令は変えない。
+`odrive_set_position()` の速度とトルクの前置補償は、線路上の `int16`（倍率 0.001）に収まるよう ±32.767 で頭打ちにする。エラーにはしない。
 `odrive_set_limits()`、`odrive_set_traj_limits()`、`odrive_set_gains()`、`odrive_set_absolute_position()` も、有限でない値は送らずに `-EINVAL` を返す。
 `odrive_set_input_mode()` は、`enum odrive_input_mode` に無い値を `-EINVAL` で拒む。
 

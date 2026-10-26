@@ -119,6 +119,7 @@ encoder estimates 以外の測定値（iq、温度、トルク、バス、エラ
 ODrive が受け付けない指令を送り続けても意味がなく、watchdog の餌だけが残るのは紛らわしい。
 `motor_enable()` はいつ呼ばれても決定 11 の手順を最初からやり直すので、
 上位の再投入は `motor_enable()` の 1 回で足りる。
+**ただし `motor_enable()` は保存していた目標を捨て、新しい目標が渡されるまで指令フレームを送らない。** 故障や `odrive_set_absolute_position()` の後に、前の目標へ全ゲインで向かわないようにするためである。上位は再投入の後に目標を渡し直す。
 `odrive_clear_errors()` は有効化を伴わずにエラーだけ消したいときのためにある。
 `odrive_estop()` のあとも同じで、`Estop` が残す `ESTOP_REQUESTED` は次の `motor_enable()` が消す。
 `drivers/motor/robstride.c` が run state の離脱でハンドシェイクをやり直すのとは、ここで分かれる。
