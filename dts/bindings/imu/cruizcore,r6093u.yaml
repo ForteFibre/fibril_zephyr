@@ -1,0 +1,43 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  CruizCore R6093U gyro on a UART.
+
+  The device streams a 26 byte packet at about 100 Hz without being asked, so
+  this node only listens, apart from the reset command the driver sends at
+  boot to zero the yaw. It must be a child of the UART node it is wired to,
+  and that UART runs at the device's fixed 38400 bps.
+
+    &uart5 {
+        current-speed = <38400>;
+        status = "okay";
+
+        gyro: r6093u {
+            compatible = "cruizcore,r6093u";
+        };
+    };
+
+  Give each node a distinct name when a target has more than one. The node
+  carries no reg, so the device name is the bare node name.
+
+compatible: "cruizcore,r6093u"
+
+include: uart-device.yaml
+
+properties:
+  stale-timeout-ms:
+    type: int
+    default: 50
+    description: |
+      Age of the latest packet beyond which a reading is reported stale. The
+      default allows four missed packets at the device's 10 ms rate.
+
+  offline-timeout-ms:
+    type: int
+    default: 500
+    description: |
+      Age of the latest packet beyond which the device is reported offline.
+      It is also how often the driver re-arms the UART receiver while nothing
+      arrives, which is what brings back a receiver stopped by an error that
+      went unnoticed. Must not be shorter than stale-timeout-ms.

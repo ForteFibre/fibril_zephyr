@@ -52,6 +52,7 @@
 | [0017](0017-can-diag-builtin-function.md) | CAN の健全性は、devicetree に書かない組み込みの機能として全てのイメージで出す | Proposed |
 | [0018](0018-md-motor-trigger-in-firmware.md) | MdMotor の trigger をファームウェアに入れる | Proposed |
 | [0019](0019-robstride-mode-params-readback.md) | RobStride の設定をモードごとに書き、読み戻して確かめてから有効化する | Proposed |
+| [0020](0020-imu-driver-class.md) | ジャイロを、SI 単位と連続した yaw のスナップショットを返す IMU クラスで見せる | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -76,4 +77,5 @@
 0017-can-diag-builtin-function
 0018-md-motor-trigger-in-firmware
 0019-robstride-mode-params-readback
+0020-imu-driver-class
 ```
