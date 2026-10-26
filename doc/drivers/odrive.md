@@ -8,7 +8,7 @@ ODrive 3.x はメッセージ集合が違うので対応しない。
 
 指令はこのドライバに固有の公開 API [include/drivers/motor/odrive.h](../../include/drivers/motor/odrive.h) にある。
 共通のモータインタフェース [include/drivers/motor.h](../../include/drivers/motor.h) からは、有効化と無効化と feedback スナップショットだけが使える。
-この分け方の理由は [ADR 0006](../adr/0006-odrive-control-api-layering.md) にある。
+この分け方の理由は [ADR 0022](../adr/0022-odrive-control-api-layering.md) にある。
 
 ## バスの要件
 

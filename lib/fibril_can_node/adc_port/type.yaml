@@ -1,0 +1,17 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# One input MdMotor's calibration watches, as seen from the bus. Paired with
+# adc_port.cpp, which samples the inputs for md_motor.cpp.
+#
+# The type holds only the threshold. Which motor watches which port, and when,
+# is MdMotor's `adc/port` and `sensor_state`; the edges arrive on that motor's
+# `sensor` topic.
+
+types:
+  AdcPort:
+    params:
+      # The level is |input| >= threshold, in the input's normalised units:
+      # 0..1 of full scale for an ADC channel, raw current / 10000 for a motor.
+      # 0.5 is CanMotorMbed's default.
+      threshold: { type: f32, default: 0.5 }

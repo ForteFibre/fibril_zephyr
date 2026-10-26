@@ -1,0 +1,39 @@
+description: |
+  The rotor angle of a DJI RoboMaster C610/C620, exposed as an encoder.
+
+  A RoboMaster ESC reports its rotor angle (0..8191) in every feedback frame.
+  This node turns that into an encoder class device, so a control loop that
+  takes encoders can close around the motor's own rotor instead of an encoder
+  fitted to the output shaft.
+
+    rm_enc1: robomaster-encoder-1 {
+        compatible = "dji,robomaster-encoder";
+        motor = <&rm_motor1>;
+    };
+
+  The counts are rotor counts, 8192 per rotor revolution, before the motor's
+  gearbox. The position starts at the rotor angle of the first frame, and
+  starts over (with a new position_epoch) whenever the motor has been silent
+  for longer than the transport's feedback-timeout-ms, because the rotor can
+  have turned any number of times in between.
+
+  The node carries no reg, so give each one a distinct name: the device name
+  is the bare node name.
+
+compatible: "dji,robomaster-encoder"
+
+include: base.yaml
+
+properties:
+  motor:
+    type: phandle
+    required: true
+    description: |
+      The dji,robomaster-motor node whose rotor this encoder reads. Each motor
+      can back one encoder.
+
+  invert-direction:
+    type: boolean
+    description: |
+      Report motion with the opposite sign. The single-turn value stays what
+      the ESC reported.

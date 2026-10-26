@@ -28,17 +28,32 @@ west twister -T apps --integration
 `app/sample.yaml` は `build_only: true` で、`integration_platforms` に `nucleo_g474re` を指定している。
 `app.default` と、`debug.conf` を重ねた `app.debug` の 2 通りをビルドする。
 
-`apps/node/sample.yaml` も `build_only: true` で、`integration_platforms` は `fibril_rc26_mainair_v01` である。
-焼く単位ごとに 1 シナリオで、トランスポート snippet とデプロイ snippet を重ねた組み合わせをビルドする。
-現状は `rc26-mainair-usb` と `rc26-air` を重ねた `app.node.rc26_air` の 1 通りである。
+`apps/node/sample.yaml` も `build_only: true` である。
+焼く単位ごとに 1 シナリオで、トランスポート snippet とデプロイ snippet を重ねた組み合わせを、そのボードでビルドする。
+
+| シナリオ | ボード | snippet |
+| --- | --- | --- |
+| `app.node.rc26_air` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-air` |
+| `app.node.rc26_robstride` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-robstride` |
+| `app.node.rc26_main` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-main` |
+| `app.node.rc26_main_odom` | `fibril_rc26_mainair_v01` | `rc26-mainair-usb`、`rc26-main`、`rc26-odom` |
+| `app.node.miniv4_md_qdec4` | `fibril_robomaster_miniv4` | `miniv4-can`、`miniv4-md-qdec4` |
+| `app.node.miniv4_md_rotor8` | `fibril_robomaster_miniv4` | `miniv4-can`、`miniv4-md-rotor8` |
+
+ボードはシナリオごとに `platform_allow` で書く。
+twister は `common` のリストをシナリオのリストに連結するので、`common` にボードを並べると、別のボードの snippet でもビルドを試みてしまう。
 
 `apps/` のビルドは `fcan_codegen` CLI を要求する。
 `ros-jazzy-fibril-can-codegen` を入れた環境では自動で見つかる。
-そうでなければ環境変数で渡す。
+見つからなければ、`modules/lib/fibril_can` から host 向けにビルドする（シナリオごとのビルドディレクトリの `fcan_codegen_host/`。protobuf と yaml-cpp が要る）。
+CI（Linux と macOS）はこの経路でビルドする。Windows は protobuf と yaml-cpp を入れる手順が無いので、`apps/` を飛ばす。
+手元の CLI や、木からのビルドを指定するときは環境変数で渡す。
 twister の `--extra-args=-DFCAN_CODEGEN=...` はヘルパに届かないので効かない。
 
 ```shell
-FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps --integration
+west twister -T apps --integration                                         # 見つからなければ木からビルドする
+FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps --integration     # 手元の CLI を使う
+FCAN_CODEGEN_FROM_SOURCE=ON west twister -T apps --integration             # deb があっても木からビルドする
 ```
 
 ## 構成
@@ -47,8 +62,10 @@ FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps --integration
 | --- | --- | --- |
 | `tests/drivers/encoder/accum` | 積算・速度・オフセットの共通コア | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/encoder/amt21` | AMT21x ドライバ | `native_sim`、`native_sim/native/64` |
+| `tests/drivers/imu/r6093u` | R6093U ドライバ | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/motor/robomaster` | RoboMaster ドライバ | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/motor/robomaster_start_retry` | 起動できない CAN バスからの復帰 | `native_sim`、`native_sim/native/64` |
+| `tests/lib/motor_control` | 制御のコア（モード、PID の入力の単位、FF と摩擦、失速ブレーカ） | `native_sim`、`native_sim/native/64` |
 | `tests/lib/custom` | `lib/custom` | 制限なし |
 
 いずれも実機を必要としない。

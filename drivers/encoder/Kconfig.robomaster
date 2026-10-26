@@ -1,0 +1,11 @@
+config ENCODER_ROBOMASTER
+	bool "DJI RoboMaster rotor encoder"
+	default y
+	depends on MOTOR_DJI_ROBOMASTER
+	depends on DT_HAS_DJI_ROBOMASTER_ENCODER_ENABLED
+	help
+	  Expose the rotor angle a RoboMaster ESC reports as an encoder class
+	  device, so that a control loop can close around the motor's own
+	  rotor instead of an encoder fitted to the shaft. The device follows
+	  every feedback frame of the motor it names, through the RoboMaster
+	  driver's rotor callback.

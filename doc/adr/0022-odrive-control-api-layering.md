@@ -3,7 +3,7 @@ status: Proposed
 date: 2026-09-13
 ---
 
-# 0006. ODrive の制御 API を push 型 feedback と機種固有ヘッダで載せる
+# 0022. ODrive の制御 API を push 型 feedback と機種固有ヘッダで載せる
 
 ## Status
 

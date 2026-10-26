@@ -1,0 +1,13 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config MOTOR_CONTROL
+	bool "Per-motor control core ported from CanMotorMbed"
+	depends on CPP && STD_CPP17
+	select FIBRIL_COMMON
+	help
+	  DUTY, SPEED, POSITION and cascaded SPEED_POSITION control with the
+	  CanMotorMbed feed-forward and friction terms, a duty slew limit and
+	  the encoder stall breaker. The caller samples the encoder and drives
+	  the motor; the core only turns one into the other, once per 1 ms
+	  tick.

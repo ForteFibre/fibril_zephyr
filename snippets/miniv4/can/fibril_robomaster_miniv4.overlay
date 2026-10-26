@@ -1,0 +1,35 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * RoboMaster Mini V4 directly on the fibril_can bus through the external CAN
+ * port (FDCAN1, PD0/PD1).
+ *
+ * Only the transport. A deployment snippet adds the fibril,fcan-* nodes and
+ * must reference board labels only, never anything defined here, so that the
+ * two overlays can be applied in either order. The transceiver's STB and the
+ * RNG that boot_id draws from are the board's.
+ */
+
+#include <fibril/can-bitrate.h>
+
+#ifdef FIBRIL_CLAIM_FDCAN1
+#error "FDCAN1 claimed twice; miniv4-can is one claimant"
+#endif
+#define FIBRIL_CLAIM_FDCAN1 1
+
+/ {
+    chosen {
+        zephyr,canbus = &fdcan1;
+    };
+};
+
+/* CanMotorMbed ran this port at 500k/4M (main) or 1M/4M (feat/fibril-can);
+ * neither is a fibril_can bus this node has to join, so the repository's rate
+ * wins until a robot's bus says otherwise.
+ */
+&fdcan1 {
+    status = "okay";
+    bitrate = <FIBRIL_FCAN_BITRATE>;
+    bitrate-data = <FIBRIL_FCAN_BITRATE_DATA>;
+};

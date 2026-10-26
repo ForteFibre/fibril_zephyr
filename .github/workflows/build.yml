@@ -31,7 +31,9 @@ jobs:
           client-id: ${{ vars.FIBRIL_CI_APP_CLIENT_ID }}
           private-key: ${{ secrets.FIBRIL_CI_APP_PRIVATE_KEY }}
           owner: ForteFibre
-          repositories: fibril_can
+          repositories: |
+            fibril_can
+            fibril_common
           # Least-privilege: west update only needs to clone the module. The
           # matching GitHub App installation must expose Contents: read.
           permission-contents: read
@@ -63,6 +65,28 @@ jobs:
             EXTRA_TWISTER_FLAGS="--short-build-path -O/tmp/twister-out"
           fi
           west twister -T app -v --inline-logs --integration $EXTRA_TWISTER_FLAGS
+
+      # apps/ needs the fcan_codegen CLI. There is no ROS 2 here, so
+      # fcan_invoke_codegen builds it from the fibril_can that west.yml pins,
+      # which keeps the codegen and the runtime at the same version; it needs
+      # protobuf and yaml-cpp on the host. Windows is skipped: it has no
+      # package manager step for them yet.
+      - name: Install codegen dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            protobuf-compiler libprotobuf-dev libyaml-cpp-dev
+
+      - name: Install codegen dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf yaml-cpp
+
+      - name: Build apps
+        if: runner.os != 'Windows'
+        working-directory: example-application
+        shell: bash
+        run: west twister -T apps -v --inline-logs --integration
 
       - name: Twister Tests
         working-directory: example-application

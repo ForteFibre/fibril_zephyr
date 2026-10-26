@@ -21,7 +21,9 @@ API リファレンスは Doxygen が別に生成する。
    drivers/amt21
    drivers/odrive
    drivers/qdec_stm32
+   drivers/r6093u
    drivers/robomaster
+   drivers/robomaster_encoder
    drivers/robstride
 
 .. toctree::

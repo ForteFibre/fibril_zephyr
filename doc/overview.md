@@ -20,20 +20,36 @@ Zephyr 本体はこのリポジトリの外に clone され、`west.yml` がそ�
 │   ├── hal/cmsis_6               Cortex-M ポートが要求する CMSIS
 │   ├── lib/cmsis-dsp             CMSIS-DSP
 │   ├── lib/fibril_can            CAN FD 通信フレームワーク（private repo）
+│   ├── lib/fibril_common         ROS 2 側と共通の C++ ライブラリ（private repo）
 │   └── third_party/cannectivity  gs_usb による USB-CAN ゲートウェイ
 └── fibril_zephyr/                このリポジトリ
 ```
 
-`west.yml` が直接宣言しているのは `zephyr`、`cannectivity`、`fibril_can` の 3 つだけである。
+`west.yml` が直接宣言しているのは `zephyr`、`cannectivity`、`fibril_can`、`fibril_common` の 4 つだけである。
 `modules/hal` と `modules/lib` 以下の残りは、`zephyr` プロジェクトの `import` に `name-allowlist` を与えて必要なものだけ取り込んでいる。
 workspace のディレクトリに他のものが置かれていても、この manifest が管理する対象ではない。
 
 サンプルが参照する fibril_can はこのリポジトリの中ではなく `modules/lib/fibril_can` にある。
 private repository なので、`west update` を通すには先に GitHub の認証が必要である。
 
-fibril_can の revision はブランチではなくコミットで固定してある。
+fibril_common は ROS 2 のノードが使っているものと同じ制御器とシリアライザを基板の上でも使うために載せてある。
+`CONFIG_FIBRIL_COMMON` が立つまで何もビルドしないので、載せているだけではイメージに現れない。
+取り込みの調査結果と部品ごとの状態は [ADR 0008](adr/0008-fibril-common-integration.md) にある。
+
+fibril_common の revision は、タグではなくコミットで固定してある（現在は `8f336f4`）。Zephyr module の入口（fibril_common#69）と `-Wdouble-promotion` の修正（fibril_common#74）を含むタグが、まだ無いためである。
+これより前の版では、`CONFIG_FIBRIL_COMMON` を立てたビルドが twister の `-Werror` で止まる。
+
+fibril_can の revision はブランチではなくタグで固定してある（現在は v0.4.2）。
+v0.4.2 で、host の CMake が 3.28（Ubuntu 24.04 の apt）のときも codegen をビルドできるようになった。v0.4.1 では `fibril_can.pb.h` が見つからずに止まる。
+v0.4.1 で、`fcan_codegen` が見つからなければ、`fcan_invoke_codegen` が fibril_can の木から host 向けにビルドするようになった（ビルドディレクトリの `fcan_codegen_host/`。protobuf と yaml-cpp が要る）。この CLI は runtime と同じ版になる。deb の版がずれているときは `-DFCAN_CODEGEN_FROM_SOURCE=ON` で木からのビルドを使う。runtime は v0.4.0 から変わらない。
+v0.4.0 で、slave の RAM、Flash、スタックが減った。`service_buffer` が 0 のスキーマでは分割転送のコードがイメージから外れ、FRAME_DEFINE は ISR のスタックをほとんど使わなくなった。router は、node 宛の DISCOVER でそのノードの学習だけを消す。互換を壊す変更は組み込み master にだけあり、このリポジトリは使っていない。
+v0.3.7 で、ACCEPTED を返した呼び出しはタイムアウトではなくノードの状態で終わるようになり（fibril_can の ADR-0018）、MdMotor の `trigger` が使う。呼び出しの handle は runtime が世代を入れて作る。
+v0.3.5 で、基板の CAN の健全性を出すブロック型（`CanPortDiag`、`CanHubDiag`）と、それを読む Zephyr の関数が入り、`can_diag` が使う。
+v0.3.4 で `fcan_state` を `fcan_poll` と別のスレッドから読めるようになり、hub 構成の tick から `fibril_fcan_node_state()` を呼べる。
+deb の `fcan_codegen`（`ros-jazzy-fibril-can-codegen`）を使うなら v0.4.0 以上にする。v0.4.0 の codegen は生成コードが小さく、`max_copy_entries` を Topic のフィールド数で抑える（v0.3.7 の codegen でもビルドと動作はできる）。**`ros-jazzy-fibril-can-core` も同じ版に上げる。** codegen のパッケージは core に版を指定せずに依存するので、`apt install` で codegen だけを上げると古い `libfibril_can_core.so` が残る。v0.4.0 で core の `SerializedBlob` が変わったので、この組では生成が失敗することがある。`ldd /opt/ros/jazzy/lib/fibril_can_codegen/fcan_codegen` と `dpkg -l | grep fibril-can` で確かめる。v0.3.7 より前の codegen は handle を runtime から受け取らないので、コンパイルは通っても、後送の応答（`calibrate_current_baseline`、`trigger`）がすべて古いとして捨てられる。v0.3.3 より前の codegen が出す `*_complete` は戻り値を返さず、MdMotor が `FCAN_E_BUSY` を見られない。v0.3.2 より前の codegen は、MdMotor が使う `read_<topic>(seq)` も出さない。
 codegen が決めるブロック配列の並びはワイヤの契約の一部で、`main` を追いかけていると `fcan_config_t::instance_counts` の割り当てが黙って変わる。
 上げるときは意図して上げ、必要な移行を同じ変更に含める。
+指したいものにタグが無いときだけコミットで固定する。
 
 ## Zephyr module としての入口
 
@@ -59,12 +75,13 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 | --- | --- |
 | `apps/` | 実機に焼くアプリケーション。`apps/node/` が fibril_can スレーブ |
 | `app/` | ボード持ち込みの動作確認用アプリケーション |
-| `snippets/` | 焼く単位。トランスポート層とデプロイ層に分かれる |
+| `snippets/` | 焼く単位。トランスポート層とデプロイ層に分かれる。`snippets/common/` は基板によらない役割（ノードヘッダと Kconfig） |
 | `boards/fibril/` | 自作ボードの定義。ボードごとの詳細は各 `doc/index.rst` |
 | `drivers/` | out-of-tree ドライバの実装 |
 | `dts/bindings/` | 上記ドライバと機能の devicetree binding |
+| `dts/fibril/` | snippet の overlay が include するハードウェアの断片（基板に依存しないものと、`<board>/` の下の基板ごとのもの） |
 | `include/` | 公開ヘッダ。ドライバクラスの API はここが正本 |
-| `lib/` | out-of-tree ライブラリ。`lib/fibril_can_node/` にブロック型の実装、`lib/fcan_transport/` にバスへの繋ぎ方 |
+| `lib/` | out-of-tree ライブラリ。`lib/fibril_can_node/` にブロック型の実装、`lib/fcan_transport/` にバスへの繋ぎ方、`lib/motor_control/` にモータ 1 台ぶんの制御のコア、`lib/node_id/` に基板の ID スイッチから node_id を読む処理 |
 | `samples/` | ドライバ単体および fibril_can と組み合わせたサンプル |
 | `tests/` | Twister から走る ztest |
 | `scripts/` | west の拡張コマンドと runner |
@@ -73,12 +90,18 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 `apps/` と `lib/fibril_can_node/` と `snippets/` の関係は [アプリケーションと機能](apps.md) にある。
 どの機能を載せるかは snippet の overlay が置く `fibril,fcan-*` ノードが決め、アプリケーションはブロック型の名前を持たない。
 
+`apps/node/` と `lib/fibril_can_node/` は C++17 で、codegen にも `LANGUAGE CXX` を渡している。
+`lib/motor_control/` も C++17 である。fibril_common の制御器（テンプレート）を使うためで、codegen とは関係しない。
+`drivers/`、`lib/fcan_transport/`、`app/`、`samples/`、`tests/` は C のままである（`tests/lib/motor_control/` だけは、試す対象に合わせて C++ で書く）。
+理由と、C++ 標準ライブラリに要求が付く点は [ADR 0007](adr/0007-cpp-node-implementation.md) にある。
+
 ## ドライバ
 
 | クラス | 実装 | ドキュメント |
 | --- | --- | --- |
 | エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/amt21.c` | [AMT21x](drivers/amt21.md) |
 | エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/qdec_stm32.c` | [直交エンコーダ](drivers/qdec_stm32.md) |
+| IMU（`include/drivers/imu.h`） | `drivers/imu/r6093u.c` | [R6093U](drivers/r6093u.md) |
 | モータ（`include/drivers/motor.h`） | `drivers/motor/robomaster.c` | [RoboMaster](drivers/robomaster.md) |
 
 ラップ解決・速度・オフセットはエンコーダドライバに共通なので、`drivers/encoder/encoder_accum.c` に切り出してある。

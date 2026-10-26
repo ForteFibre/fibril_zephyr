@@ -8,7 +8,9 @@
 cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
-project(fibril_node LANGUAGES C)
+# C stays alongside C++: the generated schema_blob.c and lib/fcan_transport/
+# are C whichever wrapper the application uses.
+project(fibril_node LANGUAGES C CXX)
 
 if(NOT ZEPHYR_FIBRIL_CAN_MODULE_DIR)
   message(FATAL_ERROR
@@ -41,13 +43,19 @@ endif()
 #   FCAN_TYPE_SCHEMAS     every block type this repository implements
 #   FCAN_INSTANCE_SCHEMAS the instances each enabled function derived from
 #                         its devicetree node
+#   FCAN_BUILTIN_SCHEMAS  instances the image carries without a devicetree
+#                         node (can_diag, derived from the transport)
 #
 # Types are offered wholesale rather than curated: an unreferenced one is
 # dropped before the blob is built, so the list costs nothing. What the image
-# carries is decided by the devicetree alone.
+# drives is decided by the devicetree alone; the built-in instances only
+# report on the transport the devicetree chose.
 get_property(FCAN_TYPE_SCHEMAS GLOBAL PROPERTY fibril_can_node_type_schemas)
 get_property(FCAN_INSTANCE_SCHEMAS GLOBAL PROPERTY fibril_can_node_instance_schemas)
+get_property(FCAN_BUILTIN_SCHEMAS GLOBAL PROPERTY fibril_can_node_builtin_instance_schemas)
 
+# Checked on the devicetree's instances alone: the built-in ones are in every
+# image, so counting them would let an image that drives nothing through.
 if(NOT FCAN_INSTANCE_SCHEMAS)
   message(FATAL_ERROR
     "No function is enabled: the devicetree describes no fibril,fcan-* node, "
@@ -55,9 +63,10 @@ if(NOT FCAN_INSTANCE_SCHEMAS)
 endif()
 
 fcan_invoke_codegen(
-  SCHEMA     "${NODE_SCHEMA}" ${FCAN_TYPE_SCHEMAS} ${FCAN_INSTANCE_SCHEMAS}
+  SCHEMA     "${NODE_SCHEMA}" ${FCAN_TYPE_SCHEMAS} ${FCAN_INSTANCE_SCHEMAS} ${FCAN_BUILTIN_SCHEMAS}
   OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/schema_gen"
-  BASE_NAME  schema_gen)
+  BASE_NAME  schema_gen
+  LANGUAGE   CXX)
 
 # Backing section for FIBRIL_FCAN_FUNC_DEFINE (include/fibril_can_node/func.h).
 # Both calls are needed and neither covers the other: the .ld fragment feeds
@@ -67,4 +76,4 @@ fcan_invoke_codegen(
 zephyr_linker_sources(DATA_SECTIONS sections-ram.ld)
 zephyr_iterable_section(NAME fibril_fcan_func GROUP DATA_REGION ${XIP_ALIGN_WITH_INPUT})
 
-target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE src/main.cpp)

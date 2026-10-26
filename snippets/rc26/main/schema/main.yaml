@@ -1,0 +1,30 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# Who RC26's main node is on the bus.
+#
+# `{i}` in the node name is replaced with the node id at startup, so this file
+# describes a role rather than one board.
+#
+# There is no `types:` and no `instances:` here. The application hands the
+# codegen every block type this repository implements, plus one generated
+# fragment per function the devicetree enables; unreferenced types are dropped
+# before the blob is built. What this node runs is said once, in the overlay.
+
+node: rc26_main{i}
+protocol: 2
+
+options:
+  allocation: static
+
+limits:
+  # The bridge's default plan needs 14 frames at the codegen's max-count
+  # basis (eight valves, eight actuators), against 13 for rc26-robstride on
+  # 16. 24 leaves the planner room for a machine that splits topics by
+  # period.
+  max_frames: 24
+  max_copy_entries: 128
+  # Every Solenoid and RobstrideMotor service fits a single frame, so
+  # nothing needs the reassembly buffer.
+  service_buffer: 0
+  service_reassembly: 1

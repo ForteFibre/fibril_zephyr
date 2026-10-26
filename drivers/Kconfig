@@ -6,4 +6,5 @@ rsource "blink/Kconfig"
 rsource "sensor/Kconfig"
 rsource "motor/Kconfig"
 rsource "encoder/Kconfig"
+rsource "imu/Kconfig"
 endmenu

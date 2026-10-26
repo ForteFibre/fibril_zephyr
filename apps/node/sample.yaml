@@ -14,18 +14,23 @@ sample:
 common:
   build_only: true
   # Codegen needs the fcan_codegen CLI. It is found automatically where the
-  # ros-jazzy-fibril-can-codegen package is installed; elsewhere set it in the
-  # environment, which is what reaches the helper:
+  # ros-jazzy-fibril-can-codegen package is installed, and otherwise built
+  # from modules/lib/fibril_can (needs protobuf and yaml-cpp). To pick one,
+  # set it in the environment, which is what reaches the helper:
   #   FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps
-  # twister's --extra-args=-DFCAN_CODEGEN=... does not.
+  #   FCAN_CODEGEN_FROM_SOURCE=ON west twister -T apps
+  # twister's --extra-args=-D... does not.
   filter: CONFIG_FIBRIL_CAN
-  platform_allow:
-    - fibril_rc26_mainair_v01
-  integration_platforms:
-    - fibril_rc26_mainair_v01
+  # Each scenario names its own board: twister joins a list under `common`
+  # with the scenario's, so a board listed here would also be tried with
+  # every other board's snippets.
 
 tests:
   app.node.rc26_air:
+    platform_allow:
+      - fibril_rc26_mainair_v01
+    integration_platforms:
+      - fibril_rc26_mainair_v01
     tags:
       - fibril_can
       - can
@@ -35,3 +40,130 @@ tests:
     # entry into one -D, and CMake reads SNIPPET as a list.
     extra_args:
       - SNIPPET=rc26-mainair-usb;rc26-air
+
+  app.node.rc26_robstride:
+    platform_allow:
+      - fibril_rc26_mainair_v01
+    integration_platforms:
+      - fibril_rc26_mainair_v01
+    tags:
+      - fibril_can
+      - can
+      - hub
+      - usb
+      - motor
+    extra_args:
+      - SNIPPET=rc26-mainair-usb;rc26-robstride
+
+  app.node.rc26_main:
+    platform_allow:
+      - fibril_rc26_mainair_v01
+    integration_platforms:
+      - fibril_rc26_mainair_v01
+    tags:
+      - fibril_can
+      - can
+      - hub
+      - usb
+      - motor
+    extra_args:
+      - SNIPPET=rc26-mainair-usb;rc26-main
+
+  app.node.rc26_main_odom:
+    platform_allow:
+      - fibril_rc26_mainair_v01
+    integration_platforms:
+      - fibril_rc26_mainair_v01
+    tags:
+      - fibril_can
+      - can
+      - hub
+      - usb
+      - motor
+      - encoder
+      - imu
+    extra_args:
+      - SNIPPET=rc26-mainair-usb;rc26-main;rc26-odom
+
+  app.node.miniv4_md_qdec4:
+    platform_allow:
+      - fibril_robomaster_miniv4
+    integration_platforms:
+      - fibril_robomaster_miniv4
+    tags:
+      - fibril_can
+      - can
+      - motor
+      - encoder
+    extra_args:
+      - SNIPPET=miniv4-can;miniv4-md-qdec4
+
+  app.node.miniv4_usb_md_qdec4:
+    platform_allow:
+      - fibril_robomaster_miniv4
+    integration_platforms:
+      - fibril_robomaster_miniv4
+    tags:
+      - fibril_can
+      - can
+      - hub
+      - usb
+      - motor
+      - encoder
+    extra_args:
+      - SNIPPET=miniv4-usb;miniv4-md-qdec4
+
+  app.node.miniv4_md_rotor8:
+    platform_allow:
+      - fibril_robomaster_miniv4
+    integration_platforms:
+      - fibril_robomaster_miniv4
+    tags:
+      - fibril_can
+      - can
+      - motor
+      - encoder
+    extra_args:
+      - SNIPPET=miniv4-can;miniv4-md-rotor8
+
+  app.node.miniv4_md_amt4:
+    platform_allow:
+      - fibril_robomaster_miniv4
+    integration_platforms:
+      - fibril_robomaster_miniv4
+    tags:
+      - fibril_can
+      - can
+      - motor
+      - encoder
+      - rs485
+    extra_args:
+      - SNIPPET=miniv4-can;miniv4-md-amt4
+
+  app.node.miniv4_md_rotor8_adc:
+    platform_allow:
+      - fibril_robomaster_miniv4
+    integration_platforms:
+      - fibril_robomaster_miniv4
+    tags:
+      - fibril_can
+      - can
+      - motor
+      - encoder
+      - adc
+    extra_args:
+      - SNIPPET=miniv4-can;miniv4-md-rotor8;miniv4-adc
+
+  app.node.miniv4_md_qdec4_adc:
+    platform_allow:
+      - fibril_robomaster_miniv4
+    integration_platforms:
+      - fibril_robomaster_miniv4
+    tags:
+      - fibril_can
+      - can
+      - motor
+      - encoder
+      - adc
+    extra_args:
+      - SNIPPET=miniv4-can;miniv4-md-qdec4;miniv4-adc

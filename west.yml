@@ -30,11 +30,64 @@ manifest:
       # application passes in fcan_config_t::instance_counts. Bump this
       # deliberately, together with any migration the release notes call for.
       #
-      # Currently the merge commit of fibril_can PR #56 on main. #55 brought
-      # the schema merging apps/node relies on (one node schema plus every
-      # block type this repository implements), #56 the codegen lookup and the
-      # generated-header visibility the build needs. Both are past v0.1.2, so
-      # there is no tag to point at yet.
-      revision: dedeacd8c35dee269be0c8da79e6e96af16d179a
+      # v0.4.2 calls protoc directly for fibril_can_core (fibril_can#91). With
+      # v0.4.1, building the codegen on a host whose CMake is 3.28 (Ubuntu
+      # 24.04's apt) fails with "fibril_can.pb.h: No such file or directory",
+      # because protobuf_generate there writes the output under proto/.
+      #
+      # v0.4.1 builds fcan_codegen from this tree when none is installed
+      # (fibril_can#89): fcan_invoke_codegen configures
+      # fibril_can_codegen/standalone with the host compiler into
+      # <build dir>/fcan_codegen_host, so a machine without ROS 2 (macOS)
+      # needs only protobuf and yaml-cpp, and the CLI matches the runtime.
+      # -DFCAN_CODEGEN_FROM_SOURCE=ON uses it even where the deb is
+      # installed. The runtime is unchanged from v0.4.0.
+      #
+      # v0.4.0 cuts the slave's RAM, Flash and stack (fibril_can#79): a schema
+      # with service_buffer 0 now drops the segmentation code from the image
+      # here too, FRAME_DEFINE no longer needs ~400 B of ISR stack, and the
+      # codegen caps max_copy_entries by the topics' field count. It also makes
+      # the router forget only the targeted node's std IDs on a DISCOVER, and
+      # shares the router/hub driver code. The breaking change is in the
+      # embedded master only, which nothing here uses. Use the v0.4.0 codegen
+      # (the v0.3.7 one still works) and upgrade ros-jazzy-fibril-can-core
+      # with it: the codegen package does not pin the core version.
+      #
+      # v0.3.7 ends an ACCEPTED call on the node's state instead of a timeout
+      # (fibril_can ADR-0018): the call handle carries an epoch the runtime
+      # stamps, which MdMotor's trigger relies on. The generated dispatchers
+      # build handles through the runtime, so the codegen has to be v0.3.7
+      # too; an older one compiles but every deferred reply goes stale.
+      #
+      # v0.3.5 adds the CanPortDiag and CanHubDiag block types
+      # (zephyr/schema/can_diag.yaml) and the helpers that read a controller's
+      # health and a hub's counters from a tick (can_diag.h, and
+      # fcan_hub_zephyr_get_diag / _peer* in can_hub.h), which the can_diag
+      # function publishes. The runtime and the codegen are unchanged from
+      # v0.3.4.
+      #
+      # v0.3.4 lets fcan_state be read from a thread that does not run
+      # fcan_poll (#66), which is what fibril_fcan_node_state() relies on when a
+      # tick runs behind a hub. It keeps, from v0.3.3, fcan_svc_complete staging
+      # the reply for the next fcan_poll (#64), so MdMotor can finish
+      # calibrate_current_baseline from the tick behind a hub, and *_complete
+      # returning FCAN_E_BUSY when no slot is free; and read_<topic>(seq) from
+      # v0.3.2 (#61), which MdMotor uses to apply only the commands that newly
+      # arrived. The codegen package must be at least v0.3.3: an older
+      # fcan_codegen emits a *_complete that returns nothing, and apps/node with
+      # MdMotor fails to compile. v0.3.4 changes the runtime only.
+      revision: v0.4.2
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
+    - name: fibril_common
+      # ROS 2 側と共通の C++17 ライブラリ。CONFIG_FIBRIL_COMMON が立つまで
+      # 何もビルドしないので、載せているだけではイメージに現れない。
+      #
+      # タグではなくコミットなのは、Zephyr module の入口（fibril_common #69）
+      # を含むタグがまだ無いため。1.0.19 はそれより前を指している。
+      #
+      # #74 の -Wdouble-promotion の修正を含む。これより前の版では、
+      # CONFIG_FIBRIL_COMMON を立てたビルドが twister の -Werror で止まる。
+      revision: 8f336f4838694dc20b52f15b3385573e74af01c8
+      url: https://github.com/ForteFibre/fibril_common.git
+      path: modules/lib/fibril_common

@@ -38,7 +38,23 @@
 | [0003](0003-multi-app-structure.md) | 複数用途のファームウェアを 1 つのアプリケーションと機能ライブラリで構成する | Proposed |
 | [0004](0004-robstride-control-api-layering.md) | RobStride の制御 API を汎用 motor クラスと機種固有ヘッダに分ける | Proposed |
 | [0005](0005-motor-position-64bit.md) | motor_feedback.position を 64 bit の積算カウントにする | Proposed |
-| [0006](0006-odrive-control-api-layering.md) | ODrive の制御 API を push 型 feedback と機種固有ヘッダで載せる | Proposed |
+| [0006](0006-robstride-fcan-node-parity.md) | RobStride を fibril_can のブロック型として載せ、ROS 2 実装のインタフェースに合わせる | Proposed |
+| [0007](0007-cpp-node-implementation.md) | fibril_can スレーブを C++17 で書き、codegen の C++ ラッパを使う | Proposed |
+| [0008](0008-fibril-common-integration.md) | fibril_common を Zephyr module として取り込む | Proposed |
+| [0009](0009-motor-control-core.md) | CanMotorMbed の制御のコアを、1 kHz 固定の tick で回る C++ ライブラリとして移す | Proposed |
+| [0010](0010-md-motor-block-type.md) | CanMotorMbed の後継を MdMotor ブロック型として載せ、can_md_controller に寄せる | Proposed |
+| [0011](0011-robomaster-rotor-encoder.md) | RoboMaster のロータ角を、受信経路から通知を受ける encoder device として見せる | Proposed |
+| [0012](0012-node-id-switch-and-watchdog.md) | node_id を基板の ID スイッチの値そのままにし、watchdog を tick で叩く | Proposed |
+| [0013](0013-md-motor-calibration-and-current.md) | MdMotor の ADC キャリブレーションを AdcPort ブロック型で入れ替え可能にし、電流ベースラインは測り終えてから応答する | Proposed |
+| [0014](0014-snippet-hardware-fragments.md) | 基板に繋がるハードウェアを共有の devicetree 断片に切り出し、未接続を許すデバイスは最大の構成で書く | Proposed |
+| [0015](0015-hub-joins-fibril-can-only.md) | hub が繋ぐバスは fibril_can のデバイスだけにし、モータのバスへの生の転送はしない | Proposed |
+| [0016](0016-command-loss-stop.md) | 指令の途絶を、master 全体の途絶と topic ごとの途絶の 2 段で捉えて出力を止める | Proposed |
+| [0017](0017-can-diag-builtin-function.md) | CAN の健全性は、devicetree に書かない組み込みの機能として全てのイメージで出す | Proposed |
+| [0018](0018-md-motor-trigger-in-firmware.md) | MdMotor の trigger をファームウェアに入れる | Proposed |
+| [0019](0019-robstride-mode-params-readback.md) | RobStride の設定をモードごとに書き、読み戻して確かめてから有効化する | Proposed |
+| [0020](0020-imu-driver-class.md) | ジャイロを、SI 単位と連続した yaw のスナップショットを返す IMU クラスで見せる | Proposed |
+| [0021](0021-odometry-block-type.md) | 自己位置推定の入力を、PCMainFW の host が出していた topic と同じ形のブロック型にする | Proposed |
+| [0022](0022-odrive-control-api-layering.md) | ODrive の制御 API を push 型 feedback と機種固有ヘッダで載せる | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -49,5 +65,21 @@
 0003-multi-app-structure
 0004-robstride-control-api-layering
 0005-motor-position-64bit
-0006-odrive-control-api-layering
+0006-robstride-fcan-node-parity
+0007-cpp-node-implementation
+0008-fibril-common-integration
+0009-motor-control-core
+0010-md-motor-block-type
+0011-robomaster-rotor-encoder
+0012-node-id-switch-and-watchdog
+0013-md-motor-calibration-and-current
+0014-snippet-hardware-fragments
+0015-hub-joins-fibril-can-only
+0016-command-loss-stop
+0017-can-diag-builtin-function
+0018-md-motor-trigger-in-firmware
+0019-robstride-mode-params-readback
+0020-imu-driver-class
+0021-odometry-block-type
+0022-odrive-control-api-layering
 ```

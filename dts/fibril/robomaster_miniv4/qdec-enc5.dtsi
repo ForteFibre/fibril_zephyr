@@ -1,0 +1,32 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Encoder input ENC5 (PC6/PC7) on TIM8, as enc5. See qdec.dtsi for the
+ * settings every input shares.
+ *
+ * PC6/PC7 could also be TIM3, which ENC0 needs.
+ */
+
+#ifndef FIBRIL_MINIV4_QDEC_ENC5_DTSI
+#define FIBRIL_MINIV4_QDEC_ENC5_DTSI
+
+#ifdef FIBRIL_CLAIM_TIM8
+#error "TIM8 claimed twice; ENC5 is one claimant"
+#endif
+#define FIBRIL_CLAIM_TIM8 1
+
+&timers8 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc5: encoder5 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim8_ch1_pc6 &tim8_ch2_pc7>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+#endif /* FIBRIL_MINIV4_QDEC_ENC5_DTSI */

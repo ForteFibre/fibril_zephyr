@@ -68,6 +68,10 @@ devicetree でも無効のままにしてある。
 
 いずれの FDCAN もピンとクロックだけを設定して無効にしてあるので、使う側の overlay が ``status`` を ``"okay"`` にしてビットレートを与える。
 
+2 つのトランシーバの STB は、ボードの devicetree が gpio-hog で Low にする。
+どちらのバスを有効にしても、トランシーバは動作状態で始まる。
+fibril_can の boot_id が使う ``rng`` も、ボードの devicetree で有効にしてある。
+
 UART
 ****
 
@@ -153,6 +157,7 @@ devicetree に書かれていないペリフェラル
 タイマーノード自身は ``pinctrl-0`` を取らない。
 子ノードの名前に ``qdec`` は使えない（SoC の dtsi が各タイマーの下に同名の無効ノードを持っている）。
 詳細は :doc:`/drivers/qdec_stm32` にある。
+``dts/fibril/rc26_mainair_v01/qdec-enc3.dtsi`` と ``qdec-enc4.dtsi`` がそれぞれを ``enc3``、``enc4`` として定義し、J25 の R6093U は ``r6093u.dtsi`` が ``gyro`` として定義する（:doc:`/drivers/r6093u`）。
 
 アドレサブル RGB LED（D10、WS281x 系）は PB9 につながっている。
 PB9 は TIM17_CH1 と SPI2_NSS のどちらでも駆動できるため、devicetree ではピンを空けたままにして overlay に選ばせる。

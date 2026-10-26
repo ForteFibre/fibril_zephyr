@@ -87,7 +87,7 @@ struct amt21_bus_stats
 {
   /** Scans of every encoder on the bus that ran to completion. */
   uint32_t scans;
-  /** Scans skipped because the previous one overran the poll interval. */
+  /** Poll interval boundaries dropped because a scan was still running. */
   uint32_t scans_skipped;
   /** Times reception was restarted after being stopped or resynchronised. */
   uint32_t rx_restarts;

@@ -1,0 +1,30 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Encoder input ENC2 (PD12/PD13) on TIM4, as enc2. See qdec.dtsi for the
+ * settings every input shares.
+ */
+
+#ifndef FIBRIL_MINIV4_QDEC_ENC2_DTSI
+#define FIBRIL_MINIV4_QDEC_ENC2_DTSI
+
+#ifdef FIBRIL_CLAIM_TIM4
+#error "TIM4 claimed twice; ENC2 is one claimant"
+#endif
+#define FIBRIL_CLAIM_TIM4 1
+
+&timers4 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc2: encoder2 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim4_ch1_pd12 &tim4_ch2_pd13>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+#endif /* FIBRIL_MINIV4_QDEC_ENC2_DTSI */

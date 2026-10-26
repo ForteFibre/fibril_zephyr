@@ -13,11 +13,12 @@
  * main thread -- the hub+self topology puts fcan_poll(self) on the hub
  * driver thread (via fcan_hub_poll) while app_logic_tick() runs on main.
  * Topic begin/commit/read and param_read stay safe across that boundary via
- * fcan_seqlock.h. fcan_svc_complete() does NOT: it races the hub thread's
- * fcan_service_poll on the reassembly slots. So the `home` service handler
- * completes synchronously here (returns FCAN_SVC_OK with a filled response)
- * instead of stashing a handle for a later motordriver_home_complete call.
- * The deferred-response path is still demonstrated by the example_node sample.
+ * fcan_seqlock.h, and since fibril_can v0.3.3 fcan_svc_complete() only
+ * stages the reply for the hub thread's next fcan_poll (GCC/Clang builds).
+ * The `home` service handler still completes synchronously here (returns
+ * FCAN_SVC_OK with a filled response): handing a call handle from the hub
+ * thread to app_logic_tick() would need its own synchronisation, and the
+ * deferred-response path is already demonstrated by the example_node sample.
  */
 
 #include "app_logic.h"
@@ -90,8 +91,7 @@ void app_logic_tick(float dt_seconds)
 	}
 
 	/* 4. Low-rate diagnostics. No deferred-response completion here (see the
-	 *    file header): motordriver_home returns synchronously in this sample
-	 *    so nothing needs to complete a stashed handle from the app thread. */
+	 *    file header): motordriver_home returns synchronously in this sample. */
 	g_axis.uptime_ticks++;
 	if ((g_axis.uptime_ticks % DIAG_DIVIDER) == 0U) {
 		motordriver_diagnostics_t *diag = motordriver_diagnostics_begin(MOTOR_INST);
@@ -186,10 +186,8 @@ fcan_svc_status_t motordriver_home(uint8_t inst,
 		g_axis.velocity = 0.0f;
 	}
 	/* Synchronous completion: fill the response and return OK so the runtime
-	 * sends it from this call's context (hub driver thread). The
-	 * deferred-response path (FCAN_SVC_ACCEPTED + motordriver_home_complete
-	 * later) would trip on the hub-thread vs app-thread race documented at
-	 * the top of this file. */
+	 * sends it from this call's context (hub driver thread). See the top of
+	 * this file for why this sample skips the ACCEPTED path. */
 	resp->success = true;
 	return FCAN_SVC_OK;
 }

@@ -1,0 +1,75 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Four RoboMaster motors, each closed around an AMT21x absolute encoder on
+ * the RS485 bus. The encoders are the four CanMotorMbed's robomaster_miniv4
+ * build declared (0x10, 0x14, 0x54, 0x04, 14 bit, multi-turn), paired with
+ * motors 1..4 in that order; CanMotorMbed itself never closed a loop around
+ * them, so the pairing is this snippet's.
+ *
+ * The hardware comes from dts/fibril/robomaster_miniv4/; the encoders and the
+ * pairing are said here. Only the encoders that are wired are listed: an
+ * AMT21x that does not answer costs the bus time (see amt21.dtsi).
+ */
+
+#include <fibril/robomaster_miniv4/robomaster.dtsi>
+#include <fibril/robomaster_miniv4/amt21.dtsi>
+
+/* One node schema per image; see doc/apps.md. */
+#ifdef FIBRIL_CLAIM_NODE_ROLE
+#error "NODE_ROLE claimed twice; miniv4-md-amt4 is one claimant"
+#endif
+#define FIBRIL_CLAIM_NODE_ROLE 1
+
+#ifdef FIBRIL_CLAIM_FCAN_MD_MOTOR
+#error "FCAN_MD_MOTOR claimed twice; miniv4-md-amt4 is one claimant"
+#endif
+#define FIBRIL_CLAIM_FCAN_MD_MOTOR 1
+
+/* Multi-turn, so the position survives more than one shaft turn after power
+ * up. Only a single-turn AMT21x can store a zero point; a robot that fits
+ * those drops `multiturn` here. */
+&amt21_bus {
+    amt0: encoder@10 {
+        compatible = "cui,amt21-encoder";
+        reg = <0x10>;
+        resolution = <14>;
+        multiturn;
+    };
+
+    amt1: encoder@14 {
+        compatible = "cui,amt21-encoder";
+        reg = <0x14>;
+        resolution = <14>;
+        multiturn;
+    };
+
+    amt2: encoder@54 {
+        compatible = "cui,amt21-encoder";
+        reg = <0x54>;
+        resolution = <14>;
+        multiturn;
+    };
+
+    amt3: encoder@4 {
+        compatible = "cui,amt21-encoder";
+        reg = <0x04>;
+        resolution = <14>;
+        multiturn;
+    };
+};
+
+/ {
+    fcan_md_motor: fcan-md-motor {
+        compatible = "fibril,fcan-md-motor";
+
+        /* Becomes motor0..motor3 on the ROS side, the names
+         * can_md_controller used. */
+        fcan-ns = "motor{i}";
+
+        motors = <&rm_motor1>, <&rm_motor2>, <&rm_motor3>, <&rm_motor4>;
+        encoders = <&amt0>, <&amt1>, <&amt2>, <&amt3>;
+        status = "okay";
+    };
+};

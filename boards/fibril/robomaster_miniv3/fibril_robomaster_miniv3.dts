@@ -13,7 +13,6 @@
 /dts-v1/;
 #include <st/g4/stm32g474Xe.dtsi>
 #include <st/g4/stm32g474m(b-c-e)tx-pinctrl.dtsi>
-#include <zephyr/dt-bindings/input/input-event-codes.h>
 
 / {
 	model = "Fibril RoboMaster Mini V3";
@@ -24,6 +23,7 @@
 		zephyr,shell-uart = &usart1;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
+		fibril,node-id = &rotary_id;
 	};
 
 	leds: leds {
@@ -49,35 +49,17 @@
 	 * Read as a nibble to derive per-unit CAN IDs / hostnames, matching the
 	 * mbed target's Hardware() constructor. ROT4 (PC14) and ROT8 (PC13)
 	 * overlap with the LSE oscillator inputs and SYS_WKUP2 — we don't enable
-	 * either, so the pins are free for GPIO. Not a gpio-keys input source.
+	 * either, so the pins are free for GPIO.
+	 * The switch is what tells identical boards apart, so it is also where the
+	 * fibril_can node id comes from (chosen fibril,node-id, lib/node_id).
 	 */
 	rotary_id: rotary_id {
-		compatible = "gpio-keys";
-		status = "okay";
-
-		rot1: rot1 {
-			label = "ROT1";
-			gpios = <&gpioc 0 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			zephyr,code = <INPUT_KEY_1>;
-		};
-
-		rot2: rot2 {
-			label = "ROT2";
-			gpios = <&gpioc 1 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			zephyr,code = <INPUT_KEY_2>;
-		};
-
-		rot4: rot4 {
-			label = "ROT4";
-			gpios = <&gpioc 14 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			zephyr,code = <INPUT_KEY_3>;
-		};
-
-		rot8: rot8 {
-			label = "ROT8";
-			gpios = <&gpioc 13 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			zephyr,code = <INPUT_KEY_4>;
-		};
+		compatible = "fibril,id-switch";
+		/* ROT1, ROT2, ROT4, ROT8: least significant bit first. */
+		gpios = <&gpioc 0 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>,
+			<&gpioc 1 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>,
+			<&gpioc 14 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>,
+			<&gpioc 13 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
 	};
 
 	aliases {

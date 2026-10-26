@@ -1,0 +1,32 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config FIBRIL_CAN_NODE_MD_MOTOR
+	bool
+	default y
+	depends on DT_HAS_FIBRIL_FCAN_MD_MOTOR_ENABLED
+	select MOTOR
+	select ENCODER
+	select MOTOR_CONTROL
+	help
+	  Compiled whenever the devicetree pairs motors with encoders under a
+	  fibril,fcan-md-motor node, which is also what puts MdMotor instances
+	  into the schema.
+
+	  The leaf drivers are not selected here: they are on by default once
+	  their own devicetree nodes exist, and this function works with any
+	  motor and encoder class device.
+
+config FIBRIL_CAN_NODE_MD_MOTOR_MAX
+	int "MdMotor instances to allocate for"
+	default 8
+	range 1 32
+	depends on FIBRIL_CAN_NODE_MD_MOTOR
+	help
+	  The schema's max_count for MdMotor: how many instances the generated
+	  code reserves state for. It is a ceiling, not a count, and never
+	  reaches the schema blob.
+
+	  8 covers every RoboMaster a two-bus board can address, which is the
+	  most CanMotorMbed ever drove from one board. Lowering it below the
+	  devicetree's length fails the BUILD_ASSERT in md_motor.cpp.

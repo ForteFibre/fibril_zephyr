@@ -1,0 +1,38 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Eight RoboMaster motors, each closed around its own rotor angle.
+ *
+ * The hardware comes from dts/fibril/robomaster_miniv4/; only the pairing is
+ * said here.
+ */
+
+#include <fibril/robomaster_miniv4/robomaster.dtsi>
+
+/* One node schema per image; see doc/apps.md. */
+#ifdef FIBRIL_CLAIM_NODE_ROLE
+#error "NODE_ROLE claimed twice; miniv4-md-rotor8 is one claimant"
+#endif
+#define FIBRIL_CLAIM_NODE_ROLE 1
+
+#ifdef FIBRIL_CLAIM_FCAN_MD_MOTOR
+#error "FCAN_MD_MOTOR claimed twice; miniv4-md-rotor8 is one claimant"
+#endif
+#define FIBRIL_CLAIM_FCAN_MD_MOTOR 1
+
+/ {
+    fcan_md_motor: fcan-md-motor {
+        compatible = "fibril,fcan-md-motor";
+
+        /* Becomes motor0..motor7 on the ROS side, the names
+         * can_md_controller used. */
+        fcan-ns = "motor{i}";
+
+        motors = <&rm_motor1>, <&rm_motor2>, <&rm_motor3>, <&rm_motor4>,
+                 <&rm_motor5>, <&rm_motor6>, <&rm_motor7>, <&rm_motor8>;
+        encoders = <&rm_enc1>, <&rm_enc2>, <&rm_enc3>, <&rm_enc4>,
+                   <&rm_enc5>, <&rm_enc6>, <&rm_enc7>, <&rm_enc8>;
+        status = "okay";
+    };
+};

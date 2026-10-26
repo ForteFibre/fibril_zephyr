@@ -12,4 +12,5 @@ supported:
   - uart
   - dma
   - can
+  - adc
 vendor: fibril

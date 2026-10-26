@@ -221,12 +221,11 @@ int main(void)
 		 * thread (fcan_hub_poll drives it at the end of each pass),
 		 * so this main-thread app_logic_tick() must only use fcan APIs
 		 * that are documented cross-thread-safe -- topic begin/commit/
-		 * read and param_read are seqlock-protected per fcan_seqlock.h.
-		 * Do NOT call fcan_svc_complete from here: it races the hub
-		 * thread's fcan_service_poll on the reassembly slots.
-		 * app_logic.c completes the `home` service synchronously to
-		 * keep that invariant, at the cost of skipping the ACCEPTED
-		 * demo the example_node sample carries. */
+		 * read and param_read are seqlock-protected per fcan_seqlock.h,
+		 * and fcan_svc_complete only stages the reply for the hub
+		 * thread's next fcan_poll (fibril_can v0.3.3). app_logic.c
+		 * still completes the `home` service synchronously; the
+		 * ACCEPTED demo lives in the example_node sample. */
 		app_logic_tick(0.01f);
 
 		const fcan_node_state_t s = fcan_state(self);

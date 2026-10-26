@@ -7,3 +7,13 @@ tests:
     integration_platforms:
       - native_sim
       - native_sim/native/64
+  drivers.motor.robstride.no_verify:
+    tags:
+      - drivers
+      - motor
+      - can
+    extra_configs:
+      - CONFIG_MOTOR_ROBSTRIDE_VERIFY=n
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64

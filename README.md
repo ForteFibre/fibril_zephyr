@@ -1,7 +1,7 @@
 # fibril_zephyr
 
 ForteFibre のロボット用基板で動く Zephyr ファームウェアを、1 つの workspace にまとめたリポジトリ。
-自作ボードの定義、out-of-tree のモータドライバとエンコーダドライバ、CAN FD 通信フレームワーク [fibril_can](https://github.com/ForteFibre/fibril_can) を使ったサンプルが入っている。
+自作ボードの定義、out-of-tree のモータ、エンコーダ、IMU のドライバ、CAN FD 通信フレームワーク [fibril_can](https://github.com/ForteFibre/fibril_can) を使ったサンプルが入っている。
 
 Zephyr の [T2 topology][west_t2] に沿った **workspace application** で、このリポジトリ自身が west manifest（[west.yml](west.yml)）を提供し、Zephyr 本体と依存モジュールを取り込む。
 Zephyr のバージョンは `west.yml` で v4.4.1 に固定してある。
@@ -41,7 +41,7 @@ cd fibril_zephyr_ws
 west update
 ```
 
-`west update` は private リポジトリである `fibril_can` を clone する。
+`west update` は private リポジトリである `fibril_can` と `fibril_common` を clone する。
 先に GitHub の認証を通しておく（`gh auth login` の後に `gh auth setup-git` を実行するか、SSH 鍵を登録して `insteadOf` を張る）。
 
 ## コーディングエージェントを開く場所
@@ -72,6 +72,15 @@ west flash
 | --- | --- | --- | --- |
 | `rc26-mainair-usb` | トランスポート | RC26 MainAir V01 | CAN0 を gs_usb で PC に見せ、自ノードを同じ論理バスに載せる |
 | `rc26-air` | デプロイ | RC26 MainAir V01 | 6 系統の電磁弁を ROS Service で駆動する |
+| `rc26-robstride` | デプロイ | RC26 MainAir V01 | CAN1 の RobStride アクチュエータを ROS から駆動する |
+| `rc26-main` | デプロイ | RC26 MainAir V01 | `rc26-air` の電磁弁と `rc26-robstride` のアクチュエータを、1 つのノード（`rc26_main0`）で駆動する |
+| `rc26-odom` | デプロイ | RC26 MainAir V01 | 接地エンコーダ 2 本（J11、J12）と R6093U（J25）を、自己位置推定の入力として出す（PCMainFW の後継）。`rc26-main`、`rc26-air`、`rc26-robstride` のどれにも重ねられる |
+| `miniv4-can` | トランスポート | RoboMaster Mini V4 | 外部 CAN（FDCAN1）に直接つなぐ |
+| `miniv4-usb` | トランスポート | RoboMaster Mini V4 | 外部 CAN（FDCAN1）を gs_usb で PC に見せ、自ノードを同じ論理バスに載せる。FDCAN1 には fibril_can のデバイスだけを繋ぐ |
+| `miniv4-md-qdec4` | デプロイ | RoboMaster Mini V4 | RoboMaster 4 台を基板の qdec で閉ループ制御する（CanMotorMbed の後継） |
+| `miniv4-md-rotor8` | デプロイ | RoboMaster Mini V4 | RoboMaster 8 台をそれぞれのロータ角で閉ループ制御する（CanMotorMbed の `ROBOMASTER_ENCODER`） |
+| `miniv4-md-amt4` | デプロイ | RoboMaster Mini V4 | RoboMaster 4 台を、RS485 の AMT21x（0x10、0x14、0x54、0x04）で閉ループ制御する |
+| `miniv4-adc` | デプロイ | RoboMaster Mini V4 | キャリブレーションの入力を、基板で固定の 13 ポート（CanMotorMbed の並び、トルク 8、基板の ADC 5）で足す。どの `miniv4-md-*` にも重ねられる |
 
 ボード持ち込みの動作確認には `app/` を使う。fibril_can を使わない。
 
@@ -82,7 +91,17 @@ west build -b <ボード名> app -- -DEXTRA_CONF_FILE=debug.conf   # 診断用 K
 
 `apps/node` のビルドには `fcan_codegen` が要る。
 `ros-jazzy-fibril-can-codegen` パッケージが入っていれば自動で見つかる。
-入っていなければ絶対パスを渡す（`-- -DFCAN_CODEGEN=/abs/path/fcan_codegen`）。
+見つからなければ、`west.yml` が固定した fibril_can の木から host 向けにビルドする（ビルドディレクトリの `fcan_codegen_host/`）。
+これには protobuf と yaml-cpp が要る。Mac（Apple Silicon）ではこれで `west build` が通る。
+
+```shell
+brew install protobuf yaml-cpp                                            # macOS
+sudo apt install protobuf-compiler libprotobuf-dev libyaml-cpp-dev         # Ubuntu
+```
+
+deb の codegen は版が runtime とずれることがある（`west.yml` は fibril_can を v0.4.2 に固定している。古い codegen では MdMotor を含む `apps/node` の後送の応答が届かない）。
+木からビルドした CLI を必ず使うときは `-- -DFCAN_CODEGEN_FROM_SOURCE=ON` を、手元の CLI を使うときは `-- -DFCAN_CODEGEN=/abs/path/fcan_codegen` を渡す。
+理由は [doc/overview.md](doc/overview.md) にある。
 
 構成の考え方と機能の足し方は [doc/apps.md](doc/apps.md) にある。
 
@@ -91,6 +110,8 @@ west build -b <ボード名> app -- -DEXTRA_CONF_FILE=debug.conf   # 診断用 K
 | クラス | 実装 | 文書 |
 | --- | --- | --- |
 | エンコーダ | AMT21x アブソリュートエンコーダ（RS485） | [doc/drivers/amt21.md](doc/drivers/amt21.md) |
+| エンコーダ | DJI RoboMaster のロータ角 | [doc/drivers/robomaster_encoder.md](doc/drivers/robomaster_encoder.md) |
+| IMU | CruizCore R6093U ジャイロ（UART） | [doc/drivers/r6093u.md](doc/drivers/r6093u.md) |
 | モータ | DJI RoboMaster C610 / C620（CAN） | [doc/drivers/robomaster.md](doc/drivers/robomaster.md) |
 | モータ | ODrive Pro / S1 / Micro（CAN） | [doc/drivers/odrive.md](doc/drivers/odrive.md) |
 | モータ | RobStride アクチュエータ（CAN） | [doc/drivers/robstride.md](doc/drivers/robstride.md) |

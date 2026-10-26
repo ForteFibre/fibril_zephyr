@@ -1,3 +1,4 @@
+cruizcore	CruizCore (Microinfinity)
 cui	CUI Devices (Same Sky)
 dji	DJI
 fibril	ForteFibre

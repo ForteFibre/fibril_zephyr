@@ -68,8 +68,9 @@ west twister -T apps -T app --integration                    # アプリのビ�
 
 `apps/node` と `samples/lib/fibril_can/` 以下は `fcan_codegen` を必要とする。
 `ros-jazzy-fibril-can-codegen` パッケージが入っていれば自動で見つかる。
-入っていなければ `-DFCAN_CODEGEN=/abs/path/fcan_codegen` を渡す。
-twister には CMake 引数ではなく環境変数 `FCAN_CODEGEN` で渡す（`--extra-args` はこのヘルパに届かない）。
+見つからなければ、`modules/lib/fibril_can` から host 向けにビルドする（ビルドディレクトリの `fcan_codegen_host/`。protobuf と yaml-cpp が要る）。
+手元の CLI を使うなら `-DFCAN_CODEGEN=/abs/path/fcan_codegen`、木からのビルドを必ず使うなら `-DFCAN_CODEGEN_FROM_SOURCE=ON` を渡す。
+twister には CMake 引数ではなく同じ名前の環境変数で渡す（`--extra-args` はこのヘルパに届かない）。
 
 `apps/` の構成と機能の足し方は [doc/apps.md](doc/apps.md)、判断の理由は [doc/adr/0003-multi-app-structure.md](doc/adr/0003-multi-app-structure.md) にある。
 
@@ -146,6 +147,16 @@ refactor(samples): hub_gs_usb_latency_probe main.c を整形
 - `struct` の定義と関数定義は、次の行に `{` を置く
 - `enum` の定義と制御構文は、同じ行に `{` を置く
 - ポインタは `const struct device * dev` のように `*` の両側を空ける
+
+**`apps/node/` と `lib/fibril_can_node/` の C++ コード**
+
+C++17。`drivers/` と `include/` の C と同じ形を使う（半角スペース 2 つ、`struct` と関数定義は次の行に `{`、`const auto & x` のようにポインタと参照の両側を空ける）。
+
+- ハンドラは `start` で登録し、λ が捕捉するのはインスタンス番号までにする
+- 生成物（`fcan_gen::`）以外に例外と RTTI を持ち込まない
+- `FCAN_ARRAY_<TYPE>` ではなく `fcan_gen::<type>::block_array_index` を使う
+
+理由は [doc/adr/0007-cpp-node-implementation.md](doc/adr/0007-cpp-node-implementation.md) にある。
 
 **`samples/` の C コード**
 

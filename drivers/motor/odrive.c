@@ -55,7 +55,7 @@ LOG_MODULE_REGISTER(motor_odrive, CONFIG_MOTOR_LOG_LEVEL);
  * One revolution is 65536 counts in motor_feedback.position. Pos_Estimate is a
  * float32, whose step reaches 1/65536 rev at 128 rev, so counts and estimates
  * correspond one to one up to there and coarsen by a factor of two per
- * doubling beyond it. See ADR 0006.
+ * doubling beyond it. See ADR 0022.
  */
 #define ODRIVE_COUNTS_PER_REV 65536.0F
 

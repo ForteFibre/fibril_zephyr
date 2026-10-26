@@ -4,7 +4,8 @@ DJI の RoboMaster モータコントローラ C610 と C620 を CAN 経由で�
 モータ 1 台が 1 つの device として現れ、電流指令と feedback スナップショットを扱う。
 
 共通のモータインタフェースは [include/drivers/motor.h](../../include/drivers/motor.h) にある。
-このドライバに固有の公開 API はない。
+このドライバに固有の公開 API は、ロータ角を受信のたびに受け取る `robomaster_motor_set_rotor_callback()` だけである（[include/drivers/motor/robomaster.h](../../include/drivers/motor/robomaster.h)）。
+ロータ角を encoder クラスとして見せる [robomaster_encoder](robomaster_encoder.md) が使う。
 
 ## デバイスの構成
 
@@ -62,7 +63,21 @@ C610 と C620 は同じ扱いになる。
 そのグループに属するモータが 1 台もそのバスにいなければ、フレームは送らない。
 
 `can_send()` は `K_NO_WAIT` で呼び、戻り値を見ない。
-バスが混んでいて送れなかったフレームは、次のタイマー刻みで送り直される。
+コントローラが受け取らなかったフレームは、次のタイマー刻みのフレームに置き換わる。
+
+### 送信は完了を待たない
+
+`can_send()` に完了コールバックを渡さないと、**フレームが線路に出るまで `K_FOREVER` で待つ**（`zephyr/drivers/can/can_common.c` の `z_impl_can_send()`）。
+`K_NO_WAIT` が縛るのは送信メールボックスの空き待ちだけである。
+誰も ACK を返さないバスではこれが送信ワークを止め、システムワークキュー全体を巻き込む。
+正常なバスでも、線路に出るまでの時間だけワークキューを占有する。
+
+そのためドライバは**常に完了コールバックを渡す**。
+同じ理由で fibril_can の hub も `NULL` を禁じている。
+
+ただしコールバックは何もしない。
+このドライバは毎周期その時点の指令からフレームを組み直すので、線路に出なかったフレームには取り消す状態が無く、次の刻みのフレームがそれを置き換える。
+RobStride ドライバがハンドシェイクの段を巻き戻すのに完了の失敗を使っているのとはここが違う（[robstride.md](robstride.md) の「送信は完了を待たない」）。
 
 ## CAN バスの自動検出
 
@@ -102,6 +117,19 @@ C610 と C620 は同じ扱いになる。
 最初の feedback フレームでは、`position` の初期値として機械角の生の値をそのまま入れる。
 0 から始まるわけではないので、起動後の変位を見たい場合は最初の読み値を基準として引く。
 
+### ロータ角の通知
+
+`robomaster_motor_set_rotor_callback()` で、モータ 1 台につき 1 つの受け手を登録できる。
+受け手は、そのモータの feedback フレームを受け取るたびに、機械角と受信時刻（`k_cycle_get_32()`）を受け取る。
+呼ばれるのは CAN の受信コールバックの中で、モータのロックを外した後である。
+多くのコントローラでは割り込み文脈なので、受け手はブロックしてはいけない。
+
+`continuous` は、その角度が直前の角度から続いているかを表す。
+モータからの最初のフレームと、`feedback-timeout-ms` より長く途絶えた後の最初のフレームで偽になる。
+途絶えている間にロータが何回転したかは分からないので、直前との差は意味を持たない。
+
+2 つ目の受け手は `-EBUSY`、RoboMaster のモータでない device は `-EINVAL` で断る。
+
 ## API の振る舞い
 
 `motor_enable()` と `motor_disable()` はフラグを立てるだけで、CAN には何も送らない。
@@ -136,13 +164,17 @@ C610 と C620 は同じ扱いになる。
 
 モータ電源が入った時点でバスは自然に立ち上がる。
 
+バスが起動したあとでモータ電源が落ちている場合は、送ったフレームに誰も ACK を返さない。
+それでも送信ワークが止まらないのは、上の「送信は完了を待たない」による。
+
 ## テスト
 
 振る舞いは `native_sim` 上の ztest で固定してある。
 
-- [tests/drivers/motor/robomaster](../../tests/drivers/motor/robomaster/src/main.c) — 指令のグループ振り分け、無効化でスロットが 0 になること、未対応モードの拒否、`-ENODATA` と stale、feedback のデコードと折り返し、モータ ID とバスによる振り分け、バス自動検出と保持していた指令の反映
+- [tests/drivers/motor/robomaster](../../tests/drivers/motor/robomaster/src/main.c) — 指令のグループ振り分け、無効化でスロットが 0 になること、未対応モードの拒否、`-ENODATA` と stale、feedback のデコードと折り返し、モータ ID とバスによる振り分け、バス自動検出と保持していた指令の反映、完了が返らないバスでも送信ワークが回り続けること
+- [tests/drivers/encoder/robomaster](../../tests/drivers/encoder/robomaster/src/main.c) — ロータ角の通知（受け手が 1 つに限られること、`continuous` が途絶えた後に偽になること）を、それを使うエンコーダ越しに確かめる
 - [tests/drivers/motor/robomaster_start_retry](../../tests/drivers/motor/robomaster_start_retry/src/main.c) — 起動できないバスがあってもモータ device を失わず、後から復帰すること
 
 ```shell
-west twister -T tests/drivers/motor --integration
+west twister -T tests/drivers/motor -T tests/drivers/encoder/robomaster --integration
 ```

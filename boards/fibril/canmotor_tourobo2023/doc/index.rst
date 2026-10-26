@@ -78,11 +78,14 @@ Twister が認識する機能は ``gpio``、``uart``、``spi``、``pwm``、``usb
      - PE8（プルアップ、アクティブ Low）
      - 有効
    * - ロータリ ID スイッチ
-     - ``rot1`` / ``rot2`` / ``rot4`` / ``rot8``
+     - ``rotary_id`` の ROT1 / ROT2 / ROT4 / ROT8
      - PE14 / PE11 / PE13 / PE12（プルアップ、アクティブ Low）
      - 有効
 
 ``led0`` エイリアスは緑（``led_g``）、``sw0`` は ``user_button``、``watchdog0`` は ``iwdg`` を指す。
+
+ロータリスイッチは ``fibril,id-switch``（``rotary_id``）として記述し、``chosen`` の ``fibril,node-id`` がこれを指す。
+ROT1 を最下位ビットとする 4 ビットの値として読み、fibril_can の node_id にそのまま使う（``lib/node_id``、:doc:`/apps` の「node_id を ID スイッチから読む」）。
 
 MCP2517FD は 20 MHz の発振子を持ち、devicetree ではアービトレーションを 1 Mbps、トランシーバの上限を 5 Mbps としている。
 SoC 内蔵 CAN を使う他のボードと違って、この CAN は SPI 越しに見えるため、SPI の転送レートと割り込み応答が CAN のレイテンシに乗る。

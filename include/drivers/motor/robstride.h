@@ -27,9 +27,15 @@ extern "C" {
  * no counterpart in the class, and are read through
  * @ref robstride_get_feedback.
  *
+ * @ref motor_disable sends the stop frame itself rather than waiting for the
+ * next command interval, and returns the error when the controller will not
+ * take it: the motor holds its last target until the stop reaches it. Getting
+ * the frame onto the wire is reported separately, so a stop that is accepted
+ * and then fails is re-sent by the driver rather than surfacing here.
+ *
  * Selecting a target also selects the mode it belongs to. Switching mode makes
- * the driver stop the motor, write the new mode and enable it again, which
- * takes a few command intervals.
+ * the driver stop the motor, write the new mode and its parameters, read them
+ * back and enable it again, which takes several command intervals.
  *
  * @defgroup motor_robstride RobStride driver
  * @ingroup motor_interface
@@ -57,6 +63,9 @@ enum robstride_mode {
   /** Quadrature current. */
   ROBSTRIDE_MODE_CURRENT = 4,
 };
+
+/** @brief Number of values in @ref robstride_mode. */
+#define ROBSTRIDE_MODE_COUNT 5
 
 /** @brief Run state reported by the motor alongside every feedback frame. */
 enum robstride_run_state {
@@ -101,14 +110,33 @@ struct robstride_limits
 };
 
 /**
- * @brief Gains of the motor's internal loops.
+ * @brief What the driver writes into the motor for one control mode.
  *
- * The driver does not write these until @ref robstride_set_gains is called, so
- * a motor keeps the gains stored in its own memory unless the application
- * overrides them.
+ * Each mode uses only some of the fields: @ref ROBSTRIDE_MODE_POSITION all of
+ * them, @ref ROBSTRIDE_MODE_POSITION_CSP everything but @c acceleration,
+ * @ref ROBSTRIDE_MODE_VELOCITY everything but @c max_velocity and
+ * @c position_kp, and @ref ROBSTRIDE_MODE_CURRENT and
+ * @ref ROBSTRIDE_MODE_OPERATION the current loop alone. The others are ignored.
+ *
+ * Until @ref robstride_set_mode_params has been called for a mode, the driver
+ * writes none of these for it, and the motor runs that mode on the values in
+ * its own memory.
  */
-struct robstride_gains
+struct robstride_mode_params
 {
+  /**
+   * Velocity cap in rad/s, motor side. The trajectory generator's cruise
+   * velocity in @ref ROBSTRIDE_MODE_POSITION, and the velocity limit in
+   * @ref ROBSTRIDE_MODE_POSITION_CSP, where it never exceeds the limit from
+   * @ref robstride_set_limits.
+   */
+  float max_velocity;
+  /**
+   * Acceleration in rad/s^2, motor side. The trajectory generator's in
+   * @ref ROBSTRIDE_MODE_POSITION, the velocity ramp's in
+   * @ref ROBSTRIDE_MODE_VELOCITY.
+   */
+  float acceleration;
   /** Proportional gain of the position loop. */
   float position_kp;
   /** Proportional gain of the velocity loop. */
@@ -142,12 +170,33 @@ struct robstride_feedback
   uint32_t fault_bits;
   /** Warnings from the most recent fault frame. */
   uint32_t warning_bits;
-  /** True when the motor has answered at least once and has not timed out. */
+  /** True when the motor has answered at least once, whatever it answered. */
   bool online;
-  /** True when the measurements are present but no longer fresh. */
+  /** True when no feedback frame has arrived within the configured timeout. */
   bool stale;
-  /** Timestamp of the most recent frame from this motor, in milliseconds. */
+  /**
+   * @brief Timestamp of the most recent feedback frame, in milliseconds.
+   *
+   * Only feedback frames carry measurements, so a presence or parameter reply
+   * marks the motor online without moving this on.
+   */
   int64_t timestamp_ms;
+  /**
+   * @brief True once the motor holds everything the driver writes for the
+   *        current mode and has reported running since it was enabled.
+   *
+   * Each value is read back from the motor before it counts as written (unless
+   * @c CONFIG_MOTOR_ROBSTRIDE_VERIFY is off). Commands are only sent
+   * while this is true.
+   */
+  bool configured;
+  /**
+   * @brief Times configuring the motor has been given up on and started over.
+   *
+   * Counts from boot and is never reset, so a motor that keeps needing retries
+   * stays visible after it has come up.
+   */
+  uint32_t configure_failures;
 };
 
 /**
@@ -214,7 +263,10 @@ int robstride_set_motion_target(
  * @retval 0 Success.
  * @retval -EINVAL @p dev is not a RobStride motor, or @p feedback is NULL.
  * @retval -ENODATA The motor has not answered yet.
- * @retval -EAGAIN The measurements are older than the configured timeout.
+ * @retval -EAGAIN The motor is online but holds no measurement to report: no
+ *                 feedback frame has arrived within the configured timeout, or
+ *                 none has arrived at all because the motor has only answered
+ *                 a presence probe or has just been zeroed.
  */
 int robstride_get_feedback(const struct device * dev, struct robstride_feedback * feedback);
 
@@ -232,14 +284,39 @@ int robstride_get_feedback(const struct device * dev, struct robstride_feedback 
 int robstride_set_limits(const struct device * dev, const struct robstride_limits * limits);
 
 /**
- * @brief Override the gains of the motor's internal loops.
+ * @brief Read back the limits currently in force.
+ *
+ * These are what the devicetree asked for, or the model limit where it asked
+ * for nothing, narrowed by any later @ref robstride_set_limits. A control
+ * layer that wants to express a command as a fraction of full scale has no
+ * other way to learn the denominator: the model is not exposed, and the
+ * devicetree property is optional.
  *
  * @param dev RobStride motor device instance.
- * @param gains Gains to apply.
+ * @param limits Destination for the limits.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not a RobStride motor, or @p gains is NULL.
+ * @retval -EINVAL @p dev is not a RobStride motor, or @p limits is NULL.
  */
-int robstride_set_gains(const struct device * dev, const struct robstride_gains * gains);
+int robstride_get_limits(const struct device * dev, struct robstride_limits * limits);
+
+/**
+ * @brief Set what the driver writes into the motor for one mode.
+ *
+ * Every time the motor is configured for @p mode, which is on enable, on a
+ * switch into the mode and after a fault, these values are written and read
+ * back before the motor is enabled. Changing them for the mode the motor is in
+ * rewrites them without stopping it; commands pause for the few intervals the
+ * readback takes.
+ *
+ * @param dev RobStride motor device instance.
+ * @param mode Mode these values belong to.
+ * @param params Values to write. @c max_velocity is clamped to the model limit.
+ * @retval 0 Success.
+ * @retval -EINVAL @p dev is not a RobStride motor, @p mode is not a mode,
+ *                 @p params is NULL, or a field is negative or not a number.
+ */
+int robstride_set_mode_params(
+  const struct device * dev, enum robstride_mode mode, const struct robstride_mode_params * params);
 
 /**
  * @brief Store the current position as the mechanical zero.
@@ -265,6 +342,25 @@ int robstride_set_zero(const struct device * dev);
 int robstride_save_parameters(const struct device * dev);
 
 /**
+ * @brief Clear the motor's own fault latch.
+ *
+ * A motor that has tripped refuses to run until the latch is cleared, and
+ * nothing the driver sends in the course of a handshake clears it. This is
+ * the way back. It is deliberately separate from @ref motor_disable, because
+ * the frame stops the output as a side effect, so it is not a way to
+ * acknowledge a fault while the motor keeps driving.
+ *
+ * Clearing does not repair the condition. A motor that is still too hot, or
+ * still stalled, trips again on the next attempt to run.
+ *
+ * @param dev RobStride motor device instance.
+ * @retval 0 Success.
+ * @retval -EINVAL @p dev is not a RobStride motor.
+ * @retval negative_errno The frame could not be queued.
+ */
+int robstride_clear_faults(const struct device * dev);
+
+/**
  * @brief Write one motor parameter by index.
  *
  * This is an escape hatch for parameters the typed calls above do not cover.
@@ -273,9 +369,12 @@ int robstride_save_parameters(const struct device * dev);
  *
  * @param dev RobStride motor device instance.
  * @param index Parameter index, as defined by the RobStride protocol.
- * @param value Value to write.
+ * @param value Value to write. For an index whose payload is an integer it has
+ *              to be a number in the range of @c uint32_t; anything else has no
+ *              representation on the wire and is rejected rather than converted.
  * @retval 0 Success.
- * @retval -EINVAL @p dev is not a RobStride motor.
+ * @retval -EINVAL @p dev is not a RobStride motor, or @p value cannot be
+ *                 carried by this index.
  * @retval negative_errno The frame could not be queued.
  */
 int robstride_set_parameter(const struct device * dev, uint16_t index, float value);
@@ -292,7 +391,16 @@ int robstride_set_parameter(const struct device * dev, uint16_t index, float val
  * @retval 0 Success.
  * @retval -EINVAL @p dev is not a RobStride motor, or @p value is NULL.
  * @retval -ETIMEDOUT The motor did not answer in time.
- * @retval -EBUSY Another read of this motor is already in flight.
+ * @retval -EBUSY Another read of this motor is already in flight. A read holds
+ *                the motor from the call until it returns, so this is reported
+ *                for the whole of that window and not only until the reply
+ *                arrives.
+ *
+ * @note A reply carries only the parameter index, with nothing tying it to the
+ *       request it answers. After a read of an index times out, the next read
+ *       of that same index can therefore be completed by the earlier reply and
+ *       return the value it carried. Reading a parameter that changes is worth
+ *       repeating once after a timeout.
  * @retval negative_errno The request could not be queued.
  */
 int robstride_get_parameter(const struct device * dev, uint16_t index, float * value);

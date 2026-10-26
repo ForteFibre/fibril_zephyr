@@ -1,0 +1,82 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Motors closed around an encoder on the board, exposed on the CAN bus as the
+  schema's MdMotor block type. This is the motor driver CanMotorMbed used to
+  be: the board runs the speed and position loops (lib/motor_control), and the
+  master sends targets and gains.
+
+  This node is what puts MdMotor on the bus. The build reads it to emit the
+  schema's `instances:` entry, so describing the wiring is the whole of adding
+  the function to an image.
+
+  Each instance pairs one entry of `motors` with the entry of `encoders` at
+  the same position, so the two lists must have the same length. Instance 0
+  on the bus is the first pair; reordering the lists renames every motor on
+  the ROS side.
+
+    fcan_md_motor: fcan-md-motor {
+        compatible = "fibril,fcan-md-motor";
+        fcan-ns = "motor{i}";
+        motors = <&wheel_left>, <&wheel_right>;
+        encoders = <&qdec_left>, <&qdec_right>;
+        status = "okay";
+    };
+
+  The motors are driven with current commands (MOTOR_OUTPUT_MODE_CURRENT). The
+  control core works in duty, which `duty-full-scale` turns into the motor's
+  raw current unit; the motor's own limit (such as `max-current` on a
+  RoboMaster) still clamps the result.
+
+  This node carries no reg and there is no reason to have two of them. The
+  implementation reads the first enabled node only, so a second one is a
+  build error rather than a silently ignored list of motors.
+
+compatible: "fibril,fcan-md-motor"
+
+include: base.yaml
+
+properties:
+  fcan-ns:
+    type: string
+    required: true
+    description: |
+      The instance namespace on the bus, which becomes the ROS name prefix.
+      `{i}` expands to the instance index, so `motor{i}` gives
+      motor0..motorN.
+
+      The `{i}` may be left out only when CONFIG_FIBRIL_CAN_NODE_MD_MOTOR_MAX
+      is 1; the codegen keys that rule on the ceiling, not on how many motors
+      are wired.
+
+  motors:
+    type: phandles
+    required: true
+    description: |
+      One motor-class device per instance, in bus-instance order. The device
+      must accept MOTOR_OUTPUT_MODE_CURRENT.
+
+      The count has to fit CONFIG_FIBRIL_CAN_NODE_MD_MOTOR_MAX. CMake cannot
+      read a phandle list, so the ceiling is a Kconfig value; a BUILD_ASSERT
+      in the implementation catches an overflow.
+
+  encoders:
+    type: phandles
+    required: true
+    description: |
+      One encoder-class device per instance, paired with `motors` by
+      position. Positive encoder counts must correspond to positive current
+      on the paired motor, or the loops run away; flip the encoder
+      (`invert-direction` on a qdec) rather than the motor to fix it.
+
+  duty-full-scale:
+    type: int
+    default: 10000
+    description: |
+      The raw current command a duty of 1.0 maps to.
+
+      10000 is what CanMotorMbed sent to a RoboMaster C610/C620 at duty 1.0,
+      so the gains tuned on that firmware keep their meaning here. It is
+      deliberately not the motor's `max-current`: lowering that limit should
+      cap the output, not rescale every gain.

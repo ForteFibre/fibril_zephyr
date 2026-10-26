@@ -1,0 +1,221 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * fibril_can slave entry point.
+ *
+ * Names no block type and no transport. The functions this image carries
+ * register themselves in the fibril_fcan_func section (see
+ * include/fibril_can_node/func.h), and how their frames reach the bus is
+ * decided by the devicetree (see include/fcan_transport/transport.h). Adding
+ * a valve, or putting the same node behind a CAN hub, does not touch this
+ * file.
+ */
+
+#include <cstddef>
+#include <cstdint>
+
+#include <zephyr/drivers/watchdog.h>
+#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/random/random.h>
+
+#include <fcan_transport/transport.h>
+#include <fibril_can_node/func.h>
+#include <node_id/node_id.h>
+
+#include "schema_gen.hpp"
+
+LOG_MODULE_REGISTER(fibril_node, CONFIG_APP_LOG_LEVEL);
+
+#define MASTER_LOST_US 300000U /* SPEC §5.11 */
+
+/* The node's storage, and every variable-length buffer fcan_init carves
+ * once, come from this. Running out is a boot failure, not a slow path.
+ */
+K_HEAP_DEFINE(fcan_heap, CONFIG_APP_FCAN_HEAP_SIZE);
+
+static void * heap_alloc(size_t size, size_t align, void * ctx)
+{
+  ARG_UNUSED(ctx);
+  return k_heap_aligned_alloc(&fcan_heap, align, size, K_NO_WAIT);
+}
+
+#if defined(CONFIG_APP_WATCHDOG)
+static const struct device * const watchdog = DEVICE_DT_GET(DT_ALIAS(watchdog0));
+static int watchdog_channel = -1;
+
+static int watchdog_start(void)
+{
+  struct wdt_timeout_cfg cfg{};
+
+  if (!device_is_ready(watchdog)) {
+    LOG_ERR("watchdog not ready");
+    return -ENODEV;
+  }
+
+  cfg.window.min = 0U;
+  cfg.window.max = CONFIG_APP_WATCHDOG_TIMEOUT_MS;
+  cfg.flags = WDT_FLAG_RESET_SOC;
+
+  const int channel = wdt_install_timeout(watchdog, &cfg);
+
+  if (channel < 0) {
+    LOG_ERR("watchdog timeout not accepted (%d)", channel);
+    return channel;
+  }
+
+  /* Paused under the debugger, or every breakpoint would reset the board. */
+  const int ret = wdt_setup(watchdog, WDT_OPT_PAUSE_HALTED_BY_DBG);
+
+  if (ret != 0) {
+    LOG_ERR("watchdog setup failed (%d)", ret);
+    return ret;
+  }
+
+  watchdog_channel = channel;
+
+  return 0;
+}
+#endif
+
+static void run_ticks(void)
+{
+  STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
+    if (f->tick != nullptr) {
+      f->tick();
+    }
+  }
+
+#if defined(CONFIG_APP_WATCHDOG)
+  if (watchdog_channel >= 0) {
+    (void)wdt_feed(watchdog, watchdog_channel);
+  }
+#endif
+}
+
+int main(void)
+{
+  /* Indexed by fcan_gen::<type>::block_array_index, so a function fills its
+   * own slot whatever order the schema puts the block arrays in.
+   *
+   * Static because config_user documents that the pointer has to outlive the
+   * node, and fcan_transport_run() does return on a backend whose frames a
+   * driver thread drives. The runtime copies the counts today, so an
+   * automatic would work; one byte of .bss is cheaper than depending on that.
+   */
+  static uint8_t counts[fcan_gen::num_block_arrays];
+  bool any_tick = false;
+
+  STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
+    int ret = (f->init != nullptr) ? f->init() : 0;
+
+    if (ret != 0) {
+      LOG_ERR("%s: init failed (%d)", f->name, ret);
+      return ret;
+    }
+
+    counts[f->array] = f->count;
+    any_tick = any_tick || (f->tick != nullptr);
+    LOG_INF("%s: %u instance(s) on block array %u", f->name, f->count, f->array);
+  }
+
+  int rc = fcan_transport_init();
+
+  if (rc != 0) {
+    return rc;
+  }
+
+  fcan_gen::config_user user{};
+
+#if defined(CONFIG_FIBRIL_NODE_ID_SWITCH)
+  rc = node_id_read(&user.node_id);
+  if (rc != 0) {
+    LOG_ERR("could not read the node id switch (%d)", rc);
+    return rc;
+  }
+#else
+  user.node_id = CONFIG_FIBRIL_NODE_ID;
+#endif
+  user.boot_id = sys_rand32_get();
+  user.instance_counts = counts;
+  user.hal = fcan_transport_hal();
+  user.allocator = {.alloc = heap_alloc, .ctx = nullptr};
+  user.master_lost_us = MASTER_LOST_US;
+
+  /* The schema-determined half of the config, and the capacities derived from
+   * the counts, come from the generated header.
+   */
+  fcan_config_t cfg = fcan_gen::make_config(user);
+
+  /* The library makes the node, not this file, so that the functions can read
+   * its state without this file having to hand it over.
+   */
+  fcan_node_t * node = nullptr;
+
+  rc = fibril_fcan_node_init(&cfg, &node);
+  if (rc != 0) {
+    return rc;
+  }
+  LOG_INF(
+    "fcan_init OK: node_id=0x%02x schema_hash=0x%016llx blob_len=%u", user.node_id,
+    (unsigned long long)fcan_schema_hash, (unsigned)fcan_schema_blob_len);
+
+#if defined(CONFIG_SYS_HEAP_RUNTIME_STATS)
+  /* Nothing allocates from fcan_heap after fcan_init, so this is the peak. */
+  struct sys_memory_stats heap_stats;
+
+  sys_heap_runtime_stats_get(&fcan_heap.heap, &heap_stats);
+  LOG_INF(
+    "fcan_heap: %u of %u bytes used", (unsigned)heap_stats.allocated_bytes,
+    (unsigned)CONFIG_APP_FCAN_HEAP_SIZE);
+#endif
+
+  /* Also what installs the service and parameter dispatchers the functions
+   * register their handlers into, so it has to run before any start hook.
+   */
+  if (fcan_gen::register_all(node) != FCAN_OK) {
+    LOG_ERR("register_all failed (fault=%d)", (int)fcan_fault(node));
+    return -EIO;
+  }
+  LOG_INF("register_all OK");
+
+  /* Before attach, not after. Attaching is what lets frames reach the node —
+   * behind a hub the driver thread starts polling it, and a gs_usb build
+   * enumerates on the same call — so a service handler could otherwise run
+   * while a function is still publishing its initial state and overwrite a
+   * just-commanded output. Committing here is not a lost publish: the runtime
+   * holds the request until the node is allowed to transmit.
+   */
+  STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
+    int ret = (f->start != nullptr) ? f->start() : 0;
+
+    if (ret != 0) {
+      LOG_ERR("%s: start failed (%d)", f->name, ret);
+      return ret;
+    }
+  }
+
+  rc = fcan_transport_attach(node);
+  if (rc != 0) {
+    return rc;
+  }
+
+#if defined(CONFIG_APP_WATCHDOG)
+  /* Last, so that nothing before the first tick has to fit in the timeout. */
+  if (any_tick) {
+    rc = watchdog_start();
+    if (rc != 0) {
+      return rc;
+    }
+  } else {
+    LOG_WRN("no function ticks, so nothing feeds the watchdog; left off");
+  }
+#endif
+
+  LOG_INF("handing over to the transport (periodic ticks %s)", any_tick ? "on" : "off");
+
+  fcan_transport_run(node, any_tick ? run_ticks : nullptr);
+
+  return 0;
+}
