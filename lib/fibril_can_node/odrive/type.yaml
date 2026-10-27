@@ -1,0 +1,93 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# An ODrive axis, as seen from the bus. Paired with odrive.cpp, which drives
+# it through lib/odrive_sequencer.
+#
+# The interface is the one fibril_ros's fibril_odrive_adapter put on the ROS
+# graph on top of ros_odrive's odrive_can_node: per motor, a `target` and a
+# `feedback`, with the adapter's parameters under the adapter's names. A
+# consumer written against the adapter keeps working when the ODrives move
+# from a PC's SocketCAN onto a board on the fibril_can bus, and the two PC
+# processes between them disappear (doc/adr/0023).
+#
+# Not copied into a node schema. apps/node/CMakeLists.txt passes this file to
+# the codegen alongside the node schema, so a node schema only names
+# ODriveMotor in its `instances:`.
+
+types:
+  ODriveMotor:
+    # The declaration order is the bit order of the changed mask that the
+    # params-changed handler receives. Appending is free; reordering silently
+    # moves every bit.
+    params:
+      # Joint units per rev. Feedback position and velocity are multiplied by
+      # it and position and velocity targets divided, exactly as the adapter
+      # did, so a tuned value moves between the two unchanged. Torque is not
+      # scaled. 0 or a non-finite value is refused and the previous one kept.
+      encoder_gain: { type: f32, default: 1.0 }
+      # Flips command and feedback together, torque and current included.
+      invert: { type: bool, default: false }
+      # Calibrate with FULL_CALIBRATION_SEQUENCE rather than
+      # MOTOR_CALIBRATION. The full sequence also turns the motor to find the
+      # encoder offset.
+      use_full_calibration: { type: bool, default: false }
+      # |velocity| in rev/s, unscaled by encoder_gain as in the adapter, below
+      # which a control mode switch may re-arm the axis.
+      switch_stop_velocity_threshold: { type: f32, default: 0.05, min: 0.0 }
+      # VELOCITY targets through the ODrive's VEL_RAMP input mode, which ramps
+      # at its own vel_ramp_rate, rather than PASSTHROUGH.
+      use_input_vel_ramp: { type: bool, default: false }
+      # Torque in Nm that a DUTY target of 1.0 asks for. The adapter sent DUTY
+      # as Nm unscaled; here DUTY is dimensionless as for RobstrideMotor, and
+      # since an ODrive cannot report its own current limit and torque
+      # constant over CANSimple, the full scale is said here. 0 refuses DUTY.
+      duty_full_scale: { type: f32, default: 0.0, min: 0.0 }
+      # Disarm when no target has arrived for this long, and stay disarmed
+      # until the next one (doc/adr/0016). The adapter had no deadline: the
+      # PC process dying took odrive_can_node with it. 0 turns it off. Losing
+      # the master altogether disarms whatever this says.
+      command_timeout_ms: { type: u32, default: 200, min: 0, max: 60000 }
+
+    topics:
+      # The repository-wide actuator command. Changing `type` re-arms the axis
+      # through idle, as the adapter did.
+      target:
+        dir: m2s
+        fields:
+          type: u8
+          value: f32
+        ros: { type: fibril_control_msgs/msg/Target }
+
+      # 100 Hz, like RobstrideMotor. The ODrive's encoder_msg_rate_ms decides
+      # how fresh this can be. The adapter published at 20 Hz.
+      feedback:
+        dir: s2m
+        period_us: 10000
+        fields:
+          is_ready: bool
+          position: f32
+          velocity: f32
+          output: f32
+          current: f32
+        ros: { type: fibril_control_msgs/msg/Feedback }
+
+      # What the adapter's diagnostic_updater showed, as a plain message;
+      # diagnostic_msgs carries its values as a string map, which a fixed
+      # layout frame cannot fill. `state` is the adapter's state machine, in
+      # its order.
+      diagnostics:
+        dir: s2m
+        period_us: 500000
+        fields:
+          online: bool
+          stale: bool
+          calibrated: bool
+          state: u8
+          axis_state: u8
+          procedure_result: u8
+          active_errors: u32
+          disarm_reason: u32
+          bus_voltage: f32
+          fet_temperature: f32
+          motor_temperature: f32

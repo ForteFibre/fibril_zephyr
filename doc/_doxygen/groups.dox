@@ -50,5 +50,8 @@
  * @defgroup node_id Node id switch
  * @brief The node id a board's switch is set to
  *
+ * @defgroup odrive_sequencer ODrive axis sequencer
+ * @brief Calibration, arming, mode switches and error recovery of one ODrive axis
+ *
  * @}
  */

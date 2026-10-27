@@ -1,0 +1,57 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  ODrive axes exposed on the CAN bus as the schema's ODriveMotor block type,
+  the successor of fibril_ros's fibril_odrive_adapter.
+
+  This node is what puts ODriveMotor on the bus. The build reads it to emit
+  the schema's `instances:` entry, so describing the wiring is the whole of
+  adding the function to an image.
+
+  One node covers every ODrive the board drives. Each entry of `axes` becomes
+  one schema instance, in the order written, so instance 0 on the bus is the
+  first phandle here. The order is the contract with the ROS side, as the
+  adapter's motor0..motorN were; reordering the list renames every joint.
+
+    fcan_odrive: fcan-odrive {
+        compatible = "fibril,fcan-odrive";
+        fcan-ns = "motor{i}";
+        axes = <&steer0>, <&steer1>, <&steer2>, <&steer3>;
+        status = "okay";
+    };
+
+  The axes themselves stay where the driver expects them, as `odrive,axis`
+  children of an `odrive,bus` node, and may be spread over several buses.
+  This node only says which of them the bus should see and in what order.
+
+  This node carries no reg and there is no reason to have two of them. The
+  implementation reads the first enabled node only, so a second one is a build
+  error rather than a silently ignored list of axes.
+
+compatible: "fibril,fcan-odrive"
+
+include: base.yaml
+
+properties:
+  fcan-ns:
+    type: string
+    required: true
+    description: |
+      The instance namespace on the bus, which becomes the ROS name prefix.
+      `{i}` expands to the instance index, so `motor{i}` gives the adapter's
+      motor0..motorN.
+
+      The `{i}` may be left out only when CONFIG_FIBRIL_CAN_NODE_ODRIVE_MAX
+      is 1; the codegen keys that rule on the ceiling rather than on how many
+      axes are wired.
+
+  axes:
+    type: phandles
+    required: true
+    description: |
+      One `odrive,axis` node per ODrive, in bus-instance order.
+
+      The count has to fit CONFIG_FIBRIL_CAN_NODE_ODRIVE_MAX. CMake cannot
+      read a phandle list, so the ceiling is a Kconfig value rather than this
+      length; a BUILD_ASSERT in the implementation catches an overflow.

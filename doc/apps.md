@@ -36,7 +36,7 @@ west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
 | 層 | 決めるもの | 例 |
 | --- | --- | --- |
 | トランスポート | 基板がバスに出る経路 | `rc26-mainair-usb`、`miniv4-can`、`miniv4-usb` |
-| デプロイ | ノード名、どの機能をどのピンに出すか（ID スイッチの無い基板では node_id も） | `rc26-air`、`rc26-robstride`、`rc26-main`、`miniv4-md-qdec4` |
+| デプロイ | ノード名、どの機能をどのピンに出すか（ID スイッチの無い基板では node_id も） | `rc26-air`、`rc26-robstride`、`rc26-odrive`、`rc26-main`、`miniv4-md-qdec4` |
 
 RC26 MainAir には必ず USB の CAN が載り、電磁弁やエンコーダは搭載の有無が変わる。
 経路を別の層に括り出しておくと、機能の増減がデプロイ snippet 1 つの中で閉じる。
@@ -108,7 +108,7 @@ overlay はすべて 1 回のプリプロセッサの実行に並ぶので、`-S
 
 | 確保する名前 | 確保する側 |
 | --- | --- |
-| `NODE_ROLE` | `CONFIG_FIBRIL_NODE_SCHEMA` を決めるデプロイ snippet（`*-md-*`、`rc26-air`、`rc26-robstride`、`rc26-main`） |
+| `NODE_ROLE` | `CONFIG_FIBRIL_NODE_SCHEMA` を決めるデプロイ snippet（`*-md-*`、`rc26-air`、`rc26-robstride`、`rc26-odrive`、`rc26-main`） |
 | `FCAN_MD_MOTOR`、`FCAN_ADC_PORT`、`FCAN_SOLENOID`、`FCAN_ROBSTRIDE`、`FCAN_ODOMETRY` | その `fibril,fcan-*` のノードを書く snippet |
 | `TIM<n>` | qdec の入力の断片（miniv4 と rc26_mainair_v01 の `qdec-encN.dtsi`）。PWM などで timer を使う断片も確保する |
 | `FDCAN<n>` | CAN コントローラを使う断片と snippet（RoboMaster のバス、経路、RobStride） |
@@ -136,6 +136,12 @@ snippets/rc26/robstride/
 ├── robstride.conf                     CONFIG_FIBRIL_NODE_SCHEMA と node_id
 ├── fibril_rc26_mainair_v01.overlay    アクチュエータと fcan-robstride ノード
 └── schema/robstride.yaml              node と limits
+
+snippets/rc26/odrive/
+├── snippet.yml
+├── odrive.conf                        CONFIG_FIBRIL_NODE_SCHEMA と node_id
+├── fibril_rc26_mainair_v01.overlay    ODrive の軸と fcan-odrive ノード
+└── schema/odrive.yaml                 node と limits
 
 snippets/rc26/main/                    rc26-air と rc26-robstride を 1 つのノードにしたもの
 ├── snippet.yml
@@ -182,6 +188,12 @@ snippets/miniv4/adc/
 1 つのイメージが名乗れるノードは 1 つなので、2 つのデプロイ snippet は重ねられない。両方を載せるときは、両方の `fibril,fcan-*` ノードを書いた 3 つ目の snippet を選ぶ。
 3 つとも `NODE_ROLE` を確保するので、どれか 1 つだけを選ぶ。
 RobStride のバスは `dts/fibril/rc26_mainair_v01/robstride.dtsi` の断片を共有し、電磁弁の配線とモータは各 overlay に書く。
+
+`rc26-odrive` は、CAN1 に ODrive をつなぐデプロイ snippet で、ノード `rc26_odrive{i}`（node_id 0x22）になる。
+ODrive のバスは `dts/fibril/rc26_mainair_v01/odrive.dtsi` にある。
+MainAir V01 の FDCAN は 2 本で、fibril_can が CAN0 を、RobStride が CAN1 を使う。
+ODrive も CAN1 を使うので、`rc26-robstride` と `rc26-main` とは `FDCAN2` の確保でぶつかり、ビルドが止まる。
+overlay の例は R1 の steering と extend の 6 軸（node_id 0〜5）で、1 本のバスに載る。ドライバのバスあたりの上限（`CONFIG_MOTOR_ODRIVE_MAX_AXES`）は既定が 4 なので、`odrive.conf` で 6 に上げている。
 
 `rc26-odom` は、自己位置推定の入力（`Odometry`）を足すデプロイ snippet で、`rc26-main`、`rc26-air`、`rc26-robstride` のどれとも重ねられる。
 `NODE_ROLE` を確保しないので、ノードの名前と node_id は、重ねた側のものになる。
@@ -314,6 +326,7 @@ RAM の少ない基板では、デプロイ snippet の `.conf` でこれを下�
 | `RobstrideMotor` | `fibril,fcan-robstride` | RobStride アクチュエータ。指令、feedback、診断、再ゼロ |
 | `MdMotor` | `fibril,fcan-md-motor` | エンコーダで閉ループにした電流指令のモータ。CanMotorMbed の後継 |
 | `AdcPort` | `fibril,fcan-adc-port` | `MdMotor` のキャリブレーションが見る入力。ADC のチャネルか、モータが報告する電流 |
+| `ODriveMotor` | `fibril,fcan-odrive` | ODrive の軸。`fibril_odrive_adapter` の後継。指令、feedback、診断。下の「ODrive（ODriveMotor）」 |
 | `Odometry` | `fibril,fcan-odometry` | 接地エンコーダ 2 本とジャイロ。PCMainFW が自己位置推定のために送っていた値。下の「自己位置推定の入力（Odometry）」 |
 | `CanPortDiag`、`CanHubDiag` | なし（トランスポートから決まる） | この基板の CAN コントローラと hub の健全性。下の「CAN の健全性（can_diag）」 |
 
@@ -346,6 +359,22 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 
 `encoders` には、基板のエンコーダ入力（`fibril,stm32-qdec`、`cui,amt21-encoder`）のほか、RoboMaster のロータ角（`dji,robomaster-encoder`）を置ける。
 ロータ角のカウントは減速前の 8192 counts/rev なので、`encoder/gain` に減速比を含める。
+
+### ODrive（ODriveMotor）
+
+`ODriveMotor` は、PC の `odrive_can_node`（ros_odrive）と fibril_ros の `fibril_odrive_adapter` の組を置き換える。
+ROS からは adapter と同じに見える。モータごとに `target`（`fibril_control_msgs/msg/Target`）、`feedback`（`Feedback`）、`diagnostics` を出す。
+adapter の状態機械（キャリブレーション、closed loop、IDLE を経由するモードの切り替え、エラーからの復帰）は `lib/odrive_sequencer` に移した。
+判断の理由は [ADR 0023](adr/0023-odrive-adapter-block-type.md) にある。
+
+- `fibril,fcan-odrive` は `axes` に `odrive,axis` を並べる。軸は複数の `odrive,bus` にまたがってよい。`axes` の 1 つ目が `motor0` になる。
+- param の `encoder_gain`、`invert`、`use_full_calibration`、`switch_stop_velocity_threshold`、`use_input_vel_ramp` は、adapter と同じ名前と意味である。bridge の node に `<node>.motorN.encoder_gain` の形で載る。
+- キャリブレーションは、master が RUNNING になってから始める。closed loop には `target` が来てから入れる。`feedback.is_ready` はそれまで false である。adapter は指令を待たずに closed loop に入れていた。
+- `target` の `type` が変わると、IDLE にして速度が `switch_stop_velocity_threshold`（rev/s）を下回るのを待ち、closed loop に戻してから新しい指令を送る。待つ間に来た指令は最新のものだけを残す。
+- DUTY は -1..1 で、`duty_full_scale`（Nm）を掛けたトルク指令になる。既定の 0 では DUTY を断る。adapter は DUTY の値をそのまま Nm にしていた。
+- `feedback.output` はトルクの推定値（`Get_Torques`）、`current` は `Iq_Measured` で、どちらも `invert` を掛ける。ODrive の encoder estimates が無いか古い間は、すべて 0 を出す。
+- `diagnostics.state` は adapter の状態機械と同じ番号である（0 が UNKNOWN、6 が READY、10 が ERROR）。
+- ODrive 側では、heartbeat、encoder、iq、torques、error の `*_msg_rate_ms` を有効にする。CAN のビットレートは `odrive.dtsi` に合わせる（1 Mbps）。
 
 ### 自己位置推定の入力（Odometry）
 
@@ -417,11 +446,11 @@ RAM が足りないときは、`CONFIG_CAN_STATS=n` でエラーカウンタだ�
 モータを駆動する型は、指令の途絶を 2 段で捉えて出力を止める。
 判断の理由は [ADR 0016](adr/0016-command-loss-stop.md) にある。
 
-| | `MdMotor` | `RobstrideMotor` |
-| --- | --- | --- |
-| master 全体の途絶（ノードが RUNNING でなくなる。`apps/node` では 300 ms） | すべてのモードで DUTY 0 | 出力を切る |
-| `command_timeout_ms`（既定 200 ms、0 で無効） | DUTY と VELOCITY だけ DUTY 0。POSITION と trajectory は保持する | すべての指令で出力を切る |
-| 再開 | 新しい `target` か `trajectory` | 新しい `target` か `motion_target`。`enable` だけでは戻らない |
+| | `MdMotor` | `RobstrideMotor` | `ODriveMotor` |
+| --- | --- | --- | --- |
+| master 全体の途絶（ノードが RUNNING でなくなる。`apps/node` では 300 ms） | すべてのモードで DUTY 0 | 出力を切る | IDLE にする |
+| `command_timeout_ms`（既定 200 ms、0 で無効） | DUTY と VELOCITY だけ DUTY 0。POSITION と trajectory は保持する | すべての指令で出力を切る | すべての指令で IDLE にする |
+| 再開 | 新しい `target` か `trajectory` | 新しい `target` か `motion_target`。`enable` だけでは戻らない | 新しい `target`。closed loop に入れ直してから送る |
 
 - 新しい指令は topic の世代で判断し、届いた tick に 1 度だけ適用する。同じ値を送り直しても、新しい指令として数える。値が NaN の指令や、扱えない `type` の指令は、拒否して指令として数えない。
 - `RobstrideMotor` の `enable` は、出力が切れる前なら期限を延ばすが、切れた後は出力を戻さない。ドライバが切れる前の目標を持ったままなので、戻すと古い目標へ動く。

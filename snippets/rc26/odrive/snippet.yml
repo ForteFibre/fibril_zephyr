@@ -1,0 +1,24 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# RC26 MainAir V01 driving ODrives on the board's CAN1, in place of the PC's
+# odrive_can_node and fibril_odrive_adapter. It carries no transport, so it is
+# layered on the board's transport snippet:
+#
+#   west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-odrive
+#
+# CAN1 is also rc26-robstride's, so the two cannot be layered together.
+#
+# The overlay wires six axes at node_id 0..5, R1's steering and extend. A
+# machine replaces them with its own node_ids; nothing else in the image
+# changes.
+
+name: rc26-odrive
+
+append:
+  EXTRA_CONF_FILE: odrive.conf
+
+boards:
+  /fibril_rc26_mainair_v01.*/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: fibril_rc26_mainair_v01.overlay

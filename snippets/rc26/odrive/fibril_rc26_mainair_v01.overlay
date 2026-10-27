@@ -1,0 +1,73 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * What RC26's ODrive node drives. The transport snippet decides how it
+ * reaches the fibril_can bus, so nothing here mentions that controller.
+ *
+ * The bus comes from dts/fibril/rc26_mainair_v01/; the axes and their order
+ * are said here.
+ */
+
+#include <fibril/rc26_mainair_v01/odrive.dtsi>
+
+/* One node schema per image; see doc/apps.md. */
+#ifdef FIBRIL_CLAIM_NODE_ROLE
+#error "NODE_ROLE claimed twice; rc26-odrive is one claimant"
+#endif
+#define FIBRIL_CLAIM_NODE_ROLE 1
+
+#ifdef FIBRIL_CLAIM_FCAN_ODRIVE
+#error "FCAN_ODRIVE claimed twice; rc26-odrive is one claimant"
+#endif
+#define FIBRIL_CLAIM_FCAN_ODRIVE 1
+
+/ {
+    fcan_odrive: fcan-odrive {
+        compatible = "fibril,fcan-odrive";
+
+        /* Becomes motor0..motorN on the ROS side, the adapter's names. */
+        fcan-ns = "motor{i}";
+
+        /* R1's steering on 0..3, then its extend on 4 and 5, so the
+         * bridge can rename them motor by motor into the adapter's
+         * namespaces. */
+        axes = <&axis0>, <&axis1>, <&axis2>, <&axis3>, <&axis4>, <&axis5>;
+        status = "okay";
+    };
+};
+
+/* Six ODrives at node_id 0..5 on the one bus, as R1 wired them; odrive.conf
+ * raises MOTOR_ODRIVE_MAX_AXES to match. An ODrive not fitted stays
+ * NOT_POWERED and publishes zeros; it does not hold up the others. */
+&odrive0 {
+    axis0: axis@0 {
+        compatible = "odrive,axis";
+        reg = <0>;
+    };
+
+    axis1: axis@1 {
+        compatible = "odrive,axis";
+        reg = <1>;
+    };
+
+    axis2: axis@2 {
+        compatible = "odrive,axis";
+        reg = <2>;
+    };
+
+    axis3: axis@3 {
+        compatible = "odrive,axis";
+        reg = <3>;
+    };
+
+    axis4: axis@4 {
+        compatible = "odrive,axis";
+        reg = <4>;
+    };
+
+    axis5: axis@5 {
+        compatible = "odrive,axis";
+        reg = <5>;
+    };
+};
