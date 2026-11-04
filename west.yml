@@ -21,8 +21,19 @@ manifest:
           - cmsis-dsp
           - hal_stm32 # required by the nucleo_f302r8 board (STM32 based)
     - name: cannectivity
-      url: https://github.com/CANnectivity/cannectivity.git
-      revision: v1.4.0
+      # v1.4.0 with three upstream gs_usb fixes backported, in upstream order
+      # (backport/gs-usb-out-restart on the ForteFibre fork). With v1.4.0 the
+      # host can stop being able to send until the device is enumerated
+      # again:
+      #   0fd5538  stopping a channel leaked a pool buffer
+      #   5719a54  with the pool empty, the OUT endpoint was never re-armed
+      #   9cb0d90  a failed CAN TX returned no echo frame, so the Linux
+      #            driver never freed that TX URB
+      # Upstream v1.5.0 has them all but needs Zephyr 4.5
+      # (can_add_state_change_callback()). Go back to upstream when this
+      # workspace moves to Zephyr 4.5.
+      url: https://github.com/ForteFibre/cannectivity.git
+      revision: 4ffbdd8e17f71601712d3136cec240c56772b42c
       path: modules/third_party/cannectivity
     - name: fibril_can
       # Pinned, not tracking main: the codegen's block-array order is part of
