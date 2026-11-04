@@ -21,8 +21,15 @@ manifest:
           - cmsis-dsp
           - hal_stm32 # required by the nucleo_f302r8 board (STM32 based)
     - name: cannectivity
-      url: https://github.com/CANnectivity/cannectivity.git
-      revision: v1.4.0
+      # v1.4.0 with upstream 5719a54 backported (backport/gs-usb-out-restart
+      # on the ForteFibre fork). With v1.4.0, a host that read RX frames
+      # slower than the bus delivered them emptied the pool, the OUT endpoint
+      # was never re-armed and the host could no longer send until the device
+      # was enumerated again. Upstream fixed it in v1.5.0, which needs Zephyr
+      # 4.5 (can_add_state_change_callback()). Go back to upstream when this
+      # workspace moves to Zephyr 4.5.
+      url: https://github.com/ForteFibre/cannectivity.git
+      revision: 251191a4307ea03e99a7f4f1e006421448e73451
       path: modules/third_party/cannectivity
     - name: fibril_can
       # Pinned, not tracking main: the codegen's block-array order is part of

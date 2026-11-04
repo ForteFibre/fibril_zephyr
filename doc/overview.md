@@ -39,6 +39,12 @@ fibril_common は ROS 2 のノードが使っているものと同じ制御器�
 fibril_common の revision は、タグではなくコミットで固定してある（現在は `8f336f4`）。Zephyr module の入口（fibril_common#69）と `-Wdouble-promotion` の修正（fibril_common#74）を含むタグが、まだ無いためである。
 これより前の版では、`CONFIG_FIBRIL_COMMON` を立てたビルドが twister の `-Werror` で止まる。
 
+CANnectivity は、本家ではなく ForteFibre の fork のコミットで固定してある（現在は `251191a`、ブランチ `backport/gs-usb-out-restart`）。
+v1.4.0 に、本家の `5719a54`（OUT の転送を、バッファが空いたら張り直す）を 1 コミットだけ載せたものである。
+v1.4.0 の gs_usb は、ホストが RX を読むのが遅いとバッファのプールが尽き、OUT の endpoint を張り直せないまま諦めるので、列挙し直すまでホストから送れなくなる。
+本家は v1.5.0 で直したが、v1.5.0 は Zephyr 4.5 の `can_add_state_change_callback()` を使うので、v4.4.1 のこの workspace では使えない。
+Zephyr を 4.5 に上げるときに、本家の v1.5.0 以降へ戻す。
+
 fibril_can の revision はブランチではなくタグで固定してある（現在は v0.4.2）。
 v0.4.2 で、host の CMake が 3.28（Ubuntu 24.04 の apt）のときも codegen をビルドできるようになった。v0.4.1 では `fibril_can.pb.h` が見つからずに止まる。
 v0.4.1 で、`fcan_codegen` が見つからなければ、`fcan_invoke_codegen` が fibril_can の木から host 向けにビルドするようになった（ビルドディレクトリの `fcan_codegen_host/`。protobuf と yaml-cpp が要る）。この CLI は runtime と同じ版になる。deb の版がずれているときは `-DFCAN_CODEGEN_FROM_SOURCE=ON` で木からのビルドを使う。runtime は v0.4.0 から変わらない。
