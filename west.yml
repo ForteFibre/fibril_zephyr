@@ -21,6 +21,9 @@ manifest:
           - cmsis-dsp
           - hal_stm32 # required by the nucleo_f302r8 board (STM32 based)
     - name: cannectivity
+      # zephyr/patches.yml backports v1.5.0's gs_usb TX fixes onto this tag
+      # (`west patch apply` after `west update`). v1.5.0 itself needs Zephyr
+      # v4.5. Drop the patches when bumping past v1.4.0.
       url: https://github.com/CANnectivity/cannectivity.git
       revision: v1.4.0
       path: modules/third_party/cannectivity

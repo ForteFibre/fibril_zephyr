@@ -1,0 +1,54 @@
+# Patches that `west patch apply` puts on top of the projects west.yml pins.
+# Run it after every `west update`: west update resets the projects to the
+# pinned revisions and drops these changes.
+#
+# Paths are relative to zephyr/patches/. Each sha256sum is the patch file's;
+# regenerate it with `sha256sum <file>` whenever a patch changes.
+
+patches:
+  # CANnectivity v1.4.0 stops sending once the bus gets busy. These are
+  # backports from v1.5.0, which needs Zephyr v4.5 (can_add_state_change_
+  # callback()), so it cannot be used with the Zephyr v4.4.1 west.yml pins.
+  # Drop all three when moving to CANnectivity v1.5.0 or later.
+  - path: cannectivity/0001-usb-device_next-class-gs_usb-send-echo-frame-even-on.patch
+    sha256sum: 39644b2e44ae6116485ed9928a28ab0699da2bd47e7adc14bc3c314ff2aa86f2
+    module: modules/third_party/cannectivity
+    author: Henrik Brix Andersen
+    email: henrik@brixandersen.dk
+    date: 2026-10-25
+    upstreamable: false
+    merge-status: true
+    merge-commit: 9cb0d9020b131e04ac916ae8f71c7dd0f85f79d2
+    merge-date: 2026-11-03
+    comments: >-
+      A CAN TX that fails (e.g. a timeout on a busy bus) returned no echo
+      frame, so the Linux gs_usb driver never freed that TX URB. Once all of
+      its URBs leaked, the host could not send at all.
+  - path: cannectivity/0002-usb-device_next-class-gs_usb-restart-OUT-transfers-o.patch
+    sha256sum: 51f26db40efa9beaef405301edff8bd04a2c0384f344e2af4a9ab10cb7e427a6
+    module: modules/third_party/cannectivity
+    author: Giuseppe Fabiano
+    email: gfabiano40@gmail.com
+    date: 2026-10-07
+    upstreamable: false
+    merge-status: true
+    merge-commit: 5719a5499751b77483eef7ce54512079d6ba91b1
+    merge-date: 2026-10-21
+    comments: >-
+      With the buffer pool empty (frames waiting for the IN endpoint), the
+      OUT endpoint was never armed again and the host could not send until
+      the device was enumerated again. The conflict with the v1.4.0 state
+      change callback signature was resolved by hand; the code is unchanged.
+  - path: cannectivity/0003-usb-device_next-class-gs_usb-add-missing-net_buf_unr.patch
+    sha256sum: d4dc1f0573334eaaf53dd15428381a8b620056cabe776eca8edb3303c67ea644
+    module: modules/third_party/cannectivity
+    author: Henrik Brix Andersen
+    email: henrik@brixandersen.dk
+    date: 2026-07-19
+    upstreamable: false
+    merge-status: true
+    merge-commit: 0fd5538d069d1411b18c291908e7348510ccf1df
+    merge-date: 2026-07-20
+    comments: >-
+      A channel stop leaked one pool buffer, which shrinks the pool that
+      0002 waits on.

@@ -39,10 +39,15 @@ Zephyr の開発環境が未構築なら、先に公式の [Getting Started Guid
 west init -m https://github.com/ForteFibre/fibril_zephyr --mr main fibril_zephyr_ws
 cd fibril_zephyr_ws
 west update
+west patch apply
 ```
 
 `west update` は private リポジトリである `fibril_can` と `fibril_common` を clone する。
 先に GitHub の認証を通しておく（`gh auth login` の後に `gh auth setup-git` を実行するか、SSH 鍵を登録して `insteadOf` を張る）。
+
+`west patch apply` は、`zephyr/patches.yml` のパッチを CANnectivity に当てる（v1.4.0 で、バスが混むと PC から送れなくなる不具合の修正）。
+当てずにビルドしてもエラーにはならないので、忘れると直っていない gs_usb が焼かれる。
+`west update` をやり直したときや、パッチが変わったときは、`west patch clean` の後に `west patch apply` を実行する（当てた状態で `apply` すると失敗する）。
 
 ## コーディングエージェントを開く場所
 

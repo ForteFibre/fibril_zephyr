@@ -29,6 +29,12 @@ Zephyr 本体はこのリポジトリの外に clone され、`west.yml` がそ�
 `modules/hal` と `modules/lib` 以下の残りは、`zephyr` プロジェクトの `import` に `name-allowlist` を与えて必要なものだけ取り込んでいる。
 workspace のディレクトリに他のものが置かれていても、この manifest が管理する対象ではない。
 
+`cannectivity` は v1.4.0 に固定し、`zephyr/patches.yml` が v1.5.0 の gs_usb の修正を 3 つ backport する（`west patch apply` で当てる）。
+v1.4.0 は、ホストからのフレームが溜まってバッファが尽きると OUT endpoint を再び arm せず、CAN の送信に失敗するとホストに echo を返さない。
+どちらも、バスが混むと PC から送れなくなる原因になる。
+v1.5.0 は Zephyr v4.5 の `can_add_state_change_callback()` を必要とするので、Zephyr v4.4.1 のままでは上げられない。
+Zephyr と CANnectivity を上げるときは、パッチを消す。
+
 サンプルが参照する fibril_can はこのリポジトリの中ではなく `modules/lib/fibril_can` にある。
 private repository なので、`west update` を通すには先に GitHub の認証が必要である。
 
