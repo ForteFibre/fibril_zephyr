@@ -39,10 +39,18 @@ fibril_common は ROS 2 のノードが使っているものと同じ制御器�
 fibril_common の revision は、タグではなくコミットで固定してある（現在は `8f336f4`）。Zephyr module の入口（fibril_common#69）と `-Wdouble-promotion` の修正（fibril_common#74）を含むタグが、まだ無いためである。
 これより前の版では、`CONFIG_FIBRIL_COMMON` を立てたビルドが twister の `-Werror` で止まる。
 
-CANnectivity は、本家ではなく ForteFibre の fork のコミットで固定してある（現在は `251191a`、ブランチ `backport/gs-usb-out-restart`）。
-v1.4.0 に、本家の `5719a54`（OUT の転送を、バッファが空いたら張り直す）を 1 コミットだけ載せたものである。
-v1.4.0 の gs_usb は、ホストが RX を読むのが遅いとバッファのプールが尽き、OUT の endpoint を張り直せないまま諦めるので、列挙し直すまでホストから送れなくなる。
-本家は v1.5.0 で直したが、v1.5.0 は Zephyr 4.5 の `can_add_state_change_callback()` を使うので、v4.4.1 のこの workspace では使えない。
+CANnectivity は、本家ではなく ForteFibre の fork のコミットで固定してある（現在は `4ffbdd8`、ブランチ `backport/gs-usb-out-restart`）。
+v1.4.0 に、本家の gs_usb の修正を 3 つ、本家の順に載せたものである。作者とメッセージは本家のままにしてある。
+v1.4.0 の gs_usb は、どれが起きても、列挙し直すまでホストから CAN に送れなくなる。
+
+| 本家 | 直すこと |
+|---|---|
+| `0fd5538` | チャネルを止めるたびに、プールのバッファを 1 つ漏らす |
+| `5719a54` | プールが尽きているときに OUT の転送が終わると、OUT の endpoint を二度と張り直さない。バッファが戻ったら work から張り直すようにする |
+| `9cb0d90` | CAN への送信が失敗すると echo を返さないので、Linux の gs_usb ドライバがその TX URB を解放できない |
+
+`5719a54` は、v1.4.0 の状態変化のコールバックの関数名と前後の行が衝突したので、手で解いた。中身は本家のままである。
+本家は v1.5.0 で 3 つとも直したが、v1.5.0 は Zephyr 4.5 の `can_add_state_change_callback()` を使うので、v4.4.1 のこの workspace では使えない。
 Zephyr を 4.5 に上げるときに、本家の v1.5.0 以降へ戻す。
 
 fibril_can の revision はブランチではなくタグで固定してある（現在は v0.4.2）。
