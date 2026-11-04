@@ -57,6 +57,12 @@ jobs:
           toolchains: arm-zephyr-eabi
           ccache-cache-key: ${{ matrix.os }}
 
+      # zephyr/patches.yml backports CANnectivity fixes onto the pinned
+      # v1.4.0; building without them hides whether they still apply.
+      - name: Apply west patches
+        working-directory: example-application
+        run: west patch apply
+
       - name: Build firmware
         working-directory: example-application
         shell: bash

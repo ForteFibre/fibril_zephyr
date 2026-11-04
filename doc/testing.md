@@ -96,6 +96,7 @@ AMT21x のテストは 3 通りに分かれている。
 
 `.github/workflows/build.yml` が Ubuntu、macOS、Windows の 3 つで `app` と `tests` の両方を走らせる。
 `fibril_can` が private repository のため、CI は GitHub App のトークンを取得して `git config url.insteadOf` を張ってから `west update` を実行する。
+その後に `west patch apply` で `zephyr/patches.yml` のパッチを当ててからビルドする。
 
 `.github/workflows/docs.yml` は Doxygen と Sphinx を Doxygen 1.9.6 と 1.14.0 の両方でビルドし、`main` では GitHub Pages に公開する。
 Sphinx は `-W` 付きで走るため、警告はエラーになる。
