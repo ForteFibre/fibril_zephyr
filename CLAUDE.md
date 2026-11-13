@@ -24,6 +24,13 @@ fibril_can 側の設計と不変条件はそのリポジトリの `CLAUDE.md` �
 
 ## 作業の進め方
 
+ForteFibre の部内では、このリポジトリを作業場所 fibril の `west_ws/fibril_zephyr` に置いて扱い、変更は原則として fibril を経由して行う。
+fibril の外の clone や、fibril の共有の `west_ws` では、編集もコミットもしない。
+fibril が作業ごとに worktree と使い捨ての west topdir を作るので、下の手作業は要らない。手順と規約は fibril の `CLAUDE.md` にあり、エージェントは fibril のルートで起動する。
+やむを得ず fibril を経由せずに変更したときは、PR の本文にそう書く。
+
+以下は、fibril の外で作業するときの手順である。
+
 **変更は worktree で行う。** main checkout は複数のブランチとセッションで共有されるので、そこで編集すると無関係な作業と混ざる。
 
 ```shell
