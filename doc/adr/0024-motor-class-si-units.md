@@ -121,16 +121,16 @@ ADR 0005 の決定 3 は換算を各ドライバの文書に書くとした。
 
 ### 6. 使う側を A に移す
 
-- **md_motor の指令**：duty に `duty-full-scale-ma` を掛けた電流を `MOTOR_OUTPUT_MODE_CURRENT` で送る。ADR 0010 の決定 5（duty 1.0 は生の電流値 10000）を置き換える。`duty-full-scale-ma` はモータごとの配列とし、既定値を持たせない。今の `duty-full-scale` は 1 つの生の値を全モータに使っていて、C610 と C620 が混ざると A では違う値になる。調整済みのゲインの意味を保つには、モータごとに今の生の値に当たる A を書く必要がある。
-- **md_motor の `feedback.current`**：A で出す。**ADR 0013 の決定 4（生の値 / 1000）を置き換える。** `current/offset` と、ROS 側の電流のしきい値は A で設定し直す。
-- **adc_port のモータのポート**：A で出す。ADR 0013 の決定 1 のうち、モータを「報告する電流 / 10000」に正規化する部分を置き換える。キャリブレーションのしきい値は A で設定し直す。
+- **md_motor の指令**：duty に `duty-full-scale-ma` を掛けた電流を `MOTOR_OUTPUT_MODE_CURRENT` で送る。あわせて ADR 0010 の決定 5（duty 1.0 は生の電流値 10000）を改訂する。`duty-full-scale-ma` はモータごとの配列とし、既定値を持たせない。今の `duty-full-scale` は 1 つの生の値を全モータに使っていて、C610 と C620 が混ざると A では違う値になる。調整済みのゲインの意味を保つには、モータごとに今の生の値に当たる A を書く必要がある。
+- **md_motor の `feedback.current`**：A で出す。**あわせて ADR 0013 の決定 4（生の値 / 1000）を改訂する。** `current/offset` と、ROS 側の電流のしきい値は A で設定し直す。
+- **adc_port のモータのポート**：A で出す。あわせて ADR 0013 の決定 1 のうち、モータを「報告する電流 / 10000」に正規化する部分を改訂する。キャリブレーションのしきい値は A で設定し直す。
 
 ### 7. RobStride と ODrive は後の PR で移す
 
 この ADR を実装する PR では、`motor.h`、RoboMaster、md_motor、adc_port を同時に移す。クラスの契約と、それに頼る側が別々に変わると壊れるからである。
 RobStride と ODrive は、新しい `struct motor_feedback` に合わせる最小の変更（`temperature` を `float` にする）だけを同じ PR に含める。
 `motor_set_output()` の実装と、`torque`、`velocity` の feedback は後の PR で足す。
-そのとき ADR 0004 の決定 2 と 4、ADR 0022 の決定 3 と 4 を置き換える。
+そのとき ADR 0004 の決定 2 と 4、ADR 0022 の決定 3 と 4 を改訂する。
 ODrive の `odrive.h` は rev 単位のまま残し、クラスの入口でだけ rad に直す（ADR 0022 の決定 14 は変えない）。
 
 ## Consequences

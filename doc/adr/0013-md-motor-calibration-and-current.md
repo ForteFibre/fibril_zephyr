@@ -34,7 +34,7 @@ fibril_can の ACCEPTED（§7.2）を返すと、bridge はその時点から待
 
 `fibril,fcan-adc-port` ノードの子 1 つが、1 つのポート（1 つのインスタンス）になる。
 子は、ADC のチャネル（`io-channels`）か、motor class の device（`motor`）のどちらか 1 つを指す。
-ADC は満量を 1 とする 0〜1 に、モータは報告する電流 / 10000 に正規化する。
+ADC は満量を 1 とする 0〜1 に正規化し、モータは motor class が報告する電流を A のまま使う（[ADR 0024](0024-motor-class-si-units.md)）。
 しきい値はインスタンスの param `adcN/threshold` に置く。`can_md_controller` と CanMotorMbed の `feat/fibril-can` も、この名前を使っていた。
 
 ポートの並びは基板ではなくデプロイ snippet が決める（2026-10-10、ユーザーの指示）。
@@ -42,8 +42,6 @@ ADC は満量を 1 とする 0〜1 に、モータは報告する電流 / 10000 
 miniv4 には、CanMotorMbed と同じ並びの `miniv4-adc-torque8-ext5` と、基板の入力だけを並べる `miniv4-adc-ext5` を置く。
 
 > ポートの並びの決め方は、[ADR 0014](0014-snippet-hardware-fragments.md) の決定 7 で、基板で固定の番号に改めた。miniv4 の snippet は `miniv4-adc` の 1 つになった。
-
-> モータのポートの正規化（報告する電流 / 10000）は、[ADR 0024](0024-motor-class-si-units.md) の決定 6 で A に改めた。
 
 ### 2. 判定はモータごとに持ち、ポートは一括でサンプリングする
 
@@ -64,11 +62,15 @@ CanMotorMbed の `feat/fibril-can` にある `trigger` は、位置に着いた�
 
 その後、fibril_can の ADR-0018 で ACCEPTED の後の呼び出しにタイムアウトが掛からなくなったので、[ADR 0018](0018-md-motor-trigger-in-firmware.md) で `trigger` をファームウェアに入れた。
 
-### 4. `feedback.current` は生の値 / 1000 にする
+### 4. `feedback.current` は A にする
 
-CanMotorMbed の `read_current()` と同じ値にする（2026-10-10、ユーザーが選んだ）。
-ホストが持っている offset やしきい値を、そのまま使うためである。
-物理量（A）ではない。
+motor class が報告する電流を、A のまま使う（[ADR 0024](0024-motor-class-si-units.md) の決定 6）。
+`current/offset` も A で表す。
+
+はじめは CanMotorMbed の `read_current()` と同じ生の値 / 1000 にしていた（2026-10-10、ユーザーが選んだ）。
+ホストが持っている offset やしきい値を、そのまま使うためだった。
+しかし生の値の倍率は機種ごとに違い、読む側が機種を知らないと A に直せない。
+ADR 0024 で motor class の単位を決めたのに合わせて、A に改めた（2026-11-15、ユーザーが選んだ）。
 
 符号と零点は次の順に掛ける。
 
@@ -81,8 +83,6 @@ Mbed は `polarity` と `offset` を同じ 1 つの変数で持ち、ベース�
 ここでは、ベースラインを `current/offset` を引いた後の残りとして測る。
 こうすると、測り終えた後の零点は Mbed と同じになる。
 そのうえ、スレーブが param を書き換えられない（fibril_can §8）という制約とも衝突しない。
-
-この項の「生の値 / 1000」は、[ADR 0024](0024-motor-class-si-units.md) の決定 6 が置き換えた。`feedback.current` と `current/offset` は A で表す。符号と零点を掛ける順は変わらない。
 
 ### 5. 電流ベースラインは ACCEPTED を返し、測り終えてから応答する
 
