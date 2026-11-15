@@ -68,10 +68,15 @@ BUILD_ASSERT(ARRAY_SIZE(motors) == ARRAY_SIZE(encoders),
 BUILD_ASSERT(ARRAY_SIZE(motors) <= fcan_gen::mdmotor::max_count,
              "more motors wired than CONFIG_FIBRIL_CAN_NODE_MD_MOTOR_MAX");
 
-static constexpr float duty_full_scale = DT_INST_PROP(0, duty_full_scale);
+#define MA_TO_A_BY_IDX(node_id, prop, idx) (DT_PROP_BY_IDX(node_id, prop, idx) / 1000.0F)
 
-/* CanMotorMbed's RoboMaster read_current(). */
-static constexpr float current_full_scale = 1000.0F;
+/* The current, in A, a duty of 1.0 commands on each motor. */
+static constexpr float duty_full_scale_a[] = {
+  DT_INST_FOREACH_PROP_ELEM_SEP(0, duty_full_scale_ma, MA_TO_A_BY_IDX, (, ))
+};
+
+BUILD_ASSERT(ARRAY_SIZE(duty_full_scale_a) == ARRAY_SIZE(motors),
+             "fibril,fcan-md-motor needs one duty-full-scale-ma entry per motor");
 
 /* `adc/port` naming the motor's own index. */
 static constexpr uint8_t adc_port_own = 255;
@@ -548,23 +553,19 @@ static void watch_command(uint8_t inst)
 /*
  * The commands are checked on the way in, but a parameter can still carry a
  * NaN into the loops (the runtime stores parameters without checking the
- * schema's min/max), and lround
- * of a non-finite or out-of-range value is unspecified. Anything that is not
- * a finite duty stops the motor rather than reaching the integer conversion.
+ * schema's min/max). The motor would refuse a non-finite current and keep the
+ * previous one, so anything that is not a finite duty stops it instead.
  */
 static void drive(uint8_t inst, float duty)
 {
-  float raw = duty * states[inst].sign * duty_full_scale;
+  float current = duty * states[inst].sign * duty_full_scale_a[inst];
 
-  if (!std::isfinite(raw)) {
+  if (!std::isfinite(current)) {
     LOG_WRN_ONCE("motor %u: non-finite duty, output 0", inst);
-    raw = 0.0F;
+    current = 0.0F;
   }
 
-  raw = CLAMP(raw, (float)INT16_MIN, (float)INT16_MAX);
-
-  const int16_t output = (int16_t)std::lround(raw);
-  const int ret = motor_set_output(motors[inst], MOTOR_OUTPUT_MODE_CURRENT, output);
+  const int ret = motor_set_output(motors[inst], MOTOR_OUTPUT_MODE_CURRENT, current);
 
   if (ret != 0) {
     LOG_WRN_ONCE("motor %u: set_output failed (%d)", inst, ret);
@@ -604,7 +605,7 @@ static bool sample_current(uint8_t inst, float & current)
     return false;
   }
 
-  current = s->current_polarity * (float)fb.current / current_full_scale - s->current_offset;
+  current = s->current_polarity * fb.current - s->current_offset;
 
   /* current/offset is any f32 the host sends, NaN included. */
   return std::isfinite(current);

@@ -34,6 +34,10 @@
 
         motors = <&rm_motor1>, <&rm_motor2>, <&rm_motor3>, <&rm_motor4>;
         encoders = <&enc0>, <&enc1>, <&enc2>, <&enc3>;
+        /* CanMotorMbed's duty 1.0, raw 10000, on the C620 robomaster-x8.dtsi
+         * fits: 10000 / 16384 x 20 A. A motor overridden to a C610 needs
+         * 10000 in its slot. */
+        duty-full-scale-ma = <12207 12207 12207 12207>;
         status = "okay";
     };
 };

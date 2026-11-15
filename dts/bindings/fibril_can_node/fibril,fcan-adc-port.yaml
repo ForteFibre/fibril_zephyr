@@ -12,8 +12,8 @@ description: |
   Each child is one port, in bus-instance order, and reads one of two things:
 
   - `io-channels`: an ADC channel, normalised to 0..1 of its full scale.
-  - `motor`: the current a motor-class device reports, divided by 10000, which
-    is how CanMotorMbed turned a RoboMaster's torque into a port. A port that
+  - `motor`: the current, in A, a motor-class device reports. CanMotorMbed
+    turned a RoboMaster's torque current into a port the same way. A port that
     climbs above its threshold while the motor pushes against a stop is the
     usual way to find an end without a switch.
 

@@ -50,9 +50,6 @@ static const struct device * const motors[] = {
 BUILD_ASSERT(ARRAY_SIZE(adcs) <= fcan_gen::adcport::max_count,
              "more ports listed than CONFIG_FIBRIL_CAN_NODE_ADC_PORT_MAX");
 
-/* CanMotorMbed's RoboMasterTorqueSensor::read(). */
-static constexpr float motor_full_scale = 10000.0F;
-
 static float values[ARRAY_SIZE(adcs)];
 static bool valid[ARRAY_SIZE(adcs)];
 static uint32_t sample_generation;
@@ -90,7 +87,7 @@ static bool sample_motor(const struct device * motor, float & value)
     return false;
   }
 
-  value = (float)fb.current / motor_full_scale;
+  value = fb.current;
 
   return true;
 }
