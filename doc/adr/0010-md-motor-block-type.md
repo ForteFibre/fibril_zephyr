@@ -81,6 +81,8 @@ CanMotorMbed は、機種によらず RoboMaster に `duty × 10000` を送っ�
 モータの `max-current` は満量ではなく上限として効く。
 上限を下げても、すべてのゲインの意味が変わることはない。
 
+この項は [ADR 0024](0024-motor-class-si-units.md) の決定 5 と 6 が置き換えた。duty 1.0 に当たる電流を、モータごとの `duty-full-scale-ma`（A ではなく mA で書く）で決める。モータの `max-current` は `max-current-ma` になる。
+
 ### 6. エンコーダの位置が作り直されたら止める
 
 エンコーダの `position_epoch` が変わった tick は、無効なサンプルとして制御のコアに渡す。
