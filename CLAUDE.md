@@ -118,6 +118,13 @@ cd doc && pip install -r requirements.txt && doxygen && make html
 Markdown 内の相対リンクは、拡張子のないパスを書くと myst が文書への相互参照と解釈して警告になる。
 ディレクトリではなくファイルを指す。
 
+## インターフェイスの単位
+
+- **数値を受け渡すところには、単位を書く。** 対象は、公開ヘッダの引数と構造体のフィールド、binding の property、`type.yaml` の param と、topic と service のフィールドである。単位のほかに、基準（どの軸か、減速の前か後か、零点）、正の向き、値が無いときの表し方も書く。
+- **汎用のデバイスクラス（`include/drivers/motor.h` など）は、SI 単位で受け渡す。** 機種の生のコードを使ってよいのは、ドライバの中と機種専用の API だけである。機種専用の API でも、単位をヘッダに書く。ブロック型が ROS に出す値も、SI 単位か、param で利用者が決める単位にし、生のコードを出さない（[ADR 0024](doc/adr/0024-motor-class-si-units.md)）。
+- **物理量の binding の property は、名前の末尾に単位を付ける**（`feedback-timeout-ms`、`max-current-ma`、`max-velocity-mrad-s`）。無次元の値（比、カウント）は、何に対する値かを description に書く。
+- **クラスに単位の決まりが無いことが理由で機能を断るとき（`-ENOTSUP` を返すなど）は、それで終わりにしない。** Issue を立て、ADR の Consequences にその番号を書く。
+
 ## コメント
 
 - **devicetree のコメントには、その値を選んだ理由を書く。** クロックの分周やタイミングのプロパティは、値だけ見ても妥当性が判断できない。既存のボード定義はこれを守っており、ドキュメントの一次情報にもなっている。
