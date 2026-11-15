@@ -56,6 +56,7 @@
 | [0021](0021-odometry-block-type.md) | 自己位置推定の入力を、PCMainFW の host が出していた topic と同じ形のブロック型にする | Proposed |
 | [0022](0022-odrive-control-api-layering.md) | ODrive の制御 API を push 型 feedback と機種固有ヘッダで載せる | Proposed |
 | [0023](0023-odrive-adapter-block-type.md) | ODrive を fibril_odrive_adapter の後継のブロック型として載せる | Proposed |
+| [0024](0024-motor-class-si-units.md) | 汎用 motor クラスの指令と feedback を float の SI 単位にする | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -84,4 +85,5 @@
 0021-odometry-block-type
 0022-odrive-control-api-layering
 0023-odrive-adapter-block-type
+0024-motor-class-si-units
 ```

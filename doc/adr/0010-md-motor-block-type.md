@@ -71,14 +71,18 @@ bridge の frame planner は 64 バイト以下の topic を 1 つのフレー�
 `target`（5 バイト）と `trajectory`（12 バイト）はこれに当たるので、分かれて届くことはない。
 この 2 つにフィールドを足すときは、64 バイトを超えないようにする。
 
-### 5. duty 1.0 は生の電流値 10000 にする
+### 5. duty 1.0 に当たる電流は、モータごとに決める
 
 制御のコアは duty を返す。
-モータには `MOTOR_OUTPUT_MODE_CURRENT` で、`duty × duty-full-scale` を送る。
-`duty-full-scale` の既定は 10000 である。
-CanMotorMbed は、機種によらず RoboMaster に `duty × 10000` を送っていた。
-同じ値にしておけば、そのファームウェアで調整したゲインをそのまま使える。
-モータの `max-current` は満量ではなく上限として効く。
+モータには `MOTOR_OUTPUT_MODE_CURRENT` で、`duty × duty-full-scale-ma` を A に直して送る（[ADR 0024](0024-motor-class-si-units.md) の決定 6）。
+`duty-full-scale-ma` はモータごとの配列で、既定値を持たない。
+
+CanMotorMbed は、機種によらず RoboMaster に `duty × 10000`（生の値）を送っていた。
+そのファームウェアで調整したゲインをそのまま使うには、モータごとに生の値 10000 に当たる電流を書く。
+ADR 0024 の仮の係数では、C620 で 12207 mA、C610 で 10000 mA になる。
+はじめは 1 つの生の値 `duty-full-scale`（既定 10000）を全モータに使っていたが、motor class の単位を A にしたので、機種ごとに値の変わるモータごとの電流に改めた。
+
+モータの `max-current-ma` は満量ではなく上限として効く。
 上限を下げても、すべてのゲインの意味が変わることはない。
 
 ### 6. エンコーダの位置が作り直されたら止める
