@@ -26,7 +26,7 @@ robomaster_controller: robomaster-controller {
                 compatible = "dji,robomaster-motor";
                 reg = <1>;
                 model = "c620";
-                max-current = <10000>;
+                max-current-ma = <12207>;
         };
 };
 ```
@@ -36,10 +36,23 @@ robomaster_controller: robomaster-controller {
 モータ ID は 1 つのトランスポート内で重複してはならない。
 
 モータノードの `reg` がモータ ID で、範囲は 1 から 8 である。
-`max-current` を省略すると 10000 になる。
+`max-current-ma` は、ドライバが指令する電流の上限（mA）である。
+省略すると、機種の全範囲（C620 は 20000、C610 は 10000）になる。
+それより大きい値を書いても、全範囲で止まる。
 
-`model` と `gear-ratio` はどちらも config に保持されるだけで、ドライバは読まない。
-C610 と C620 は同じ扱いになる。
+`model` で、電流の A と、コントローラの電流コードを換算する。
+
+| `model` | 電流コード | 温度 |
+| --- | --- | --- |
+| `c620` | ±16384 = ±20 A（指令と feedback で同じ） | 報告する |
+| `c610` | ±10000 = ±10 A（指令と feedback で同じ） | 報告しない |
+
+**この表は仮の値である**（[ADR 0024](../adr/0024-motor-class-si-units.md)）。
+C620 の値と C610 の指令の値は広く使われている値だが、DJI の資料で確かめていない。
+C610 の feedback の倍率と、C610 が温度を報告しないことは、確かめていない推測である。
+違っていたら、`drivers/motor/robomaster.c` の `robomaster_model_scales` だけを直す。
+
+`gear-ratio` は config に保持されるだけで、ドライバは読まない。
 上位の制御側がメタデータとして参照するためのプロパティである。
 
 ## Kconfig
@@ -103,11 +116,15 @@ RobStride ドライバがハンドシェイクの段を巻き戻すのに完了�
 | 4 から 5 | 電流（符号付き 16 ビット） |
 | 6 | 温度 |
 
-値はモータコントローラの生の単位のままスナップショットに入る。
-ドライバはスケーリングをしない。
-`max-current` も同じ生の単位で解釈される。
+スナップショットには、motor クラスの単位に直して入れる。
 
-`struct motor_feedback` の `valid_mask` には、電流、速度、位置、機械角、温度のすべてが立つ。
+- 電流は、`model` の係数で A に直す。
+- 速度は、ロータの rpm を rad/s に直す。減速機の後の軸ではない。
+- 温度は ℃ のまま入れる。
+
+`struct motor_feedback` の `valid_mask` には、電流、速度、位置、機械角が立つ。
+温度は、温度を報告する機種（C620）でだけ立つ。
+`torque` は立たない。トルク定数を知らないからである。
 
 ### 位置の積算
 
@@ -136,9 +153,13 @@ RobStride ドライバがハンドシェイクの段を巻き戻すのに完了�
 無効なモータのスロットには、フレームを組むときに明示的に 0 を書き込む。
 指令を止めるのではなく、0 電流を送り続ける動作になる。
 
-`motor_set_output()` が受け付けるのは `MOTOR_OUTPUT_MODE_CURRENT` と、その別名である `MOTOR_OUTPUT_MODE_TORQUE` だけである。
-速度モードと電圧モードには `-ENOTSUP` を返す。
-値は `±max-current` に飽和させてから保持する。
+`motor_set_output()` が受け付けるのは `MOTOR_OUTPUT_MODE_CURRENT`（A）だけである。
+ほかのモードには `-ENOTSUP` を返す。
+`MOTOR_OUTPUT_MODE_TORQUE` も断る。電流からトルクを作るには、ドライバが知らないトルク定数が要る。
+有限でない値には `-EINVAL` を返す。
+値は `model` の係数で電流コードに直し、`±max-current-ma` と機種の全範囲のうち狭い方に飽和させ、四捨五入して保持する。
+
+`motor_get_info()` は、`output_modes` に `MOTOR_OUTPUT_MODE_CURRENT` を、`counts_per_rev` に 8192（ロータ 1 回転）を返す。
 
 `motor_get_feedback()` は戻り値に関わらずスナップショットを書き込む。
 

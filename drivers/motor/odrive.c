@@ -1153,19 +1153,25 @@ static int odrive_axis_disable(const struct device * dev)
 }
 
 static int odrive_axis_set_output(
-  const struct device * dev, const enum motor_output_mode mode, const int16_t output)
+  const struct device * dev, enum motor_output_mode mode, float value)
 {
   ARG_UNUSED(dev);
   ARG_UNUSED(mode);
-  ARG_UNUSED(output);
+  ARG_UNUSED(value);
 
-  /*
-   * An ODrive setpoint is bounded by the drive's own configuration rather than
-   * by the protocol, so there is no unit this class-wide call could carry
-   * without changing meaning between drivers. Use
-   * include/drivers/motor/odrive.h instead.
-   */
+  /* Not wired to the class units yet (doc/adr/0024 decision 7); setpoints go
+   * through include/drivers/motor/odrive.h. */
   return -ENOTSUP;
+}
+
+static int odrive_axis_get_info(const struct device * dev, struct motor_info * info)
+{
+  ARG_UNUSED(dev);
+
+  info->output_modes = 0U;
+  info->counts_per_rev = ODRIVE_COUNTS_PER_REV;
+
+  return 0;
 }
 
 static int odrive_axis_get_feedback(const struct device * dev, void * feedback)
@@ -1191,10 +1197,9 @@ static int odrive_axis_get_feedback(const struct device * dev, void * feedback)
   k_spin_unlock(&data->lock, key);
 
   /*
-   * Only the fields that mean the same thing here as in the other motor
-   * drivers are published. Velocity, current and single-turn orientation are
-   * SI values with no unit agreed across the class; odrive_get_feedback()
-   * reports them.
+   * Velocity, torque and current in the class units come with
+   * doc/adr/0024 decision 7; until then odrive_get_feedback() reports them in
+   * the drive's own units. Single-turn orientation has no class meaning.
    */
   if (((snapshot.valid_mask & ODRIVE_FEEDBACK_ESTIMATES) != 0U) &&
       odrive_to_counts(snapshot.position, &counts)) {
@@ -1219,7 +1224,7 @@ static int odrive_axis_get_feedback(const struct device * dev, void * feedback)
       ((snapshot.valid_mask & ODRIVE_FEEDBACK_TEMPERATURE) != 0U) &&
       isfinite(snapshot.motor_temperature)) {
     out->valid_mask |= MOTOR_FEEDBACK_TEMPERATURE;
-    out->temperature = (int16_t)CLAMP(snapshot.motor_temperature, INT16_MIN, INT16_MAX);
+    out->temperature = snapshot.motor_temperature;
   }
 
   if (!out->online) {
@@ -1261,6 +1266,7 @@ static const struct motor_driver_api odrive_axis_api = {
   .disable = odrive_axis_disable,
   .set_output = odrive_axis_set_output,
   .get_feedback = odrive_axis_get_feedback,
+  .get_info = odrive_axis_get_info,
 };
 
 static bool odrive_is_axis(const struct device * dev)

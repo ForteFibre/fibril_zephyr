@@ -182,8 +182,8 @@ ZTEST(robomaster_start_retry, test_unstartable_bus_recovers_without_dropping_mot
 		zassert_true(captured_filters[i].valid, "missing captured filter %d", i);
 	}
 
-	zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 1000));
-	zassert_ok(motor_set_output(motor1, MOTOR_OUTPUT_MODE_CURRENT, 1000));
+	zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 1.0F));
+	zassert_ok(motor_set_output(motor1, MOTOR_OUTPUT_MODE_CURRENT, 1.0F));
 	zassert_ok(motor_enable(motor0));
 	zassert_ok(motor_enable(motor1));
 

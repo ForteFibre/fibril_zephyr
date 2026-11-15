@@ -18,7 +18,7 @@
  * deployment picks motors by naming them in its fibril,fcan-* node, never by
  * adding or removing them here.
  *
- * Every ESC is a C620 at its full command range. A deployment that fits a
+ * Every ESC is a C620 at its full command range, 20 A. A deployment that fits a
  * C610 or lowers a limit overrides the one motor:
  *
  *     &rm_motor3 {
@@ -40,62 +40,62 @@
          * rotor encoder starts its position over. */
         feedback-timeout-ms = <100>;
 
-        /* duty-full-scale on the md_motor node, not this limit, decides what
+        /* duty-full-scale-ma on the md_motor node, not this limit, decides what
          * a duty of 1.0 means. */
         rm_motor1: motor@1 {
             compatible = "dji,robomaster-motor";
             reg = <1>;
             model = "c620";
-            max-current = <16384>;
+            max-current-ma = <20000>;
         };
 
         rm_motor2: motor@2 {
             compatible = "dji,robomaster-motor";
             reg = <2>;
             model = "c620";
-            max-current = <16384>;
+            max-current-ma = <20000>;
         };
 
         rm_motor3: motor@3 {
             compatible = "dji,robomaster-motor";
             reg = <3>;
             model = "c620";
-            max-current = <16384>;
+            max-current-ma = <20000>;
         };
 
         rm_motor4: motor@4 {
             compatible = "dji,robomaster-motor";
             reg = <4>;
             model = "c620";
-            max-current = <16384>;
+            max-current-ma = <20000>;
         };
 
         rm_motor5: motor@5 {
             compatible = "dji,robomaster-motor";
             reg = <5>;
             model = "c620";
-            max-current = <16384>;
+            max-current-ma = <20000>;
         };
 
         rm_motor6: motor@6 {
             compatible = "dji,robomaster-motor";
             reg = <6>;
             model = "c620";
-            max-current = <16384>;
+            max-current-ma = <20000>;
         };
 
         rm_motor7: motor@7 {
             compatible = "dji,robomaster-motor";
             reg = <7>;
             model = "c620";
-            max-current = <16384>;
+            max-current-ma = <20000>;
         };
 
         rm_motor8: motor@8 {
             compatible = "dji,robomaster-motor";
             reg = <8>;
             model = "c620";
-            max-current = <16384>;
+            max-current-ma = <20000>;
         };
     };
 

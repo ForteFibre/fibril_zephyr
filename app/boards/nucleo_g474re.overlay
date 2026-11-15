@@ -21,14 +21,14 @@
             compatible = "dji,robomaster-motor";
             reg = <1>;
             model = "c620";
-            max-current = <10000>;
+            max-current-ma = <12207>;
         };
 
         motor_front_right: motor@2 {
             compatible = "dji,robomaster-motor";
             reg = <2>;
             model = "c620";
-            max-current = <10000>;
+            max-current-ma = <12207>;
         };
     };
 };

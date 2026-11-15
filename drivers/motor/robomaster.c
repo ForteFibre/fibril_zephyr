@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <math.h>
+
 #include <drivers/motor.h>
 #include <drivers/motor/robomaster.h>
 #include <zephyr/device.h>
@@ -25,13 +27,38 @@ LOG_MODULE_REGISTER(motor_dji_robomaster, CONFIG_MOTOR_LOG_LEVEL);
 #define ROBOMASTER_RX_FILTER_MASK 0x7F0U
 #define ROBOMASTER_ENCODER_WRAP 8192
 #define ROBOMASTER_ENCODER_HALF_WRAP (ROBOMASTER_ENCODER_WRAP / 2)
-#define ROBOMASTER_DEFAULT_MAX_CURRENT 10000
 #define ROBOMASTER_CANBUS_UNKNOWN 0xFF
 #define ROBOMASTER_START_RETRY_MS 500
+
+#define ROBOMASTER_RAD_S_PER_RPM (2.0F * 3.14159265358979F / 60.0F)
 
 enum robomaster_model {
   ROBOMASTER_MODEL_C610 = 0,
   ROBOMASTER_MODEL_C620 = 1,
+};
+
+struct robomaster_model_scale
+{
+  /* Current code per A, the same for the command and the feedback. */
+  float codes_per_amp;
+  /* Largest command code the controller takes. */
+  int16_t full_scale_code;
+  bool reports_temperature;
+};
+
+/* Not yet checked against DJI's documents or a motor; doc/drivers/robomaster.md
+ * says which parts are assumed. */
+static const struct robomaster_model_scale robomaster_model_scales[] = {
+  [ROBOMASTER_MODEL_C610] = {
+    .codes_per_amp = 10000.0F / 10.0F,
+    .full_scale_code = 10000,
+    .reports_temperature = false,
+  },
+  [ROBOMASTER_MODEL_C620] = {
+    .codes_per_amp = 16384.0F / 20.0F,
+    .full_scale_code = 16384,
+    .reports_temperature = true,
+  },
 };
 
 struct robomaster_transport_config
@@ -58,7 +85,8 @@ struct robomaster_motor_config
   const struct device * transport;
   uint8_t motor_id;
   enum robomaster_model model;
-  int16_t max_current;
+  /* INFINITY when the node sets no max-current-ma: the model's full range. */
+  float max_current_a;
 };
 
 struct robomaster_motor_data
@@ -227,6 +255,8 @@ static void robomaster_rx_callback(
   }
 
   struct robomaster_motor_data * motor = motor_dev->data;
+  const struct robomaster_motor_config * motor_config = motor_dev->config;
+  const struct robomaster_model_scale * scale = &robomaster_model_scales[motor_config->model];
   uint16_t orientation_raw = sys_get_be16(&frame->data[0]);
   int16_t velocity = (int16_t)sys_get_be16(&frame->data[2]);
   int16_t current = (int16_t)sys_get_be16(&frame->data[4]);
@@ -270,12 +300,14 @@ static void robomaster_rx_callback(
 
   motor->last_orientation_raw = orientation_raw;
   motor->feedback.valid_mask = MOTOR_FEEDBACK_CURRENT | MOTOR_FEEDBACK_VELOCITY |
-                               MOTOR_FEEDBACK_POSITION | MOTOR_FEEDBACK_ORIENTATION |
-                               MOTOR_FEEDBACK_TEMPERATURE;
-  motor->feedback.current = current;
-  motor->feedback.velocity = velocity;
+                               MOTOR_FEEDBACK_POSITION | MOTOR_FEEDBACK_ORIENTATION;
+  motor->feedback.current = (float)current / scale->codes_per_amp;
+  motor->feedback.velocity = (float)velocity * ROBOMASTER_RAD_S_PER_RPM;
   motor->feedback.orientation = orientation_raw;
-  motor->feedback.temperature = temperature;
+  if (scale->reports_temperature) {
+    motor->feedback.valid_mask |= MOTOR_FEEDBACK_TEMPERATURE;
+    motor->feedback.temperature = (float)temperature;
+  }
   motor->feedback.online = true;
   motor->feedback.stale = false;
   motor->feedback.timestamp_ms = now_ms;
@@ -417,21 +449,27 @@ static int robomaster_motor_disable(const struct device * dev)
 }
 
 static int robomaster_motor_set_output(
-  const struct device * dev, const enum motor_output_mode mode, const int16_t output)
+  const struct device * dev, enum motor_output_mode mode, float value)
 {
   const struct robomaster_motor_config * config = dev->config;
+  const struct robomaster_model_scale * scale = &robomaster_model_scales[config->model];
   struct robomaster_motor_data * data = dev->data;
-  int16_t clamped;
   k_spinlock_key_t key;
 
-  if ((mode != MOTOR_OUTPUT_MODE_CURRENT) && (mode != MOTOR_OUTPUT_MODE_TORQUE)) {
+  if (mode != MOTOR_OUTPUT_MODE_CURRENT) {
     return -ENOTSUP;
   }
 
-  clamped = CLAMP(output, -config->max_current, config->max_current);
+  if (!isfinite(value)) {
+    return -EINVAL;
+  }
+
+  const float limit =
+    MIN(config->max_current_a * scale->codes_per_amp, (float)scale->full_scale_code);
+  const int16_t code = (int16_t)lroundf(CLAMP(value * scale->codes_per_amp, -limit, limit));
 
   key = k_spin_lock(&data->lock);
-  data->requested_current = clamped;
+  data->requested_current = code;
   k_spin_unlock(&data->lock, key);
 
   return 0;
@@ -467,6 +505,16 @@ static int robomaster_motor_get_feedback(const struct device * dev, void * feedb
   return ret;
 }
 
+static int robomaster_motor_get_info(const struct device * dev, struct motor_info * info)
+{
+  ARG_UNUSED(dev);
+
+  info->output_modes = MOTOR_OUTPUT_MODE_CURRENT;
+  info->counts_per_rev = (float)ROBOMASTER_ENCODER_WRAP;
+
+  return 0;
+}
+
 static int robomaster_motor_init(const struct device * dev)
 {
   const struct robomaster_motor_config * config = dev->config;
@@ -489,6 +537,7 @@ static const struct motor_driver_api robomaster_motor_api = {
   .disable = robomaster_motor_disable,
   .set_output = robomaster_motor_set_output,
   .get_feedback = robomaster_motor_get_feedback,
+  .get_info = robomaster_motor_get_info,
 };
 
 #define DT_DRV_COMPAT dji_robomaster
@@ -518,8 +567,9 @@ DT_INST_FOREACH_STATUS_OKAY(ROBOMASTER_TRANSPORT_DEFINE)
 
 #define ROBOMASTER_MODEL_INIT(inst) DT_INST_ENUM_IDX(inst, model)
 
-#define ROBOMASTER_MAX_CURRENT_INIT(inst) \
-  DT_INST_PROP_OR(inst, max_current, ROBOMASTER_DEFAULT_MAX_CURRENT)
+#define ROBOMASTER_MAX_CURRENT_INIT(inst)                                                  \
+  COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, max_current_ma),                                \
+              ((float)DT_INST_PROP(inst, max_current_ma) / 1000.0F), (INFINITY))
 
 #define ROBOMASTER_MOTOR_DEFINE(inst)                                            \
   static struct robomaster_motor_data robomaster_motor_data_##inst;              \
@@ -527,7 +577,7 @@ DT_INST_FOREACH_STATUS_OKAY(ROBOMASTER_TRANSPORT_DEFINE)
     .transport = DEVICE_DT_GET(DT_INST_PARENT(inst)),                            \
     .motor_id = DT_INST_REG_ADDR(inst),                                          \
     .model = ROBOMASTER_MODEL_INIT(inst),                                        \
-    .max_current = ROBOMASTER_MAX_CURRENT_INIT(inst),                            \
+    .max_current_a = ROBOMASTER_MAX_CURRENT_INIT(inst),                          \
   };                                                                             \
   DEVICE_DT_INST_DEFINE(                                                         \
     inst, robomaster_motor_init, NULL, &robomaster_motor_data_##inst,            \

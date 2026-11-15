@@ -827,7 +827,7 @@ ZTEST(robstride_motor, test_feedback_decodes_velocity_torque_and_temperature)
   zassert_equal(si.run_state, ROBSTRIDE_RUN_STATE_RUNNING, "wrong run state");
 
   zassert_ok(motor_get_feedback(motor0, &feedback));
-  zassert_equal(feedback.temperature, 25, "the class-wide field is whole degrees");
+  zassert_within(feedback.temperature, 25.5F, 0.01F, "the class field keeps the 0.1 degree steps");
 }
 
 ZTEST(robstride_motor, test_feedback_goes_stale_after_the_timeout)
