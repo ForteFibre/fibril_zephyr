@@ -354,7 +354,7 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 - `trigger`（`WaitSensorTrigger`）は、待つ時間に上限が無い。`can_md_controller` と同じく、`trigger_cancel` か 2 回目の `trigger` で `success=false` で終わる。加えて、master がノードを止めたとき（STOP、再 DISCOVER）にも終わる。`adc/direction` の 2 は、`can_md_controller` では一致しない値だったが、ここではどちらの向きでも一致する。
 - しきい値は `AdcPort` の `adcN/threshold` に、どのポートを見るかは `motorN/adc/port` に置く。`can_md_controller` の `adc{N}.threshold` は起動時だけ送る read only の param だったが、ここではいつでも変えられる。
 - `sensor` の `edge_position` には `invert` が掛かる。`can_md_controller` は掛けていなかった。
-- 電流は A で表す。`feedback.current` と `current/offset`、モータのポートの `adcN/threshold` がそうである。`can_md_controller` は生の値 / 1000（しきい値は / 10000）だった。仮の係数では、C620 で移す前の値の約 1.22 倍になる。モータのポートの `threshold` の既定 0.5 は 0.5 A なので、設定し直す。理由は [ADR 0024](adr/0024-motor-class-si-units.md) にある。
+- 電流は A で表す。`feedback.current` と `current/offset`、モータのポートの `adcN/threshold` がそうである。`can_md_controller` では、`feedback.current` と `current/offset` が生の値 / 1000、しきい値が生の値 / 10000 だった。仮の係数で同じ電流を表すには、`feedback.current` と `current/offset` は C620 で約 1.22 倍、C610 で 1 倍にする。しきい値は C620 で約 12.2 倍、C610 で 10 倍にする（C620 の 0.5 は約 6.1 A）。モータのポートの `threshold` の既定 0.5 は 0.5 A なので、設定し直す。理由は [ADR 0024](adr/0024-motor-class-si-units.md) にある。
 - duty 1.0 に当たる電流は、devicetree の `duty-full-scale-ma` にモータごとに書く。CanMotorMbed の duty 1.0（生の値 10000）と同じにするなら、C620 で 12207、C610 で 10000 である。
 - `calibrate_current_baseline` は測り終えてから応答し、静止していなかったら失敗を返す。測る時間は 0.05〜1 s（CanMotorMbed は 0.5〜5 s）。
 - `can_md_controller` には無かった `command_timeout_ms` がある。DUTY と VELOCITY で 200 ms 指令が来なければ DUTY 0 に落とす。速度を流す master は、それより短い間隔で送り続ける（下の「指令が途絶えたとき」）。

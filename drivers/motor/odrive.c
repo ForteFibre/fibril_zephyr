@@ -1159,7 +1159,7 @@ static int odrive_axis_set_output(
   ARG_UNUSED(mode);
   ARG_UNUSED(value);
 
-  /* Not wired to the class units yet (doc/adr/0024 decision 7); setpoints go
+  /* Not wired to the class units yet (doc/adr/0024 decision 7, #55); setpoints go
    * through include/drivers/motor/odrive.h. */
   return -ENOTSUP;
 }
@@ -1198,7 +1198,7 @@ static int odrive_axis_get_feedback(const struct device * dev, void * feedback)
 
   /*
    * Velocity, torque and current in the class units come with
-   * doc/adr/0024 decision 7; until then odrive_get_feedback() reports them in
+   * doc/adr/0024 decision 7 (#55); until then odrive_get_feedback() reports them in
    * the drive's own units. Single-turn orientation has no class meaning.
    */
   if (((snapshot.valid_mask & ODRIVE_FEEDBACK_ESTIMATES) != 0U) &&

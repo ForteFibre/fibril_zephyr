@@ -129,7 +129,7 @@ ADR 0005 の決定 3 は換算を各ドライバの文書に書くとした。
 
 この ADR を実装する PR では、`motor.h`、RoboMaster、md_motor、adc_port を同時に移す。クラスの契約と、それに頼る側が別々に変わると壊れるからである。
 RobStride と ODrive は、新しい `struct motor_feedback` に合わせる最小の変更（`temperature` を `float` にする）だけを同じ PR に含める。
-`motor_set_output()` の実装と、`torque`、`velocity` の feedback は後の PR で足す。
+`motor_set_output()` の実装と、`torque`、`velocity` の feedback は後の PR で足す（#55）。
 そのとき ADR 0004 の決定 2 と 4、ADR 0022 の決定 3 と 4 を改訂する。
 ODrive の `odrive.h` は rev 単位のまま残し、クラスの入口でだけ rad に直す（ADR 0022 の決定 14 は変えない）。
 
@@ -139,6 +139,7 @@ ODrive の `odrive.h` は rev 単位のまま残し、クラスの入口でだ�
 - md_motor と adc_port が ROS に出す電流の値の意味が変わる。何が変わり何が変わらないかは、下の「ROS から見える値」にまとめた。
 - `motor_set_output()` を syscall にしないので、将来 `CONFIG_USERSPACE` を使うときは、値を構造体のポインタで渡す syscall を別に足す必要がある。
 - `struct motor_feedback` が `float` を含むので、FPU のない MCU では feedback を読むたびにソフトウェアの浮動小数点演算が入る。いまのボードはすべて Cortex-M4F で、ADR 0004 と 0022 がすでに `float` を受け入れている。
+- RobStride と ODrive は、決定 7 の PR（#55）まで `motor_set_output()` で `-ENOTSUP` を返し、クラスの feedback には `position` と `temperature` しか出さない。それまでの指令と残りの feedback は、機種専用の API を使う。
 - 新しいドライバ（VESC など）は、汎用クラスに指令を実装でき、md_motor のような機種を知らない使う側から使えるようになる。
 - **RoboMaster の換算係数は仮の値で置く。** 実装では次の値を使い、DJI の資料か実機で確かめて、違えば係数だけを直す。
   - C620：指令と feedback とも ±16384 = ±20 A。

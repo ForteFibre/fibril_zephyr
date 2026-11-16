@@ -110,7 +110,8 @@ struct motor_feedback
    * The driver resolves the wrap of the underlying device and accumulates
    * here, so a control loop sees a continuous value. What one count is worth
    * depends on the device; @ref motor_info.counts_per_rev gives the counts
-   * per turn of the measured shaft.
+   * per turn of the measured shaft. Where zero lies is driver-specific too
+   * (a RobStride's count 0 is -4 pi rad); the driver's document says.
    */
   int64_t position;
   /** Instantaneous orientation reported by the motor. */

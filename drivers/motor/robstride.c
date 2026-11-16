@@ -1451,7 +1451,7 @@ static int robstride_motor_set_output(
   ARG_UNUSED(mode);
   ARG_UNUSED(value);
 
-  /* Not wired to the class units yet (doc/adr/0024 decision 7); targets go
+  /* Not wired to the class units yet (doc/adr/0024 decision 7, #55); targets go
    * through include/drivers/motor/robstride.h. */
   return -ENOTSUP;
 }
@@ -1486,7 +1486,7 @@ static int robstride_motor_get_feedback(const struct device * dev, void * feedba
 
   /*
    * Velocity and torque in the class units come with doc/adr/0024
-   * decision 7; robstride_get_feedback() reports them meanwhile. Position and
+   * decision 7 (#55); robstride_get_feedback() reports them meanwhile. Position and
    * temperature are published only once a feedback frame has carried them: a
    * motor that has answered nothing but a presence probe is online with no
    * measurement to its name.

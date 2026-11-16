@@ -23,7 +23,8 @@ properties:
   max-current-ma:
     type: int
     description: |
-      Largest current, in mA, the driver commands either way. Absent, the
+      Largest current, in mA, the driver commands either way; it must be
+      positive. Absent, the
       model's full range applies (20000 for a C620, 10000 for a C610), and a
       larger value is capped there too.
   gear-ratio:

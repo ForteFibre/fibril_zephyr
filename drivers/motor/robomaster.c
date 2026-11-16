@@ -572,6 +572,8 @@ DT_INST_FOREACH_STATUS_OKAY(ROBOMASTER_TRANSPORT_DEFINE)
               ((float)DT_INST_PROP(inst, max_current_ma) / 1000.0F), (INFINITY))
 
 #define ROBOMASTER_MOTOR_DEFINE(inst)                                            \
+  BUILD_ASSERT(DT_INST_PROP_OR(inst, max_current_ma, 1) > 0,                     \
+               "max-current-ma must be positive");                               \
   static struct robomaster_motor_data robomaster_motor_data_##inst;              \
   static const struct robomaster_motor_config robomaster_motor_config_##inst = { \
     .transport = DEVICE_DT_GET(DT_INST_PARENT(inst)),                            \
