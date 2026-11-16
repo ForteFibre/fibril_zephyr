@@ -354,6 +354,8 @@ ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッ�
 - `trigger`（`WaitSensorTrigger`）は、待つ時間に上限が無い。`can_md_controller` と同じく、`trigger_cancel` か 2 回目の `trigger` で `success=false` で終わる。加えて、master がノードを止めたとき（STOP、再 DISCOVER）にも終わる。`adc/direction` の 2 は、`can_md_controller` では一致しない値だったが、ここではどちらの向きでも一致する。
 - しきい値は `AdcPort` の `adcN/threshold` に、どのポートを見るかは `motorN/adc/port` に置く。`can_md_controller` の `adc{N}.threshold` は起動時だけ送る read only の param だったが、ここではいつでも変えられる。
 - `sensor` の `edge_position` には `invert` が掛かる。`can_md_controller` は掛けていなかった。
+- 電流は A で表す。`feedback.current` と `current/offset`、モータのポートの `adcN/threshold` がそうである。`can_md_controller` では、`feedback.current` と `current/offset` が生の値 / 1000、しきい値が生の値 / 10000 だった。仮の係数で同じ電流を表すには、`feedback.current` と `current/offset` は C620 で約 1.22 倍、C610 で 1 倍にする。しきい値は C620 で約 12.2 倍、C610 で 10 倍にする（C620 の 0.5 は約 6.1 A）。モータのポートの `threshold` の既定 0.5 は 0.5 A なので、設定し直す。理由は [ADR 0024](adr/0024-motor-class-si-units.md) にある。
+- duty 1.0 に当たる電流は、devicetree の `duty-full-scale-ma` にモータごとに書く。CanMotorMbed の duty 1.0（生の値 10000）と同じにするなら、C620 で 12207、C610 で 10000 である。
 - `calibrate_current_baseline` は測り終えてから応答し、静止していなかったら失敗を返す。測る時間は 0.05〜1 s（CanMotorMbed は 0.5〜5 s）。
 - `can_md_controller` には無かった `command_timeout_ms` がある。DUTY と VELOCITY で 200 ms 指令が来なければ DUTY 0 に落とす。速度を流す master は、それより短い間隔で送り続ける（下の「指令が途絶えたとき」）。
 
@@ -437,7 +439,7 @@ RAM が足りないときは、`CONFIG_CAN_STATS=n` でエラーカウンタだ�
 - `sensor_state` を true にすると、`adc/port` が指す `AdcPort` の値を 5 ms ごとに見る。|値| がしきい値をまたぐたびに、向き（RISE か FALL）とその時点の位置を `sensor` に出す。有効にした直後の最初のサンプルでも、そのときの向きを 1 回出す。位置は変えない。原点を合わせるなら、host が `edge_position` を見て `reset_encoder` を呼ぶ。
 - `adc/port` の既定（255）は、モータと同じ番号のポートを指す。監視中に `adc/port` を変えると、新しいポートの最初のサンプルで、そのときの向きを 1 回出す（有効にした直後と同じ）。
 - エンコーダの値が無効な間は、ポートの値を見ない。その間にしきい値をまたいでいたら、エンコーダが戻った最初のサンプルで、そのときの位置を付けて出す。
-- `feedback.current` は、モータが報告する電流の生の値を 1000 で割ったものである（CanMotorMbed の `read_current()`）。`current/polarity` の符号を掛け、`current/offset` と、最後に測ったベースラインを引き、最後に `invert` を掛ける。結果が有限でなければ（`current/offset` が NaN など）、電流は無効とし、`feedback.current` は 0 にする。測っているベースラインは中止する。
+- `feedback.current` は、モータが報告する電流（A）である。CanMotorMbed の `read_current()` の生の値 / 1000 ではない（[ADR 0024](adr/0024-motor-class-si-units.md)）。`current/polarity` の符号を掛け、`current/offset` と、最後に測ったベースラインを引き、最後に `invert` を掛ける。結果が有限でなければ（`current/offset` が NaN など）、電流は無効とし、`feedback.current` は 0 にする。測っているベースラインは中止する。
 - `calibrate_current_baseline` は、`current/baseline_duration_s` の間、DUTY 0 で止まっているモータの電流を平均する。測り終えてから応答を返す（ACCEPTED の後に最終応答）。
 - `trigger` は、`adc/port` のポートが、`adc/direction`（0 が FALL、1 が RISE、2 がどちらでも）の向きにしきい値をまたぐまで待ち、そのときの位置を `triggered_position` に入れて返す。数えるのは待ち始めた後にまたいだときだけで、待ち始めたときの向きでは返らない。待ち始めたときの向きはその時点で最新のサンプルから取るので、待ち始める直前の 1 周期（5 ms）の間にまたいだときも数える。`sensor_state` とは別に監視するので、`sensor` の配信と同時に使える。`trigger_cancel` と 2 回目の `trigger` は、待っている `trigger` を `success=false` で終わらせる。エッジとほぼ同時（1 ms 以内）に届くと、取り消した方が `success=true` で返ることがある。待つ時間に上限は無い。master がノードを止めると（STOP、再 DISCOVER）、fibril_can の runtime が呼び出しを破棄し、master も同じ呼び出しを失敗で返す。master を見失って SUSPENDED になっても、待ち続ける。判断の理由は [ADR 0018](adr/0018-md-motor-trigger-in-firmware.md) にある。
 

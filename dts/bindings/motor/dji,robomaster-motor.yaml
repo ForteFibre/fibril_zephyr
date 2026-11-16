@@ -16,10 +16,17 @@ properties:
     enum:
       - c610
       - c620
-    description: Motor controller model.
-  max-current:
+    description: |
+      Motor controller model. The driver converts between A and the
+      controller's current codes with it: a C620 takes and reports +-16384 for
+      +-20 A, a C610 +-10000 for +-10 A. A C610 reports no temperature.
+  max-current-ma:
     type: int
-    description: Maximum absolute current command accepted by this motor node.
+    description: |
+      Largest current, in mA, the driver commands either way; it must be
+      positive. Absent, the
+      model's full range applies (20000 for a C620, 10000 for a C610), and a
+      larger value is capped there too.
   gear-ratio:
     type: int
     description: Optional motor gear ratio metadata for higher-level control.

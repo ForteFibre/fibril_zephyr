@@ -286,8 +286,9 @@ ODrive の `active_errors` は `Clear_Errors` まで残るので、途中の hea
 ## API の振る舞い
 
 `motor_set_output()` は**どのモードでも `-ENOTSUP` を返す**。
-ODrive の指令範囲は ODrive 自身の設定で決まり、`enum motor_output_mode` に載せられる機種非依存の単位がない。
-指令は `odrive.h` を使う。
+motor クラスの単位（[ADR 0024](../adr/0024-motor-class-si-units.md)）に合わせるのは、後の変更である（ADR 0024 の決定 7）。
+それまで、指令は `odrive.h` を使う。
+`motor_get_info()` は、`output_modes` に 0 を、`counts_per_rev` に 65536 を返す。
 
 `motor_get_feedback()` が `valid_mask` に立てるのは `MOTOR_FEEDBACK_POSITION` と、
 `has-motor-thermistor` がある軸での `MOTOR_FEEDBACK_TEMPERATURE` だけである。

@@ -70,9 +70,9 @@ types:
       # this motor's own index, CanMotorMbed's default mapping.
       adc/port: { type: u8, default: 255 }
 
-      # feedback.current is the motor's raw current / 1000 (CanMotorMbed's
-      # read_current()), times the sign of `polarity`, minus `offset` and
-      # minus what the last calibrate_current_baseline measured.
+      # feedback.current is the motor's current in A, times the sign of
+      # `polarity`, minus `offset` (also in A) and minus what the last
+      # calibrate_current_baseline measured.
       current/polarity: { type: f32, default: 1.0 }
       current/offset: { type: f32, default: 0.0 }
       # How long calibrate_current_baseline averages, clamped to 0.05..1 s.

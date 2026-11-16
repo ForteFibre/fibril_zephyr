@@ -21,13 +21,14 @@ description: |
         fcan-ns = "motor{i}";
         motors = <&wheel_left>, <&wheel_right>;
         encoders = <&qdec_left>, <&qdec_right>;
+        duty-full-scale-ma = <12207 12207>;
         status = "okay";
     };
 
   The motors are driven with current commands (MOTOR_OUTPUT_MODE_CURRENT). The
-  control core works in duty, which `duty-full-scale` turns into the motor's
-  raw current unit; the motor's own limit (such as `max-current` on a
-  RoboMaster) still clamps the result.
+  control core works in duty, which `duty-full-scale-ma` turns into a current
+  per motor; the motor's own limit (such as `max-current-ma` on a RoboMaster)
+  still clamps the result.
 
   This node carries no reg and there is no reason to have two of them. The
   implementation reads the first enabled node only, so a second one is a
@@ -70,13 +71,16 @@ properties:
       on the paired motor, or the loops run away; flip the encoder
       (`invert-direction` on a qdec) rather than the motor to fix it.
 
-  duty-full-scale:
-    type: int
-    default: 10000
+  duty-full-scale-ma:
+    type: array
+    required: true
     description: |
-      The raw current command a duty of 1.0 maps to.
+      The current, in mA, a duty of 1.0 commands, one entry per entry of
+      `motors`.
 
-      10000 is what CanMotorMbed sent to a RoboMaster C610/C620 at duty 1.0,
-      so the gains tuned on that firmware keep their meaning here. It is
-      deliberately not the motor's `max-current`: lowering that limit should
-      cap the output, not rescale every gain.
+      To keep the gains tuned on CanMotorMbed, write the current its raw
+      command of 10000 meant on each motor: 12207 for a C620 (16384 codes are
+      20 A) and 10000 for a C610 (10000 codes are 10 A). It is deliberately
+      not the motor's `max-current-ma`: lowering that limit should cap the
+      output, not rescale every gain. There is no default because the right
+      value depends on the motor.

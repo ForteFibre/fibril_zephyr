@@ -11,7 +11,8 @@
 types:
   AdcPort:
     params:
-      # The level is |input| >= threshold, in the input's normalised units:
-      # 0..1 of full scale for an ADC channel, raw current / 10000 for a motor.
-      # 0.5 is CanMotorMbed's default.
+      # The level is |input| >= threshold, in the input's units: 0..1 of full
+      # scale for an ADC channel, the current in A for a motor. 0.5 is
+      # CanMotorMbed's default for an ADC channel; a motor port needs a
+      # threshold of its own, in A.
       threshold: { type: f32, default: 0.5 }

@@ -710,7 +710,8 @@ ZTEST(odrive, test_temperature_reaches_the_class_only_with_a_thermistor)
   zassert_ok(motor_get_feedback(axis1, &feedback));
   zassert_true((feedback.valid_mask & MOTOR_FEEDBACK_TEMPERATURE) != 0U,
                "an axis with a thermistor published no motor temperature");
-  zassert_equal(feedback.temperature, 31, "the class field does not carry the motor temperature");
+  zassert_within(feedback.temperature, 31.0F, 0.0001F,
+                 "the class field does not carry the motor temperature");
 
   struct odrive_feedback si;
 

@@ -1445,18 +1445,26 @@ static int robstride_motor_disable(const struct device * dev)
 }
 
 static int robstride_motor_set_output(
-  const struct device * dev, const enum motor_output_mode mode, const int16_t output)
+  const struct device * dev, enum motor_output_mode mode, float value)
 {
   ARG_UNUSED(dev);
   ARG_UNUSED(mode);
-  ARG_UNUSED(output);
+  ARG_UNUSED(value);
 
-  /*
-   * A RobStride target is an SI quantity whose range depends on the model, so
-   * there is no unit this class-wide call could carry without changing meaning
-   * between drivers. Use include/drivers/motor/robstride.h instead.
-   */
+  /* Not wired to the class units yet (doc/adr/0024 decision 7, #55); targets go
+   * through include/drivers/motor/robstride.h. */
   return -ENOTSUP;
+}
+
+static int robstride_motor_get_info(const struct device * dev, struct motor_info * info)
+{
+  ARG_UNUSED(dev);
+
+  info->output_modes = 0U;
+  /* The accumulator wraps once per 8 pi rad, four turns. */
+  info->counts_per_rev = (float)ROBSTRIDE_POSITION_WRAP / 4.0F;
+
+  return 0;
 }
 
 static int robstride_motor_get_feedback(const struct device * dev, void * feedback)
@@ -1477,8 +1485,9 @@ static int robstride_motor_get_feedback(const struct device * dev, void * feedba
   key = k_spin_lock(&data->lock);
 
   /*
-   * Only the two fields that mean the same thing here as in the other motor
-   * drivers are published, and only once a feedback frame has carried them: a
+   * Velocity and torque in the class units come with doc/adr/0024
+   * decision 7 (#55); robstride_get_feedback() reports them meanwhile. Position and
+   * temperature are published only once a feedback frame has carried them: a
    * motor that has answered nothing but a presence probe is online with no
    * measurement to its name.
    */
@@ -1487,7 +1496,7 @@ static int robstride_motor_get_feedback(const struct device * dev, void * feedba
   }
 
   out->position = data->position_counts;
-  out->temperature = (int16_t)data->temperature;
+  out->temperature = data->temperature;
   out->online = data->online;
   out->timestamp_ms = data->timestamp_ms;
 
@@ -1567,6 +1576,7 @@ static const struct motor_driver_api robstride_motor_api = {
   .disable = robstride_motor_disable,
   .set_output = robstride_motor_set_output,
   .get_feedback = robstride_motor_get_feedback,
+  .get_info = robstride_motor_get_info,
 };
 
 static bool robstride_is_motor(const struct device * dev)

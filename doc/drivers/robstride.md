@@ -255,12 +255,13 @@ rad = counts * (8 * PI / 65535) - 4 * PI
 ## API の振る舞い
 
 `motor_set_output()` は**どのモードでも `-ENOTSUP` を返す**。
-RobStride の指令は機種で範囲が変わる SI 量で、`enum motor_output_mode` に載せられる機種非依存の単位がない。
-指令は `robstride.h` を使う。
+motor クラスの単位（[ADR 0024](../adr/0024-motor-class-si-units.md)）に合わせるのは、後の変更である（ADR 0024 の決定 7）。
+それまで、指令は `robstride.h` を使う。
+`motor_get_info()` は、`output_modes` に 0 を、`counts_per_rev` に 65535 / 4（8π rad で 65535 カウント）を返す。
 
 `motor_get_feedback()` が `valid_mask` に立てるのは `MOTOR_FEEDBACK_POSITION` と `MOTOR_FEEDBACK_TEMPERATURE` だけである。
 速度、トルク、単回転位置は `robstride_get_feedback()` から SI で読む。
-温度は `motor_feedback` では ℃ の整数に丸まる（線路上は 0.1 ℃ 刻み）。
+温度は ℃ で、線路上の 0.1 ℃ 刻みのまま入る。
 
 **`valid_mask` が立つのは feedback フレームを 1 度でも受け取ってからである。**
 存在確認にしか答えていないモータは `online` だが測定値を 1 つも持たないので、`valid_mask` は 0 のままにする。
