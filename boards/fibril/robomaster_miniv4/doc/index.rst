@@ -137,6 +137,10 @@ ENC0 と ENC5、ENC1 と ENC3 は、それぞれ同じ timer（``timers3``、``t
 ENC4（``timers1``）と ENC5（``timers8``）は、ビルドが通ることだけを確かめてある。実機で数えたことはまだ無い。
 
 モータ CAN の RoboMaster ESC は ``dts/fibril/robomaster_miniv4/robomaster.dtsi`` が 8 台とも定義する（``rm_motor1``〜``rm_motor8`` と、ロータ角の ``rm_enc1``〜``rm_enc8``）。
+
+VESC を使う ``miniv4-md-vesc8`` は MOTCAN1（``fdcan3``）だけを 1 Mbit/s
+で有効にし、固定8論理slotを置く。物理 VESC CAN ID は devicetree には
+置かず、起動ごとに ROS parameter で割り当てる（:doc:`/drivers/vesc`）。
 繋がっていない ESC は feedback が無いだけなので、どのデプロイも同じ断片を使う（:doc:`/apps`）。
 
 アナログ入力のピン名も CanMotorMbed の ``PinNames.h`` に合わせてある。

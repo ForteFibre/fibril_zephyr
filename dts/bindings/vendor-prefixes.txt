@@ -4,3 +4,4 @@ dji	DJI
 fibril	ForteFibre
 odrive	ODrive Robotics
 robstride	RobStride
+vesc	VESC Project

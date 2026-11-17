@@ -1,0 +1,39 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include <fibril/robomaster_miniv4/vesc.dtsi>
+
+#ifdef FIBRIL_CLAIM_NODE_ROLE
+#error "NODE_ROLE claimed twice; miniv4-md-vesc8 is one claimant"
+#endif
+#define FIBRIL_CLAIM_NODE_ROLE 1
+
+#ifdef FIBRIL_CLAIM_FCAN_MD_MOTOR
+#error "FCAN_MD_MOTOR claimed twice; miniv4-md-vesc8 is one claimant"
+#endif
+#define FIBRIL_CLAIM_FCAN_MD_MOTOR 1
+
+/ {
+    fcan_md_motor: fcan-md-motor {
+        compatible = "fibril,fcan-md-motor";
+        fcan-ns = "motor{i}";
+        motors = <&vesc_motor0>, <&vesc_motor1>, <&vesc_motor2>, <&vesc_motor3>,
+                 <&vesc_motor4>, <&vesc_motor5>, <&vesc_motor6>, <&vesc_motor7>;
+        encoders = <&vesc_enc0>, <&vesc_enc1>, <&vesc_enc2>, <&vesc_enc3>,
+                   <&vesc_enc4>, <&vesc_enc5>, <&vesc_enc6>, <&vesc_enc7>;
+        /* Runtime VescMotor.max_current_a overrides these before a slot can
+         * become ready. The nonzero placeholders satisfy MdMotor's generic
+         * binding without creating a usable startup assignment. */
+        duty-full-scale-ma = <1000 1000 1000 1000 1000 1000 1000 1000>;
+        status = "okay";
+    };
+
+    fcan_vesc: fcan-vesc {
+        compatible = "fibril,fcan-vesc";
+        fcan-ns = "vesc_node.motor{i}";
+        motors = <&vesc_motor0>, <&vesc_motor1>, <&vesc_motor2>, <&vesc_motor3>,
+                 <&vesc_motor4>, <&vesc_motor5>, <&vesc_motor6>, <&vesc_motor7>;
+        status = "okay";
+    };
+};

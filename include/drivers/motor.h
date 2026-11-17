@@ -133,6 +133,11 @@ struct motor_info
   uint32_t output_modes;
   /** @ref motor_feedback.position counts per turn of the measured shaft. */
   float counts_per_rev;
+  /**
+   * Runtime current in A corresponding to control duty 1.0, or 0 when the
+   * control layer's build-time scale applies.
+   */
+  float current_scale_a;
 };
 
 /** @brief Driver API for enabling motor output. */

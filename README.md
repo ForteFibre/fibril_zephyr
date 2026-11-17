@@ -80,6 +80,7 @@ west flash
 | `miniv4-usb` | トランスポート | RoboMaster Mini V4 | 外部 CAN（FDCAN1）を gs_usb で PC に見せ、自ノードを同じ論理バスに載せる。FDCAN1 には fibril_can のデバイスだけを繋ぐ |
 | `miniv4-md-qdec4` | デプロイ | RoboMaster Mini V4 | RoboMaster 4 台を基板の qdec で閉ループ制御する（CanMotorMbed の後継） |
 | `miniv4-md-rotor8` | デプロイ | RoboMaster Mini V4 | RoboMaster 8 台をそれぞれのロータ角で閉ループ制御する（CanMotorMbed の `ROBOMASTER_ENCODER`） |
+| `miniv4-md-vesc8` | デプロイ | RoboMaster Mini V4 | MOTCAN1 の VESC 8 論理 slot を MdMotor で閉ループ制御する |
 | `miniv4-md-amt4` | デプロイ | RoboMaster Mini V4 | RoboMaster 4 台を、RS485 の AMT21x（0x10、0x14、0x54、0x04）で閉ループ制御する |
 | `miniv4-adc` | デプロイ | RoboMaster Mini V4 | キャリブレーションの入力を、基板で固定の 13 ポート（CanMotorMbed の並び、トルク 8、基板の ADC 5）で足す。どの `miniv4-md-*` にも重ねられる |
 
@@ -114,6 +115,7 @@ deb の codegen は版が runtime とずれることがある（`west.yml` は f
 | エンコーダ | DJI RoboMaster のロータ角 | [doc/drivers/robomaster_encoder.md](doc/drivers/robomaster_encoder.md) |
 | IMU | CruizCore R6093U ジャイロ（UART） | [doc/drivers/r6093u.md](doc/drivers/r6093u.md) |
 | モータ | DJI RoboMaster C610 / C620（CAN） | [doc/drivers/robomaster.md](doc/drivers/robomaster.md) |
+| モータ | VESC（CAN、実行時 CAN ID 割り当て） | [doc/drivers/vesc.md](doc/drivers/vesc.md) |
 | モータ | ODrive Pro / S1 / Micro（CAN） | [doc/drivers/odrive.md](doc/drivers/odrive.md) |
 | モータ | RobStride アクチュエータ（CAN） | [doc/drivers/robstride.md](doc/drivers/robstride.md) |
 

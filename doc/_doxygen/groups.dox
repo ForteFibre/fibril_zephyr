@@ -18,6 +18,7 @@
  * @brief Generic motor interface
  *
  * @defgroup motor_robomaster RoboMaster driver
+ * @defgroup motor_vesc VESC CAN driver
  * @ingroup motor_interface
  * @brief Rotor angle stream specific to the RoboMaster driver
  *

@@ -1,0 +1,14 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  VESC STATUS_4 single-turn position exposed as a continuous encoder. The
+  position is retained while offline and the first frame after reconnect is
+  unwrapped against the last received angle.
+compatible: "vesc,encoder"
+include: base.yaml
+properties:
+  motor:
+    type: phandle
+    required: true
+    description: vesc,motor logical slot whose STATUS_4 position is observed.

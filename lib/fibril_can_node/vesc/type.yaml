@@ -1,0 +1,83 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+types:
+  VescBus:
+    params:
+      feedback_timeout_ms: { type: u32, default: 100, min: 1 }
+      reconnect_frames: { type: u8, default: 3, min: 1, max: 10 }
+      command_period_us: { type: u32, default: 2000, min: 1000, max: 20000 }
+    topics:
+      observed_ids: &id_bitmap
+        dir: s2m
+        period_us: 500000
+        fields: { words: { type: u32, len: 8 } }
+        ros: { type: fibril_can_msgs/msg/VescIdBitmap }
+      online_ids: *id_bitmap
+      stale_ids: *id_bitmap
+      assigned_ids: *id_bitmap
+      unexpected_ids: *id_bitmap
+      missing_ids: *id_bitmap
+      diagnostics:
+        dir: s2m
+        period_us: 500000
+        fields:
+          rx_count: u32
+          tx_count: u32
+          tx_error_count: u32
+          invalid_rx_count: u32
+          config_error_count: u32
+        ros: { type: fibril_can_msgs/msg/VescBusDiag }
+
+  VescMotor:
+    params:
+      vesc_can_id: { type: i16, default: -1, min: -1, max: 255 }
+      max_current_a: { type: f32, default: 0.0, min: 0.0 }
+      # Zero inherits the VescBus common value.
+      feedback_timeout_ms: { type: u32, default: 0 }
+      reconnect_frames: { type: u8, default: 0, max: 10 }
+      command_period_us: { type: u32, default: 0, max: 20000 }
+    topics:
+      # Event frame; the periodic diagnostics below restores current state if
+      # this frame is lost.
+      state_change:
+        dir: s2m
+        period_us: 0
+        fields:
+          applied_can_id: i16
+          slot_configured: bool
+          online: bool
+          stale: bool
+          fault_code: u8
+        ros: { type: fibril_can_msgs/msg/VescMotorState }
+      diagnostics:
+        dir: s2m
+        period_us: 500000
+        fields:
+          requested_can_id: i16
+          applied_can_id: i16
+          slot_configured: bool
+          last_config_request_ok: bool
+          online: bool
+          stale: bool
+          last_rx_age_ms: u32
+          status_mask: u32
+          rx_count: u32
+          timeout_count: u32
+          reconnect_count: u32
+          can_id_change_count: u32
+          fault_code: u8
+          fault_count: u32
+        ros: { type: fibril_can_msgs/msg/VescMotorDiag }
+      telemetry:
+        dir: s2m
+        period_us: 500000
+        fields:
+          motor_current_a: f32
+          input_current_a: f32
+          erpm: f32
+          duty: f32
+          input_voltage_v: f32
+          fet_temperature_c: f32
+          motor_temperature_c: f32
+        ros: { type: fibril_can_msgs/msg/VescMotorTelemetry }

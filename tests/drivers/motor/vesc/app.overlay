@@ -1,0 +1,22 @@
+/ {
+  test_can: fake_can0 { compatible = "zephyr,fake-can"; };
+  vesc_bus: vesc-bus {
+    compatible = "vesc,bus";
+    #address-cells = <1>; #size-cells = <0>;
+    cans = <&test_can>;
+    absolute-max-current-ma = <10000>;
+    max-feedback-timeout-ms = <100>;
+    min-command-period-us = <1000>;
+    max-reconnect-frames = <10>;
+    controller-id = <255>;
+    motor0: motor@0 { compatible = "vesc,motor"; reg = <0>; };
+    motor1: motor@1 { compatible = "vesc,motor"; reg = <1>; };
+    motor2: motor@2 { compatible = "vesc,motor"; reg = <2>; };
+    motor3: motor@3 { compatible = "vesc,motor"; reg = <3>; };
+    motor4: motor@4 { compatible = "vesc,motor"; reg = <4>; };
+    motor5: motor@5 { compatible = "vesc,motor"; reg = <5>; };
+    motor6: motor@6 { compatible = "vesc,motor"; reg = <6>; };
+    motor7: motor@7 { compatible = "vesc,motor"; reg = <7>; };
+  };
+  enc0: encoder-0 { compatible = "vesc,encoder"; motor = <&motor0>; };
+};

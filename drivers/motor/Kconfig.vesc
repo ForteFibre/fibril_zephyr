@@ -1,0 +1,16 @@
+config MOTOR_VESC
+	bool "VESC CAN motor driver"
+	default y
+	depends on CAN
+	depends on DT_HAS_VESC_BUS_ENABLED
+	help
+	  Eight runtime-bindable VESC motor slots on one classic CAN bus.
+
+if MOTOR_VESC
+
+config MOTOR_VESC_WORK_PERIOD_US
+	int "VESC driver service period in microseconds"
+	default 1000
+	range 500 10000
+
+endif

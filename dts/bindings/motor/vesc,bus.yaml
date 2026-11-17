@@ -1,0 +1,45 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  One classic-CAN VESC bus with exactly eight logical motor slots. Physical
+  VESC CAN IDs are assigned at runtime; child reg values are logical slots.
+
+compatible: "vesc,bus"
+include: base.yaml
+bus: vesc
+
+properties:
+  "#address-cells": { required: true, const: 1 }
+  "#size-cells": { required: true, const: 0 }
+  cans:
+    type: phandle
+    required: true
+    description: Dedicated CAN controller used by this bus.
+  absolute-max-current-ma:
+    type: int
+    required: true
+    description: Absolute driver-side current clamp in mA for every slot.
+  max-feedback-timeout-ms:
+    type: int
+    required: true
+    description: Largest runtime feedback timeout accepted, in ms.
+  min-command-period-us:
+    type: int
+    required: true
+    description: Smallest runtime command resend period accepted, in us.
+  max-reconnect-frames:
+    type: int
+    default: 10
+    description: Largest consecutive STATUS count accepted for reconnection.
+  controller-id:
+    type: int
+    default: 255
+    description: Controller ID expected in selective-values fault replies.
+
+child-binding:
+  description: A logical slot. reg is 0 through 7, not a VESC CAN ID.
+  compatible: "vesc,motor"
+  include: base.yaml
+  properties:
+    reg: { required: true }

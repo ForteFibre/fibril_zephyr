@@ -171,6 +171,8 @@ struct motor_state
   bool epoch_known;
 
   bool encoder_valid;
+  bool motor_healthy;
+  bool motor_disabled;
 
   /* feedback.current, and whether the motor reported one this tick. */
   float current;
@@ -491,7 +493,7 @@ static bool apply_trajectory(uint8_t inst, const fcan_gen::mdmotor::trajectory &
  * tick means the master switched between them within a millisecond; the
  * trajectory point wins because it is the one that has to keep streaming.
  */
-static void apply_commands(uint8_t inst)
+static bool apply_commands(uint8_t inst)
 {
   struct motor_state * s = &states[inst];
   const fcan_gen::mdmotor m(inst);
@@ -521,6 +523,7 @@ static void apply_commands(uint8_t inst)
     s->command_age = 0;
     s->command_lapsed = false;
   }
+  return applied;
 }
 
 /*
@@ -558,7 +561,15 @@ static void watch_command(uint8_t inst)
  */
 static void drive(uint8_t inst, float duty)
 {
-  float current = duty * states[inst].sign * duty_full_scale_a[inst];
+  struct motor_info info{};
+  const float scale = ((motor_get_info(motors[inst], &info) == 0) &&
+                       (info.current_scale_a > 0.0F)) ?
+                        info.current_scale_a : duty_full_scale_a[inst];
+  float current = duty * states[inst].sign * scale;
+
+  if (!states[inst].motor_healthy || states[inst].motor_disabled) {
+    current = 0.0F;
+  }
 
   if (!std::isfinite(current)) {
     LOG_WRN_ONCE("motor %u: non-finite duty, output 0", inst);
@@ -583,7 +594,8 @@ static void publish_feedback(uint8_t inst)
 
   /* While the encoder is out, the last position and speed stay on the wire
    * and is_ready says not to trust them, as CanMotorMbed's status bits did. */
-  pub->is_ready = s->encoder_valid && !s->control.stalled();
+  pub->is_ready = s->encoder_valid && s->motor_healthy && !s->motor_disabled &&
+                  !s->control.stalled();
   pub->velocity = s->control.speed();
   pub->position = s->control.position();
   pub->output = s->control.duty();
@@ -678,6 +690,12 @@ static void update_current(uint8_t inst)
   /* `invert` flips the current with the rest of the feedback, as
    * can_md_controller did on the host. */
   s->current = s->sign * (current - s->baseline.offset());
+}
+
+static bool sample_motor_health(uint8_t inst)
+{
+  struct motor_feedback fb{};
+  return (motor_get_feedback(motors[inst], &fb) == 0) && fb.online && !fb.stale;
 }
 
 static void watch_trigger(uint8_t inst, float value, float threshold)
@@ -984,7 +1002,8 @@ static int md_motor_func_start(void)
      * motor can be enabled from the start, as CanMotorMbed drove it. */
     const int ret = motor_enable(motors[i]);
 
-    if (ret != 0) {
+    states[i].motor_disabled = ret != 0;
+    if ((ret != 0) && (ret != -EAGAIN)) {
       LOG_ERR("motor %u: enable failed (%d)", i, ret);
     }
   }
@@ -1015,6 +1034,15 @@ static void md_motor_func_tick(void)
     const motor_control::EncoderSample sample = sample_encoder(i);
 
     s->encoder_valid = sample.valid;
+    const bool was_healthy = s->motor_healthy;
+    s->motor_healthy = sample_motor_health(i);
+
+    if (was_healthy && !s->motor_healthy) {
+      LOG_WRN("motor %u: motor feedback lost, output stopped", i);
+      s->control.stop();
+      (void)motor_disable(motors[i]);
+      s->motor_disabled = true;
+    }
 
     /* Stopped on the edge only, and before the commands: a frame landing in
      * the same tick is the one that brings the node back to RUNNING, and
@@ -1023,7 +1051,14 @@ static void md_motor_func_tick(void)
       s->control.stop();
     }
 
-    apply_commands(i);
+    const bool new_command = apply_commands(i);
+    if (new_command && s->motor_healthy && s->motor_disabled) {
+      const int ret = motor_enable(motors[i]);
+      s->motor_disabled = ret != 0;
+      if (ret != 0) {
+        s->control.stop();
+      }
+    }
     watch_command(i);
     drive(i, s->control.update(sample));
     update_current(i);

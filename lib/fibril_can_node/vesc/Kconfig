@@ -1,0 +1,11 @@
+config FIBRIL_CAN_NODE_VESC
+	bool "VESC runtime configuration and diagnostics"
+	default y
+	depends on MOTOR_VESC
+	depends on DT_HAS_FIBRIL_FCAN_VESC_ENABLED
+
+config FIBRIL_CAN_NODE_VESC_MAX
+	int
+	default 8
+	range 8 8
+	depends on FIBRIL_CAN_NODE_VESC

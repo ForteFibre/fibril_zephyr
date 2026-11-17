@@ -24,6 +24,7 @@ API リファレンスは Doxygen が別に生成する。
    drivers/r6093u
    drivers/robomaster
    drivers/robomaster_encoder
+   drivers/vesc
    drivers/robstride
 
 .. toctree::
