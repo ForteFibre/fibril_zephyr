@@ -26,7 +26,7 @@ static uint32_t packet_can_id(uint8_t packet_id, uint8_t vesc_can_id)
 
 int vesc_encode_set_current(uint8_t vesc_can_id, float current_a, struct can_frame * frame)
 {
-  if ((frame == NULL) || !isfinite(current_a)) {
+  if ((frame == NULL) || (vesc_can_id > VESC_CAN_ID_MAX_MOTOR) || !isfinite(current_a)) {
     return -EINVAL;
   }
 
@@ -44,7 +44,8 @@ int vesc_encode_set_current(uint8_t vesc_can_id, float current_a, struct can_fra
 int vesc_encode_get_fault(
   uint8_t vesc_can_id, uint8_t controller_id, struct can_frame * frame)
 {
-  if (frame == NULL) return -EINVAL;
+  if ((frame == NULL) || (vesc_can_id > VESC_CAN_ID_MAX_MOTOR) ||
+      (controller_id != VESC_CAN_ID_CONTROLLER)) return -EINVAL;
   *frame = (struct can_frame){
     .id = packet_can_id(VESC_CAN_PACKET_PROCESS_SHORT_BUFFER, vesc_can_id),
     .flags = CAN_FRAME_IDE,

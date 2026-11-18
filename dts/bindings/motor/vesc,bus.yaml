@@ -34,11 +34,12 @@ properties:
     description: Largest consecutive STATUS count accepted for reconnection.
   controller-id:
     type: int
-    default: 255
+    required: true
+    const: 254
     description: >
       This node's source ID in selective-values requests and the destination
-      ID in replies. A motor slot may not use this ID; 255 is the VESC
-      broadcast ID and is also forbidden for motor slots.
+      ID in replies. ID 254 is reserved for the MiniV4 controller; 255 is the
+      VESC broadcast ID. Neither ID may be assigned to a motor slot.
 
 child-binding:
   description: A logical slot. reg is 0 through 7, not a VESC CAN ID.

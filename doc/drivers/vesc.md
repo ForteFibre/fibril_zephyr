@@ -27,7 +27,9 @@ The selected controller is the vendor-described **VESC CAN FOC ESC** for a 6S
 `cb79df8960f77fcdf368f3b921d24d5a3ed86345`. That source confirms the 29-bit
 ID layout, ID 255 as broadcast, SET_CURRENT ID 1 with signed A x1000,
 STATUS/4/5 layouts, the selective fault reply, and a configurable command
-timeout. Motor IDs are therefore 0--254, excluding this node's controller ID.
+timeout. This deployment reserves ID 254 as the MiniV4 fault-reply destination
+and never emits broadcast commands. Runtime motor IDs are therefore 0--253;
+254 and 255 may be observed in diagnostics but are never assigned or controlled.
 
 STATUS_4 PID position is `mc_interface_get_pid_pos_now()` in degrees x50 and
 is normalized to one revolution. With a configured encoder, the firmware

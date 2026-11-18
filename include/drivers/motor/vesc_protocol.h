@@ -15,6 +15,8 @@ extern "C" {
 
 /* Protocol values are isolated here and follow vedderb/bldc
  * cb79df8960f77fcdf368f3b921d24d5a3ed86345. */
+#define VESC_CAN_ID_MAX_MOTOR 253U
+#define VESC_CAN_ID_CONTROLLER 254U
 #define VESC_CAN_ID_BROADCAST 255U
 
 enum vesc_can_packet_id {

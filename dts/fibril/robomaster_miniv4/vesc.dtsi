@@ -18,6 +18,7 @@
         #address-cells = <1>;
         #size-cells = <0>;
         cans = <&fdcan3>;
+        controller-id = <254>;
 
         /* TODO(hardware): The selected VESC CAN FOC ESC manual recommends
          * 60 A absolute for M3508 but 30 A for M2006. This broad board guard
