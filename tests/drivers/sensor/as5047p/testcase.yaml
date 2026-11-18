@@ -1,0 +1,9 @@
+tests:
+  drivers.sensor.as5047p:
+    tags:
+      - drivers
+      - sensor
+      - spi
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
