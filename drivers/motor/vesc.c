@@ -16,9 +16,12 @@
 #include <zephyr/drivers/can.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
 LOG_MODULE_REGISTER(motor_vesc, CONFIG_MOTOR_LOG_LEVEL);
+
+#define VESC_MAX_COMMAND_PERIOD_US 20000U
 
 struct vesc_bus_config {
   const struct device * can_dev;
@@ -39,6 +42,10 @@ struct vesc_slot_data {
   struct vesc_slot_diagnostics diag;
   float command_a;
   int64_t last_rx_ms;
+  int64_t last_status_ms;
+  int64_t last_status_4_ms;
+  int64_t last_status_5_ms;
+  int64_t last_fault_rx_ms;
   int64_t last_tx_us;
   int64_t last_fault_request_ms;
   uint8_t reconnect_countdown;
@@ -59,6 +66,7 @@ struct vesc_bus_data {
   uint32_t observed_timeout_ms;
   struct k_spinlock lock;
   struct k_work_delayable work;
+  atomic_t tx_complete_error_count;
   bool can_started;
 };
 
@@ -75,8 +83,10 @@ static inline bool bitmap_test(const uint32_t bitmap[VESC_ID_BITMAP_WORDS], uint
 static void tx_done(const struct device * dev, int error, void * user_data)
 {
   ARG_UNUSED(dev);
-  ARG_UNUSED(error);
-  ARG_UNUSED(user_data);
+  struct vesc_bus_data * data = user_data;
+  if ((error != 0) && (data != NULL)) {
+    atomic_inc(&data->tx_complete_error_count);
+  }
 }
 
 static int slot_index(const struct device * motor, struct vesc_bus_data ** bus_data)
@@ -102,7 +112,7 @@ static int send_current(const struct device * bus, uint8_t id, float current_a)
   struct can_frame frame;
   int ret = vesc_encode_set_current(id, current_a, &frame);
   if (ret == 0) {
-    ret = can_send(config->can_dev, &frame, K_NO_WAIT, tx_done, NULL);
+    ret = can_send(config->can_dev, &frame, K_NO_WAIT, tx_done, data);
   }
   if (ret == 0) {
     data->diag.tx_count++;
@@ -119,7 +129,7 @@ static void send_fault_request(const struct device * bus, uint8_t id)
   struct can_frame frame;
   int ret = vesc_encode_get_fault(id, config->controller_id, &frame);
   if (ret == 0) {
-    ret = can_send(config->can_dev, &frame, K_NO_WAIT, tx_done, NULL);
+    ret = can_send(config->can_dev, &frame, K_NO_WAIT, tx_done, data);
   }
   if (ret == 0) data->diag.tx_count++; else data->diag.tx_error_count++;
 }
@@ -159,8 +169,12 @@ static void note_rx(
   if (slot != NULL) {
     const bool was_online = slot->diag.online;
     slot->diag.status_mask |= mask;
+    slot->diag.fresh_status_mask |= mask;
     slot->diag.rx_count++;
     if (connection_status) {
+      if (slot->seen && ((now_ms - slot->last_rx_ms) > slot->config.feedback_timeout_ms)) {
+        slot->reconnect_countdown = 0U;
+      }
       slot->seen = true;
       slot->last_rx_ms = now_ms;
       slot->diag.stale = false;
@@ -200,6 +214,7 @@ static void vesc_rx(const struct device * can_dev, struct can_frame * frame, voi
   if (vesc_decode_status(frame, &status)) {
     note_rx(bus, status.vesc_can_id, VESC_STATUS_MASK_STATUS, now_ms, true, &slot);
     if (slot != NULL) {
+      slot->last_status_ms = now_ms;
       slot->diag.erpm = status.erpm;
       slot->diag.motor_current_a = status.motor_current_a;
       slot->diag.duty = status.duty;
@@ -207,23 +222,26 @@ static void vesc_rx(const struct device * can_dev, struct can_frame * frame, voi
   } else if (vesc_decode_status_4(frame, &status4)) {
     note_rx(bus, status4.vesc_can_id, VESC_STATUS_MASK_STATUS_4, now_ms, true, &slot);
     if (slot != NULL) {
+      slot->last_status_4_ms = now_ms;
       slot->diag.fet_temperature_c = status4.fet_temperature_c;
       slot->diag.motor_temperature_c = status4.motor_temperature_c;
       slot->diag.input_current_a = status4.input_current_a;
       if (slot->position_listener != NULL) {
         slot->position_listener(
-          data->slots[slot - data->slot_data], status4.position_counts, cycle,
+          data->slots[slot - data->slot_data], status4.position_counts, cycle, false,
           slot->position_user_data);
       }
     }
   } else if (vesc_decode_status_5(frame, &status5)) {
     note_rx(bus, status5.vesc_can_id, VESC_STATUS_MASK_STATUS_5, now_ms, true, &slot);
     if (slot != NULL) {
+      slot->last_status_5_ms = now_ms;
       slot->diag.input_voltage_v = status5.input_voltage_v;
     }
   } else if (vesc_decode_fault_status(frame, config->controller_id, &fault)) {
     note_rx(bus, fault.vesc_can_id, VESC_STATUS_MASK_FAULT, now_ms, false, &slot);
     if (slot != NULL) {
+      slot->last_fault_rx_ms = now_ms;
       if ((fault.fault_code != 0U) && (slot->diag.fault_code == 0U)) {
         slot->diag.fault_count++;
       }
@@ -290,22 +308,39 @@ static void service_work(struct k_work * work)
     }
     const bool timed_out = slot->seen &&
       ((now_ms - slot->last_rx_ms) > slot->config.feedback_timeout_ms);
-    if (timed_out && slot->diag.online) {
+    if (timed_out && !slot->diag.stale) {
+      const bool was_online = slot->diag.online;
       slot->diag.online = false;
       slot->diag.stale = true;
       slot->diag.timeout_count++;
       slot->reconnect_countdown = 0U;
-      slot->awaiting_reconnect = true;
-      stop_slot(bus, slot);
+      slot->awaiting_reconnect = was_online;
+      if (was_online) stop_slot(bus, slot);
     }
     slot->diag.last_rx_age_ms = slot->seen ?
       (uint32_t)MIN(now_ms - slot->last_rx_ms, (int64_t)UINT32_MAX) : UINT32_MAX;
+    slot->diag.fresh_status_mask = 0U;
+#define UPDATE_PACKET_FRESH(mask, member, age_member)                                           \
+    do {                                                                                        \
+      if ((slot->diag.status_mask & (mask)) != 0U) {                                            \
+        const int64_t age = now_ms - slot->member;                                              \
+        slot->diag.age_member = (uint32_t)MIN(age, (int64_t)UINT32_MAX);                        \
+        if (age <= slot->config.feedback_timeout_ms) slot->diag.fresh_status_mask |= (mask);    \
+      } else {                                                                                  \
+        slot->diag.age_member = UINT32_MAX;                                                     \
+      }                                                                                         \
+    } while (false)
+    UPDATE_PACKET_FRESH(VESC_STATUS_MASK_STATUS, last_status_ms, status_age_ms);
+    UPDATE_PACKET_FRESH(VESC_STATUS_MASK_STATUS_4, last_status_4_ms, status_4_age_ms);
+    UPDATE_PACKET_FRESH(VESC_STATUS_MASK_STATUS_5, last_status_5_ms, status_5_age_ms);
+    UPDATE_PACKET_FRESH(VESC_STATUS_MASK_FAULT, last_fault_rx_ms, fault_age_ms);
+#undef UPDATE_PACKET_FRESH
     if ((now_us - slot->last_tx_us) >= slot->config.command_period_us) {
       float command = 0.0F;
       if (slot->enabled && slot->diag.online && !slot->diag.stale &&
           (slot->diag.fault_code == 0U)) {
-        command = CLAMP(slot->command_a, -config->absolute_max_current_a,
-                        config->absolute_max_current_a);
+        const float limit = MIN(slot->config.max_current_a, config->absolute_max_current_a);
+        command = CLAMP(slot->command_a, -limit, limit);
       }
       (void)send_current(bus, (uint8_t)slot->config.vesc_can_id, command);
       slot->last_tx_us = now_us;
@@ -356,8 +391,9 @@ static int motor_set_output_impl(
   if (!isfinite(value)) return -EINVAL;
   config = ((const struct vesc_motor_config *)motor->config)->bus->config;
   k_spinlock_key_t key = k_spin_lock(&data->lock);
-  data->slot_data[idx].command_a = CLAMP(value, -config->absolute_max_current_a,
-                                         config->absolute_max_current_a);
+  const float limit = MIN(data->slot_data[idx].config.max_current_a,
+                          config->absolute_max_current_a);
+  data->slot_data[idx].command_a = CLAMP(value, -limit, limit);
   k_spin_unlock(&data->lock, key);
   return 0;
 }
@@ -371,7 +407,7 @@ static int motor_get_feedback_impl(const struct device * motor, void * feedback_
   k_spinlock_key_t key = k_spin_lock(&data->lock);
   const struct vesc_slot_data * slot = &data->slot_data[idx];
   *feedback = (struct motor_feedback){
-    .valid_mask = (slot->diag.status_mask & VESC_STATUS_MASK_STATUS) ?
+    .valid_mask = (slot->diag.fresh_status_mask & VESC_STATUS_MASK_STATUS) ?
       (MOTOR_FEEDBACK_CURRENT | MOTOR_FEEDBACK_VELOCITY) : 0U,
     .current = slot->diag.motor_current_a,
     /* ERPM to mechanical rad/s needs pole pairs, which the selected VESC and
@@ -380,7 +416,7 @@ static int motor_get_feedback_impl(const struct device * motor, void * feedback_
     .online = slot->diag.slot_configured && slot->diag.online &&
               (slot->diag.fault_code == 0U),
     .stale = slot->diag.stale,
-    .timestamp_ms = slot->last_rx_ms,
+    .timestamp_ms = slot->last_status_ms,
   };
   k_spin_unlock(&data->lock, key);
   return 0;
@@ -430,7 +466,8 @@ int vesc_configure_slot(
     (requested->feedback_timeout_ms <= limits->max_feedback_timeout_ms) &&
     (requested->reconnect_frames > 0U) &&
     (requested->reconnect_frames <= limits->max_reconnect_frames) &&
-    (requested->command_period_us >= limits->min_command_period_us);
+    (requested->command_period_us >= limits->min_command_period_us) &&
+    (requested->command_period_us <= VESC_MAX_COMMAND_PERIOD_US);
   for (uint8_t i = 0; valid && (i < VESC_MOTOR_SLOT_COUNT); ++i) {
     if ((i != idx) && (requested->vesc_can_id >= 0) &&
         (data->slot_data[i].config.vesc_can_id == requested->vesc_can_id)) {
@@ -446,6 +483,9 @@ int vesc_configure_slot(
   const int16_t old_id = slot->config.vesc_can_id;
   if (old_id != requested->vesc_can_id) {
     stop_slot(bus, slot);
+    if (slot->position_listener != NULL) {
+      slot->position_listener(motor, 0, k_cycle_get_32(), true, slot->position_user_data);
+    }
     slot->diag.can_id_change_count++;
     slot->diag.online = false;
     slot->diag.stale = false;
@@ -453,6 +493,7 @@ int vesc_configure_slot(
     slot->reconnect_countdown = 0U;
     slot->awaiting_reconnect = false;
     slot->diag.status_mask = 0U;
+    slot->diag.fresh_status_mask = 0U;
     slot->diag.fault_code = 0U;
   }
   slot->config = *requested;
@@ -510,6 +551,9 @@ int vesc_get_bus_diagnostics(
   if ((idx < 0) || (diagnostics == NULL)) return -EINVAL;
   k_spinlock_key_t key = k_spin_lock(&data->lock);
   *diagnostics = data->diag;
+  diagnostics->tx_complete_error_count =
+    (uint32_t)atomic_get(&data->tx_complete_error_count);
+  diagnostics->tx_error_count += diagnostics->tx_complete_error_count;
   k_spin_unlock(&data->lock, key);
   return 0;
 }

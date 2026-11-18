@@ -11,10 +11,20 @@ accepted. IDs are never discovered into slots automatically.
 `vesc_protocol.c`, separately from connection and safety state.
 
 Any valid STATUS packet contributes to connection state. A slot becomes online
-after `reconnect_frames` consecutive packets and becomes stale after
-`feedback_timeout_ms`. Timeout, a nonzero queried fault, unassignment, or ID
-change sends 0 A and disables the slot. Reconnection alone does not re-enable
-it: `MdMotor` must receive a new target and call `motor_enable()`.
+after `reconnect_frames` packets without a `feedback_timeout_ms` gap and becomes
+stale after that timeout. Each STATUS kind also has its own age and freshness;
+in particular, other traffic cannot keep a missing STATUS_4 position valid.
+Timeout, a nonzero queried fault, unassignment, or ID change sends 0 A and
+disables the slot. Reconnection alone does not re-enable it: `MdMotor` must
+receive a new target and call `motor_enable()`.
+
+Velocity, position, and trajectory targets stop as soon as STATUS_4 becomes
+stale and require a new target after position feedback returns. An open-loop
+DUTY target maps to current and remains allowed without encoder feedback. A CAN
+DUTY target does not make `is_ready` true while the encoder is unavailable,
+because the published position and velocity are not valid. A CAN ID change
+invalidates the old motor's accumulated encoder position; the new motor needs
+two STATUS_4 samples before closed-loop control has velocity again.
 
 STATUS_4 position uses 18000 counts/revolution according to
 `ForteFibre/ros_vesc@716a9dc`. The encoder shim resolves each delta by the
@@ -36,6 +46,13 @@ is normalized to one revolution. With a configured encoder, the firmware
 derives it from the encoder angle and applies encoder inversion, motor
 direction, and PID offset. It is the motor-side sensor angle; any gearbox/output
 shaft conversion remains outside the VESC protocol layer.
+
+`max_current_a` is both the DUTY 1.0 scale and a slot-local final current clamp;
+the devicetree `absolute-max-current-ma` remains an independent broader guard.
+Diagnostics report ages and fresh masks for STATUS, STATUS_4, STATUS_5, and the
+selective fault reply. CAN transmit-completion errors are counted separately
+from queueing errors and are also included in the aggregate transmit error
+count.
 
 > **Hardware TODO:** verify on the selected controller that its flashed image
 > matches the referenced firmware and measure STATUS periods, jitter, loss,

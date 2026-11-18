@@ -27,6 +27,7 @@ static can_rx_callback_t rx_callback;
 static void * rx_user_data;
 static struct can_frame captured[CAPTURE_MAX];
 static size_t captured_count;
+static int tx_complete_error;
 DEFINE_FFF_GLOBALS;
 
 static int add_filter(const struct device * dev, can_rx_callback_t callback, void * user_data,
@@ -44,7 +45,7 @@ static int send_frame(const struct device * dev, const struct can_frame * frame,
   if (dev != can_dev) return -EINVAL;
   if (captured_count < CAPTURE_MAX) captured[captured_count] = *frame;
   captured_count++;
-  if (callback != NULL) callback(dev, 0, user_data);
+  if (callback != NULL) callback(dev, tx_complete_error, user_data);
   return 0;
 }
 
@@ -112,6 +113,7 @@ static const struct can_frame * last_for(uint8_t id)
 static void before(void * fixture)
 {
   ARG_UNUSED(fixture); install_fakes(); captured_count = 0;
+  tx_complete_error = 0;
   struct vesc_slot_runtime_config off = config(-1, 1.0F, 20, 3);
   zassert_ok(vesc_configure_slot(motor0, &off));
   zassert_ok(vesc_configure_slot(motor1, &off));
@@ -172,12 +174,14 @@ ZTEST(vesc, test_assignment_rejects_duplicate_and_invalid_without_losing_old_con
   zassert_equal(vesc_configure_slot(motor0, &b), -EINVAL);
   b = config(38, 11.0F, 20, 3);
   zassert_equal(vesc_configure_slot(motor0, &b), -EINVAL);
+  b = config(38, 5.0F, 20, 3); b.command_period_us = 20001;
+  zassert_equal(vesc_configure_slot(motor0, &b), -EINVAL);
   struct vesc_slot_runtime_config applied;
   zassert_ok(vesc_get_slot_config(motor0, &applied));
   zassert_equal(applied.vesc_can_id, 37);
   struct vesc_bus_diagnostics diag;
   zassert_ok(vesc_get_bus_diagnostics(motor0, &diag));
-  zassert_equal(diag.config_error_count, before_diag.config_error_count + 5);
+  zassert_equal(diag.config_error_count, before_diag.config_error_count + 6);
 }
 
 ZTEST(vesc, test_id_change_sends_zero_to_old_id_and_unassigned_sends_nothing)
@@ -196,6 +200,25 @@ ZTEST(vesc, test_id_change_sends_zero_to_old_id_and_unassigned_sends_nothing)
   struct vesc_slot_diagnostics after_diag;
   zassert_ok(vesc_get_slot_diagnostics(motor0, &after_diag));
   zassert_equal(after_diag.can_id_change_count, before_diag.can_id_change_count + 2);
+}
+
+ZTEST(vesc, test_id_change_invalidates_the_old_motors_encoder_position)
+{
+  struct vesc_slot_runtime_config c = config(37, 5.0F, 20, 1);
+  zassert_ok(vesc_configure_slot(motor0, &c));
+  inject_position(37, 100); inject_position(37, 110);
+  struct encoder_feedback fb;
+  zassert_ok(encoder_get_feedback(enc0, &fb));
+  c.vesc_can_id = 38;
+  zassert_ok(vesc_configure_slot(motor0, &c));
+  zassert_equal(encoder_get_feedback(enc0, &fb), -ENODATA);
+  inject_position(38, 9000);
+  zassert_ok(encoder_get_feedback(enc0, &fb));
+  zassert_equal(fb.valid_mask & ENCODER_FEEDBACK_VELOCITY, 0U,
+                "one sample invented velocity for the new motor");
+  inject_position(38, 9010);
+  zassert_ok(encoder_get_feedback(enc0, &fb));
+  zassert_equal(fb.position, 9010);
 }
 
 ZTEST(vesc, test_unknown_id_is_observed_but_not_controlled_and_bitmaps_match)
@@ -227,6 +250,38 @@ ZTEST(vesc, test_encoder_keeps_position_across_timeout_and_reconnect)
   zassert_ok(encoder_get_feedback(enc0, &fb)); zassert_equal(fb.position, 18020);
 }
 
+ZTEST(vesc, test_status_4_freshness_expires_while_other_status_keeps_motor_online)
+{
+  struct vesc_slot_runtime_config c = config(37, 5.0F, 10, 1);
+  zassert_ok(vesc_configure_slot(motor0, &c));
+  inject_position(37, 100); inject_position(37, 110);
+  struct encoder_feedback fb;
+  zassert_ok(encoder_get_feedback(enc0, &fb));
+  k_msleep(12); inject_status(37); k_msleep(2);
+  zassert_equal(encoder_get_feedback(enc0, &fb), -EAGAIN);
+  struct motor_feedback motor_fb;
+  zassert_ok(motor_get_feedback(motor0, &motor_fb));
+  zassert_true(motor_fb.online);
+  struct vesc_slot_diagnostics d;
+  zassert_ok(vesc_get_slot_diagnostics(motor0, &d));
+  zassert_equal(d.fresh_status_mask & VESC_STATUS_MASK_STATUS_4, 0U);
+  zassert_true(d.fresh_status_mask & VESC_STATUS_MASK_STATUS);
+  inject_position(37, 120);
+  zassert_ok(encoder_get_feedback(enc0, &fb));
+}
+
+ZTEST(vesc, test_reconnect_frames_do_not_accumulate_across_a_timeout)
+{
+  struct vesc_slot_runtime_config c = config(37, 5.0F, 10, 3);
+  zassert_ok(vesc_configure_slot(motor0, &c));
+  inject_status(37);
+  k_msleep(12);
+  inject_status(37); inject_status(37);
+  zassert_equal(motor_enable(motor0), -EAGAIN);
+  inject_status(37);
+  zassert_ok(motor_enable(motor0));
+}
+
 ZTEST(vesc, test_timeout_reconnect_requires_frames_and_new_enable)
 {
   struct vesc_slot_runtime_config c = config(37, 5.0F, 30, 3);
@@ -236,9 +291,9 @@ ZTEST(vesc, test_timeout_reconnect_requires_frames_and_new_enable)
   inject_status(37); inject_status(37); zassert_equal(motor_enable(motor0), -EAGAIN);
   inject_status(37); zassert_ok(motor_enable(motor0));
   zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 12.0F)); k_msleep(3);
-  zassert_equal(frame_current(last_for(37)), 10000, "absolute driver current clamp");
+  zassert_equal(frame_current(last_for(37)), 5000, "slot current clamp");
   zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, -12.0F)); k_msleep(3);
-  zassert_equal(frame_current(last_for(37)), -10000, "negative current clamp");
+  zassert_equal(frame_current(last_for(37)), -5000, "negative slot current clamp");
   k_msleep(35); zassert_equal(frame_current(last_for(37)), 0);
   struct vesc_bus_diagnostics bus_diag;
   zassert_ok(vesc_get_bus_diagnostics(motor0, &bus_diag));
@@ -256,6 +311,19 @@ ZTEST(vesc, test_timeout_reconnect_requires_frames_and_new_enable)
   zassert_equal(slot_diag.reconnect_count, before_diag.reconnect_count + 1);
 }
 
+ZTEST(vesc, test_async_transmit_errors_are_counted)
+{
+  struct vesc_slot_runtime_config c = config(37, 5.0F, 20, 1);
+  struct vesc_bus_diagnostics before_diag;
+  zassert_ok(vesc_get_bus_diagnostics(motor0, &before_diag));
+  tx_complete_error = -EIO;
+  zassert_ok(vesc_configure_slot(motor0, &c));
+  k_msleep(3);
+  struct vesc_bus_diagnostics after_diag;
+  zassert_ok(vesc_get_bus_diagnostics(motor0, &after_diag));
+  zassert_true(after_diag.tx_complete_error_count > before_diag.tx_complete_error_count);
+}
+
 ZTEST(vesc, test_fault_stops_and_is_counted)
 {
   struct vesc_slot_runtime_config c = config(37, 5.0F, 20, 1);
@@ -265,4 +333,6 @@ ZTEST(vesc, test_fault_stops_and_is_counted)
   zassert_equal(frame_current(last_for(37)), 0);
   struct vesc_slot_diagnostics d; zassert_ok(vesc_get_slot_diagnostics(motor0, &d));
   zassert_equal(d.fault_code, 3); zassert_equal(d.fault_count, 1);
+  zassert_true(d.fresh_status_mask & VESC_STATUS_MASK_FAULT);
+  zassert_true(d.fault_age_ms < UINT32_MAX);
 }

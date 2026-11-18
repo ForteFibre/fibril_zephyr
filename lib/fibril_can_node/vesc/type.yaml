@@ -25,6 +25,7 @@ types:
           rx_count: u32
           tx_count: u32
           tx_error_count: u32
+          tx_complete_error_count: u32
           invalid_rx_count: u32
           config_error_count: u32
         ros: { type: fibril_can_msgs/msg/VescBusDiag }
@@ -70,6 +71,16 @@ types:
           fault_code: u8
           fault_count: u32
         ros: { type: fibril_can_msgs/msg/VescMotorDiag }
+      packet_health:
+        dir: s2m
+        period_us: 500000
+        fields:
+          fresh_status_mask: u32
+          status_age_ms: u32
+          status_4_age_ms: u32
+          status_5_age_ms: u32
+          fault_age_ms: u32
+        ros: { type: fibril_can_msgs/msg/VescPacketHealth }
       telemetry:
         dir: s2m
         period_us: 500000

@@ -77,6 +77,7 @@ static void publish_bus()
   if (auto p = fcan_gen::vescbus(0).publish_missing_ids()) copy_words(*p, d.missing_ids);
   if (auto p = fcan_gen::vescbus(0).publish_diagnostics()) {
     p->rx_count = d.rx_count; p->tx_count = d.tx_count; p->tx_error_count = d.tx_error_count;
+    p->tx_complete_error_count = d.tx_complete_error_count;
     p->invalid_rx_count = d.invalid_rx_count; p->config_error_count = d.config_error_count;
   }
 }
@@ -101,6 +102,11 @@ static void publish_slot(uint8_t i)
     p->status_mask = d.status_mask; p->rx_count = d.rx_count; p->timeout_count = d.timeout_count;
     p->reconnect_count = d.reconnect_count; p->can_id_change_count = d.can_id_change_count;
     p->fault_code = d.fault_code; p->fault_count = d.fault_count;
+  }
+  if (auto p = fcan_gen::vescmotor(i).publish_packet_health()) {
+    p->fresh_status_mask = d.fresh_status_mask; p->status_age_ms = d.status_age_ms;
+    p->status_4_age_ms = d.status_4_age_ms; p->status_5_age_ms = d.status_5_age_ms;
+    p->fault_age_ms = d.fault_age_ms;
   }
   if (auto p = fcan_gen::vescmotor(i).publish_telemetry()) {
     p->motor_current_a = d.motor_current_a; p->input_current_a = d.input_current_a;

@@ -31,12 +31,22 @@ struct vesc_encoder_data {
 };
 
 static void on_position(
-  const struct device * motor, int32_t position_counts, uint32_t cycle, void * user_data)
+  const struct device * motor, int32_t position_counts, uint32_t cycle, bool reset,
+  void * user_data)
 {
   const struct device * dev = user_data;
   struct vesc_encoder_data * data = dev->data;
   k_spinlock_key_t key = k_spin_lock(&data->lock);
   ARG_UNUSED(motor);
+
+  if (reset) {
+    data->valid = false;
+    data->has_interval = false;
+    data->feedback.valid_mask = 0U;
+    data->feedback.position_epoch++;
+    k_spin_unlock(&data->lock, key);
+    return;
+  }
 
   if (!data->valid) {
     data->position = position_counts;
@@ -73,6 +83,7 @@ static int get_feedback(const struct device * dev, void * feedback_ptr)
   struct vesc_encoder_data * data = dev->data;
   struct encoder_feedback * feedback = feedback_ptr;
   struct motor_feedback motor_feedback;
+  struct vesc_slot_diagnostics diagnostics;
   if (feedback == NULL) return -EINVAL;
   k_spinlock_key_t key = k_spin_lock(&data->lock);
   if (!data->valid) {
@@ -82,10 +93,12 @@ static int get_feedback(const struct device * dev, void * feedback_ptr)
   *feedback = data->feedback;
   k_spin_unlock(&data->lock, key);
   if (motor_get_feedback(config->motor, &motor_feedback) != 0) return -EIO;
+  if (vesc_get_slot_diagnostics(config->motor, &diagnostics) != 0) return -EIO;
   feedback->online = motor_feedback.online;
   feedback->stale = motor_feedback.stale;
   if (!feedback->online) return -EIO;
   if (feedback->stale) return -EAGAIN;
+  if ((diagnostics.fresh_status_mask & VESC_STATUS_MASK_STATUS_4) == 0U) return -EAGAIN;
   return 0;
 }
 

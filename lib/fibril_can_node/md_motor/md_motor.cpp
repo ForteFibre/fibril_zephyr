@@ -165,6 +165,8 @@ struct motor_state
   /* The timeout has stopped the motor and waits for a new command, so it
    * stops it once rather than on every tick. */
   bool command_lapsed;
+  /* A finite target received while its required feedback was available. */
+  bool command_valid;
 
   /* The encoder's accumulator generation, to notice a rebuilt position. */
   uint32_t position_epoch;
@@ -522,6 +524,7 @@ static bool apply_commands(uint8_t inst)
   if (applied) {
     s->command_age = 0;
     s->command_lapsed = false;
+    s->command_valid = true;
   }
   return applied;
 }
@@ -550,6 +553,7 @@ static void watch_command(uint8_t inst)
   }
 
   s->command_lapsed = true;
+  s->command_valid = false;
   s->control.stop();
 }
 
@@ -592,10 +596,10 @@ static void publish_feedback(uint8_t inst)
     return;
   }
 
-  /* While the encoder is out, the last position and speed stay on the wire
-   * and is_ready says not to trust them, as CanMotorMbed's status bits did. */
-  pub->is_ready = s->encoder_valid && s->motor_healthy && !s->motor_disabled &&
-                  !s->control.stalled();
+  /* DUTY may keep driving without an encoder, but is_ready remains false
+   * because the position and speed carried by this feedback cannot be used. */
+  pub->is_ready = s->command_valid && s->encoder_valid && s->motor_healthy &&
+                  !s->motor_disabled && !s->control.stalled();
   pub->velocity = s->control.speed();
   pub->position = s->control.position();
   pub->output = s->control.duty();
@@ -1042,6 +1046,7 @@ static void md_motor_func_tick(void)
       s->control.stop();
       (void)motor_disable(motors[i]);
       s->motor_disabled = true;
+      s->command_valid = false;
     }
 
     /* Stopped on the edge only, and before the commands: a frame landing in
@@ -1049,9 +1054,14 @@ static void md_motor_func_tick(void)
      * dropping it would lose a one-shot position target for good. */
     if (master_lost) {
       s->control.stop();
+      s->command_valid = false;
     }
 
     const bool new_command = apply_commands(i);
+    if (!s->motor_healthy ||
+        (!sample.valid && (s->control.mode() != motor_control::Mode::DUTY))) {
+      s->command_valid = false;
+    }
     if (new_command && s->motor_healthy && s->motor_disabled) {
       const int ret = motor_enable(motors[i]);
       s->motor_disabled = ret != 0;

@@ -40,7 +40,18 @@ struct vesc_slot_diagnostics {
   bool online;
   bool stale;
   uint32_t last_rx_age_ms;
+  /** Packet kinds received since the current CAN ID was bound. */
   uint32_t status_mask;
+  /** Packet kinds whose age is at most feedback_timeout_ms. */
+  uint32_t fresh_status_mask;
+  /** Age of the latest STATUS packet in milliseconds, or UINT32_MAX. */
+  uint32_t status_age_ms;
+  /** Age of the latest STATUS_4 packet in milliseconds, or UINT32_MAX. */
+  uint32_t status_4_age_ms;
+  /** Age of the latest STATUS_5 packet in milliseconds, or UINT32_MAX. */
+  uint32_t status_5_age_ms;
+  /** Age of the latest selective fault reply in milliseconds, or UINT32_MAX. */
+  uint32_t fault_age_ms;
   uint32_t rx_count;
   uint32_t timeout_count;
   uint32_t reconnect_count;
@@ -66,12 +77,16 @@ struct vesc_bus_diagnostics {
   uint32_t rx_count;
   uint32_t tx_count;
   uint32_t tx_error_count;
+  /** Transmissions accepted by can_send() but failed on completion. */
+  uint32_t tx_complete_error_count;
   uint32_t invalid_rx_count;
   uint32_t config_error_count;
 };
 
+/** STATUS_4 position listener; reset discards the old CAN ID binding. */
 typedef void (*vesc_position_listener_t)(
-  const struct device * motor, int32_t position_counts, uint32_t cycle, void * user_data);
+  const struct device * motor, int32_t position_counts, uint32_t cycle, bool reset,
+  void * user_data);
 
 int vesc_configure_slot(
   const struct device * motor, const struct vesc_slot_runtime_config * config);
