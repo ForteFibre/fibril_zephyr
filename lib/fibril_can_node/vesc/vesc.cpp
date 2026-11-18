@@ -36,6 +36,28 @@ static void request_config()
 
 static void apply_config()
 {
+#if defined(CONFIG_FIBRIL_CAN_NODE_VESC_HARDWARE_SELFTEST)
+  constexpr uint32_t feedback_timeout_ms = 100U;
+  constexpr uint8_t reconnect_frames = 3U;
+  constexpr uint32_t command_period_us = 5000U;
+  if (vesc_configure_bus_timeout(motors[0], feedback_timeout_ms) != 0) {
+    LOG_ERR("VESC self-test bus timeout rejected");
+  }
+  for (uint8_t i = 0; i < VESC_MOTOR_SLOT_COUNT; ++i) {
+    const struct vesc_slot_runtime_config config{
+      (int16_t)(i == 0U ? 0 : VESC_CAN_ID_UNASSIGNED),
+      1.0F,
+      feedback_timeout_ms,
+      reconnect_frames,
+      command_period_us,
+    };
+    const int ret = vesc_configure_slot(motors[i], &config);
+    if (ret != 0) {
+      LOG_ERR("VESC self-test slot %u configuration rejected (%d)", i, ret);
+    }
+  }
+  LOG_WRN("VESC hardware self-test active: slot 0 -> CAN ID 0, injected target limited to 0");
+#else
   const fcan_gen::vescbus bus(0);
   if (vesc_configure_bus_timeout(motors[0], bus.param_feedback_timeout_ms()) != 0) {
     LOG_WRN("VESC bus feedback_timeout_ms rejected");
@@ -57,6 +79,7 @@ static void apply_config()
       LOG_WRN("VESC slot %u configuration rejected (%d)", i, ret);
     }
   }
+#endif
 }
 
 template<typename Publisher>

@@ -114,6 +114,7 @@ struct vesc_bus_data {
   uint8_t diag_tx_fault_samples[256];
   atomic_t diag_dropped;
   int64_t diag_last_summary_ms;
+  int64_t diag_last_position_sample_ms;
 #endif
 };
 
@@ -154,8 +155,16 @@ static void diag_rx(
   const uint8_t source = (uint8_t)frame->id;
   const uint8_t bucket = diag_packet_bucket(frame);
   uint8_t * samples = &data->diag_rx_samples[source][bucket];
-  if (*samples >= CONFIG_MOTOR_VESC_DIAGNOSTICS_FIRST_FRAMES) return;
-  (*samples)++;
+  bool log_frame = *samples < CONFIG_MOTOR_VESC_DIAGNOSTICS_FIRST_FRAMES;
+  if (log_frame) (*samples)++;
+#if defined(CONFIG_FIBRIL_CAN_NODE_VESC_HARDWARE_SELFTEST)
+  if (assigned && (bucket == 1U) &&
+      ((now_ms - data->diag_last_position_sample_ms) >= 100)) {
+    data->diag_last_position_sample_ms = now_ms;
+    log_frame = true;
+  }
+#endif
+  if (!log_frame) return;
   const struct vesc_diag_event event = {
     .kind = VESC_DIAG_RX, .timestamp_us = now_ms * 1000, .frame = *frame, .assigned = assigned,
   };
