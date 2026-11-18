@@ -50,16 +50,23 @@ devicetree の側にも決めることがある。
 
 1. **`motor_driver_api` は実装する。** `enable`、`disable`、`get_feedback` の 3 つは、上位がモータの機種を知らずに呼べる。全モータの一斉停止と死活監視をクラス越しに書けることが、この 3 つを共有する理由である。
 
-2. **`motor_feedback` に載せるのは、`drivers/motor/robomaster.c` と同じ意味で読める値に限る。** `online`、`stale`、`timestamp_ms` は単位を持たない。`temperature` は ℃ の整数とし、robomaster が入れている値と揃える。`position` は ADR 0005 が定める積算カウントとして載せる。`velocity`、`current`、`orientation` は `valid_mask` を立てない。立てなければ、読み手が単位を取り違えようがない。
+2. **`motor_feedback` には、位置、速度、トルク、温度を、[ADR 0024](0024-motor-class-si-units.md) の単位で載せる。** `velocity` は rad/s、`torque` は Nm、`temperature` は ℃ である。`position` は ADR 0005 が定める積算カウントとして載せる。`current` と `orientation` は `valid_mask` を立てない。
 
    立てない理由はフィールドごとに違う。
-   `velocity` は Context に書いたとおり、分解能か機種非依存性のどちらかを失う。
-   `current` は、そもそもモータが報告しているのがトルクである。
+   `current` は、そもそもモータが報告しているのがトルクである。トルク定数で割れば推定はできるが、測った値ではない。
    `orientation` は robomaster が生カウントを入れているので、ここに rad を入れると同じフィールドが実装ごとに別の単位を指す。
+
+   はじめは、`drivers/motor/robomaster.c` と同じ意味で読める値（`position` と `temperature`）に限り、`velocity` にも `valid_mask` を立てなかった（2026-09-13）。
+   クラスに単位の契約が無く、robomaster が同じフィールドに生の値を入れていたからである。
+   ADR 0024 でクラスの単位を `float` の SI に決めたので、改めた（2026-11-16、#55）。
 
 3. **積算するカウントは、線路上の 16 bit コードそのものとする。** 位置は ±4π を 65535 段に量子化して送られてくるので、8π rad あたり 65535 カウントになる。このスケールは全機種で共通で、線路の分解能をそのまま保つ。ADR 0005 の決定 4 のとおり devicetree には持たせず、`doc/drivers/robstride.md` に書く。
 
-4. **`motor_set_output()` はどのモードでも `-ENOTSUP` を返す。** 電圧指令はプロトコルに存在しない。速度と電流については、決定 2 と同じ理由で、クラスの共有語彙に載せられる単位がない。
+4. **`motor_set_output()` は `MOTOR_OUTPUT_MODE_CURRENT`（A）と `MOTOR_OUTPUT_MODE_VELOCITY`（rad/s）を受け付ける。** それぞれ電流モードと速度モードに切り替え、`robstride_set_current()` と `robstride_set_velocity()` と同じに振る舞う。電圧と duty の指令はプロトコルに存在しない。`MOTOR_OUTPUT_MODE_TORQUE` は断る。運動制御モードで kp と kd を 0 にすればトルクの前置補償だけを渡せるが、この使い方を実機で確かめていない（2026-11-16、ユーザーが選んだ）。トルクは `robstride_set_motion_target()` で指令する。
+
+   はじめはどのモードでも `-ENOTSUP` を返していた（2026-09-13）。
+   決定 2 と同じく、クラスの共有語彙に載せられる単位がなかったからである。
+   ADR 0024 で単位を決めたので、改めた（2026-11-16、#55）。
 
 5. **指令とパラメータの読み書きは `include/drivers/motor/robstride.h` に置く。** 引数は `float` で、単位は rad、rad/s、A、Nm とする。運動制御は 5 引数を 1 つの構造体で渡す。SI の feedback も `robstride_get_feedback()` としてここに置き、測定値としてはトルクを返す。これで `include/drivers/encoder/amt21.h` の前例は診断から制御へ広がるが、公開する対象が機種に固有であるという点は変わらない。
 
@@ -86,12 +93,11 @@ devicetree の側にも決めることがある。
 対象に想定している STM32G4 は FPU を持つ Cortex-M4F なので、`CONFIG_FPU` を有効にすれば実行時の負担にはならない。
 ztest が走る `native_sim` でも問題にならない。
 
-汎用 motor クラス越しに RobStride を他のモータと差し替えられるのは、`enable`、`disable`、死活監視、積算位置までである。
-速度とトルクまで差し替え可能にするには `motor.h` に単位の契約を入れる必要があり、それは motor クラスを見直す時点でまとめて扱う。
-積算位置についてスケールがドライバごとに違うことは残るが、これは ADR 0002 の決定 11 が encoder について選んだ形と同じである。
+汎用 motor クラス越しに RobStride を他のモータと差し替えられるのは、`enable`、`disable`、死活監視、積算位置、速度とトルクの feedback、電流と速度の指令である。
+積算位置についてスケールと零点がドライバごとに違うことは残るが、`motor_get_info()` の `counts_per_rev` と `zero_counts` で換算できる（ADR 0024 の決定 4）。
+位置の指令と運動制御は、機種固有のヘッダに残る。
 
-温度は ℃ の整数に丸めて `motor_feedback` に入れるので、線路上の 0.1 ℃ 刻みは汎用クラス越しには見えない。
-過熱の判定に細かさが要る用途は `robstride_get_feedback()` を使う。
+温度は、ADR 0024 で `float` になり、線路上の 0.1 ℃ 刻みのまま汎用クラスに載る。
 
 `master-can-id` を親に置くので、1 つの CAN コントローラにぶら下がる RobStride は 1 つのホスト ID を共有する。
 同じバスに複数のホストを見せる構成は表せないが、その必要は今のところない。

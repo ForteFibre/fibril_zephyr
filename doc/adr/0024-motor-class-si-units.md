@@ -96,13 +96,14 @@ struct motor_feedback
 - `temperature` はモータ側の温度とする。インバータの温度は入れない（ADR 0022 の決定 16 と同じ）。
 - `position` と `orientation` は変えない。ADR 0005 の理由（`float` で積算すると精度が落ちる）は今も当てはまる。
 
-### 4. 1 回転あたりのカウント数と、対応する mode をクラスから読めるようにする
+### 4. 1 回転あたりのカウント数と零点と、対応する mode をクラスから読めるようにする
 
 ```c
 struct motor_info
 {
   uint32_t output_modes;    /* enum motor_output_mode のビットの和 */
   float counts_per_rev;     /* position の 1 回転あたりのカウント */
+  float zero_counts;        /* 機器の零点（0 rad）に当たる position */
 };
 
 int motor_get_info(const struct device * dev, struct motor_info * info);
@@ -111,6 +112,12 @@ int motor_get_info(const struct device * dev, struct motor_info * info);
 `counts_per_rev` は RoboMaster で 8192、RobStride で 65535 / 4、ODrive で 65536 になる。
 ADR 0005 の決定 3 は換算を各ドライバの文書に書くとした。
 ここで足すのは、使う側が機種を知らずに換算できる手段であり、カウントの意味は変えない。
+
+`zero_counts` は、RoboMaster で 0、RobStride で 65535 / 2、ODrive で 0 になる。
+軸の角度は `(position - zero_counts) * 2π / counts_per_rev` rad である。
+RobStride はカウント 0 が -4π rad なので、0 rad がカウント 32767.5 になり、整数にならない。そのため `float` にする。
+零点がどこにあり、電源を入れ直しても保たれるかは、ドライバの文書に書く。RoboMaster の 0 は、電源を入れたときのロータの 1 回転の中の機械角 0 で、出力軸に対しては保たれない。
+`zero_counts` は #55 で足した（2026-11-16、ユーザーが選んだ）。いまクラスの `position` を読む md_motor と odometry は差分か自前の零点しか使わないが、機種を知らない側が `counts_per_rev` だけを読んで 0 カウントを 0 rad と取り違えないようにする。
 
 ### 5. RoboMaster のドライバをこの単位に移す
 
@@ -133,13 +140,23 @@ RobStride と ODrive は、新しい `struct motor_feedback` に合わせる最�
 そのとき ADR 0004 の決定 2 と 4、ADR 0022 の決定 3 と 4 を改訂する。
 ODrive の `odrive.h` は rev 単位のまま残し、クラスの入口でだけ rad に直す（ADR 0022 の決定 14 は変えない）。
 
+#55 で移した結果は次のとおりである。
+
+| ドライバ | `output_modes` | feedback の `valid_mask`（位置のほか） |
+|---|---|---|
+| RobStride | `CURRENT`、`VELOCITY` | 速度、トルク、温度 |
+| ODrive | `TORQUE`、`VELOCITY` | 速度、トルク、電流、温度（`has-motor-thermistor` があるとき） |
+
+RobStride の `TORQUE` は、運動制御モードで kp と kd を 0 にすれば出せるが、実機で確かめていないので載せない（ADR 0004 の決定 4）。
+ODrive の `CURRENT` は、CAN に電流を指令するメッセージが無いので載せない（ADR 0022 の決定 3）。
+
 ## Consequences
 
 - クラスの公開ヘッダと devicetree binding（`dji,robomaster-motor` の `max-current`、`fibril,fcan-md-motor` の `duty-full-scale`）の互換を壊す。既存の snippet と overlay は同じ PR で書き換える。
 - md_motor と adc_port が ROS に出す電流の値の意味が変わる。何が変わり何が変わらないかは、下の「ROS から見える値」にまとめた。
 - `motor_set_output()` を syscall にしないので、将来 `CONFIG_USERSPACE` を使うときは、値を構造体のポインタで渡す syscall を別に足す必要がある。
 - `struct motor_feedback` が `float` を含むので、FPU のない MCU では feedback を読むたびにソフトウェアの浮動小数点演算が入る。いまのボードはすべて Cortex-M4F で、ADR 0004 と 0022 がすでに `float` を受け入れている。
-- RobStride と ODrive は、決定 7 の PR（#55）まで `motor_set_output()` で `-ENOTSUP` を返し、クラスの feedback には `position` と `temperature` しか出さない。それまでの指令と残りの feedback は、機種専用の API を使う。
+- RobStride と ODrive は、決定 7 の PR（#55）で、ほかのドライバと同じくクラスの単位で指令と feedback を受け渡すようになった。位置の指令と、運動制御や `input_mode` のような機種に固有の指令は、機種専用の API に残る。
 - 新しいドライバ（VESC など）は、汎用クラスに指令を実装でき、md_motor のような機種を知らない使う側から使えるようになる。
 - **RoboMaster の換算係数は仮の値で置く。** 実装では次の値を使い、DJI の資料か実機で確かめて、違えば係数だけを直す。
   - C620：指令と feedback とも ±16384 = ±20 A。
@@ -201,6 +218,19 @@ userspace を使うときに困らない。
 int16 の制約がなくなったので、型としては載せられる。
 しかし VESC は 1 回転の中の角度、ODrive は多回転の連続値で、零点の決め方も違う。
 共通の意味を決めないまま mode だけ足すと、同じ値が機種ごとに別の位置を指す。
+
+### 零点を `motor_info` に持たせず、ドライバの文書に書くだけにする
+
+`motor_info` が増えない。
+いまクラスの `position` を読む md_motor と odometry は、差分か自前のキャリブレーションしか使わない。
+しかし `counts_per_rev` だけをクラスから読めると、機種を知らない側は 0 カウントを 0 rad と読みやすく、RobStride では 4π rad ずれる。
+換算に要る 2 つの値のうち 1 つだけをクラスに置くことになる。
+
+### RobStride の積算を 32768 ずらし、どのドライバでもカウント 0 を零点にする
+
+`motor_info` が増えず、全ドライバで「カウント 0 が機器の零点」と言える。
+しかし 0 rad はカウント 32767.5 にあるので、半カウント（約 0.0002 rad）ずれる。
+ADR 0004 の決定 3（積算するカウントは線路上のコードそのもの）も崩れる。
 
 ### `position` を全機種で 65536 カウント = 1 回転に揃える
 

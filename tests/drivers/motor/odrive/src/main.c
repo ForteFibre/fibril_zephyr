@@ -31,15 +31,19 @@
 #define CMD_SET_INPUT_POS 0x00CU
 #define CMD_SET_INPUT_VEL 0x00DU
 #define CMD_SET_INPUT_TORQUE 0x00EU
+#define CMD_GET_IQ 0x014U
 #define CMD_GET_TEMPERATURE 0x015U
 #define CMD_CLEAR_ERRORS 0x018U
 #define CMD_SET_LIMITS 0x00FU
 #define CMD_SET_TRAJ_VEL_LIMIT 0x011U
 #define CMD_SET_ABSOLUTE_POSITION 0x019U
 #define CMD_SET_POS_GAIN 0x01AU
+#define CMD_GET_TORQUES 0x01CU
 
 #define NODE_SHIFT 5U
 #define CMD_MASK 0x1FU
+
+#define PI 3.14159265358979F
 
 /* Long enough for the driver to work through every arming stage. */
 #define ARM_MS (CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS * 6)
@@ -329,17 +333,22 @@ static void inject_error(uint8_t node_id, uint32_t active_errors, uint32_t disar
   inject(node_id, CMD_GET_ERROR, data, 8U);
 }
 
-static void inject_temperature(uint8_t node_id, float fet, float motor)
+static void inject_float_pair(uint8_t node_id, uint16_t cmd, float first, float second)
 {
   uint8_t data[8] = {0};
   uint32_t bits;
 
-  memcpy(&bits, &fet, sizeof(bits));
+  memcpy(&bits, &first, sizeof(bits));
   sys_put_le32(bits, &data[0]);
-  memcpy(&bits, &motor, sizeof(bits));
+  memcpy(&bits, &second, sizeof(bits));
   sys_put_le32(bits, &data[4]);
 
-  inject(node_id, CMD_GET_TEMPERATURE, data, 8U);
+  inject(node_id, cmd, data, 8U);
+}
+
+static void inject_temperature(uint8_t node_id, float fet, float motor)
+{
+  inject_float_pair(node_id, CMD_GET_TEMPERATURE, fet, motor);
 }
 
 /*
@@ -585,6 +594,10 @@ ZTEST(odrive, test_encoder_estimates_become_position_counts)
                 "position is not 65536 counts per revolution");
   zassert_true((feedback.valid_mask & MOTOR_FEEDBACK_POSITION) != 0U,
                "position is not marked valid");
+  zassert_true((feedback.valid_mask & MOTOR_FEEDBACK_VELOCITY) != 0U,
+               "velocity is not marked valid");
+  zassert_within(feedback.velocity, 1.25F * 2.0F * PI, 0.0001F,
+                 "the class velocity is not in rad/s");
 
   struct odrive_feedback si;
 
@@ -825,11 +838,78 @@ ZTEST(odrive, test_switching_target_switches_control_mode)
   zassert_within(frame_float(setpoint, 0), 3.0F, 0.0001F, "wrong velocity on the wire");
 }
 
-ZTEST(odrive, test_generic_set_output_is_refused)
+ZTEST(odrive, test_class_torque_goes_out_in_nm)
 {
-  zassert_equal(motor_set_output(axis0, MOTOR_OUTPUT_MODE_CURRENT, 100), -ENOTSUP);
-  zassert_equal(motor_set_output(axis0, MOTOR_OUTPUT_MODE_VELOCITY, 100), -ENOTSUP);
-  zassert_equal(motor_set_output(axis0, MOTOR_OUTPUT_MODE_VOLTAGE, 100), -ENOTSUP);
+  arm(axis0, AXIS0_NODE_ID);
+  zassert_ok(motor_set_output(axis0, MOTOR_OUTPUT_MODE_TORQUE, 0.75F));
+  sleep_armed(AXIS0_NODE_ID, TICK_MS * 2);
+
+  const struct can_frame * setpoint = find_frame(AXIS0_NODE_ID, CMD_SET_INPUT_TORQUE);
+
+  zassert_not_null(setpoint, "no torque setpoint");
+  zassert_within(frame_float(setpoint, 0), 0.75F, 0.0001F, "the class torque is in Nm");
+}
+
+ZTEST(odrive, test_class_velocity_in_rad_s_goes_out_in_rev_s_without_feed_forward)
+{
+  arm(axis0, AXIS0_NODE_ID);
+  zassert_ok(odrive_set_velocity(axis0, 1.0F, 0.5F));
+  sleep_armed(AXIS0_NODE_ID, TICK_MS * 2);
+  clear_captures();
+
+  zassert_ok(motor_set_output(axis0, MOTOR_OUTPUT_MODE_VELOCITY, 3.0F * 2.0F * PI));
+  sleep_armed(AXIS0_NODE_ID, TICK_MS * 2);
+
+  const struct can_frame * setpoint = find_frame(AXIS0_NODE_ID, CMD_SET_INPUT_VEL);
+
+  zassert_not_null(setpoint, "no velocity setpoint");
+  zassert_within(frame_float(setpoint, 0), 3.0F, 0.0001F, "rad/s was not turned into rev/s");
+  zassert_within(frame_float(setpoint, 4), 0.0F, 0.0001F,
+                 "a feed-forward from the ODrive API outlived a class command");
+}
+
+ZTEST(odrive, test_generic_set_output_refuses_the_modes_the_axis_does_not_take)
+{
+  zassert_equal(motor_set_output(axis0, MOTOR_OUTPUT_MODE_CURRENT, 1.0F), -ENOTSUP);
+  zassert_equal(motor_set_output(axis0, MOTOR_OUTPUT_MODE_VOLTAGE, 1.0F), -ENOTSUP);
+  zassert_equal(motor_set_output(axis0, MOTOR_OUTPUT_MODE_DUTY, 0.5F), -ENOTSUP);
+}
+
+ZTEST(odrive, test_generic_set_output_rejects_a_value_that_is_not_finite)
+{
+  zassert_equal(motor_set_output(axis0, MOTOR_OUTPUT_MODE_TORQUE, NAN), -EINVAL);
+  zassert_equal(motor_set_output(axis0, MOTOR_OUTPUT_MODE_VELOCITY, INFINITY), -EINVAL);
+}
+
+ZTEST(odrive, test_info_lists_torque_and_velocity_with_zero_at_count_zero)
+{
+  struct motor_info info;
+
+  zassert_ok(motor_get_info(axis0, &info));
+  zassert_equal(info.output_modes, MOTOR_OUTPUT_MODE_TORQUE | MOTOR_OUTPUT_MODE_VELOCITY);
+  zassert_within(info.counts_per_rev, 65536.0F, 0.001F);
+  zassert_within(info.zero_counts, 0.0F, 0.001F);
+}
+
+ZTEST(odrive, test_iq_and_torques_reach_the_class_only_once_they_arrive)
+{
+  inject_heartbeat(AXIS1_NODE_ID, ODRIVE_AXIS_STATE_IDLE, 0U);
+  inject_estimates(AXIS1_NODE_ID, 0.0F, 0.0F);
+
+  struct motor_feedback feedback;
+
+  zassert_ok(motor_get_feedback(axis1, &feedback));
+  zassert_equal(feedback.valid_mask & (MOTOR_FEEDBACK_CURRENT | MOTOR_FEEDBACK_TORQUE), 0U,
+                "current and torque were published before their messages arrived");
+
+  inject_float_pair(AXIS1_NODE_ID, CMD_GET_IQ, 4.0F, 3.5F);
+  inject_float_pair(AXIS1_NODE_ID, CMD_GET_TORQUES, 0.3F, 0.25F);
+
+  zassert_ok(motor_get_feedback(axis1, &feedback));
+  zassert_true((feedback.valid_mask & MOTOR_FEEDBACK_CURRENT) != 0U, "current is not marked valid");
+  zassert_within(feedback.current, 3.5F, 0.0001F, "the class current is the measured Iq");
+  zassert_true((feedback.valid_mask & MOTOR_FEEDBACK_TORQUE) != 0U, "torque is not marked valid");
+  zassert_within(feedback.torque, 0.25F, 0.0001F, "the class torque is the estimate");
 }
 
 ZTEST(odrive, test_axis_state_request_is_refused_while_the_driver_owns_the_axis)

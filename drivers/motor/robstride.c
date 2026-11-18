@@ -5,6 +5,7 @@
 
 #include <drivers/motor.h>
 #include <drivers/motor/robstride.h>
+#include <math.h>
 #include <string.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -1444,25 +1445,40 @@ static int robstride_motor_disable(const struct device * dev)
   return 0;
 }
 
+static int robstride_set_target(const struct device * dev, enum robstride_mode mode, float value);
+
 static int robstride_motor_set_output(
   const struct device * dev, enum motor_output_mode mode, float value)
 {
-  ARG_UNUSED(dev);
-  ARG_UNUSED(mode);
-  ARG_UNUSED(value);
+  enum robstride_mode robstride_mode;
 
-  /* Not wired to the class units yet (doc/adr/0024 decision 7, #55); targets go
-   * through include/drivers/motor/robstride.h. */
-  return -ENOTSUP;
+  switch (mode) {
+    case MOTOR_OUTPUT_MODE_CURRENT:
+      robstride_mode = ROBSTRIDE_MODE_CURRENT;
+      break;
+    case MOTOR_OUTPUT_MODE_VELOCITY:
+      robstride_mode = ROBSTRIDE_MODE_VELOCITY;
+      break;
+    default:
+      return -ENOTSUP;
+  }
+
+  if (!isfinite(value)) {
+    return -EINVAL;
+  }
+
+  return robstride_set_target(dev, robstride_mode, value);
 }
 
 static int robstride_motor_get_info(const struct device * dev, struct motor_info * info)
 {
   ARG_UNUSED(dev);
 
-  info->output_modes = 0U;
-  /* The accumulator wraps once per 8 pi rad, four turns. */
+  info->output_modes = MOTOR_OUTPUT_MODE_CURRENT | MOTOR_OUTPUT_MODE_VELOCITY;
+  /* The accumulator wraps once per 8 pi rad, four turns, and its count 0 is
+   * -4 pi rad, so 0 rad falls halfway between two counts. */
   info->counts_per_rev = (float)ROBSTRIDE_POSITION_WRAP / 4.0F;
+  info->zero_counts = (float)ROBSTRIDE_POSITION_WRAP / 2.0F;
 
   return 0;
 }
@@ -1485,17 +1501,18 @@ static int robstride_motor_get_feedback(const struct device * dev, void * feedba
   key = k_spin_lock(&data->lock);
 
   /*
-   * Velocity and torque in the class units come with doc/adr/0024
-   * decision 7 (#55); robstride_get_feedback() reports them meanwhile. Position and
-   * temperature are published only once a feedback frame has carried them: a
+   * Measurements are published only once a feedback frame has carried them: a
    * motor that has answered nothing but a presence probe is online with no
-   * measurement to its name.
+   * measurement to its name. The motor reports torque, not current.
    */
   if (data->has_last_position) {
-    out->valid_mask = MOTOR_FEEDBACK_POSITION | MOTOR_FEEDBACK_TEMPERATURE;
+    out->valid_mask = MOTOR_FEEDBACK_POSITION | MOTOR_FEEDBACK_VELOCITY | MOTOR_FEEDBACK_TORQUE |
+                      MOTOR_FEEDBACK_TEMPERATURE;
   }
 
   out->position = data->position_counts;
+  out->velocity = data->velocity;
+  out->torque = data->torque;
   out->temperature = data->temperature;
   out->online = data->online;
   out->timestamp_ms = data->timestamp_ms;

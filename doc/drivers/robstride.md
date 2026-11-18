@@ -249,18 +249,28 @@ RobStride の feedback はコマンドへの返信として返るので、**無�
 rad = counts * (8 * PI / 65535) - 4 * PI
 ```
 
+機種を知らない側は、`motor_get_info()` の `counts_per_rev`（65535 / 4）と `zero_counts`（65535 / 2）から同じ式を組める。
+
 積算の起点は最初に受け取った絶対位置なので、電源投入時の位置が保たれる。
 `robstride_set_zero()` が通ったあとも同じで、次の feedback が新しい原点から積算をやり直す。
 
 ## API の振る舞い
 
-`motor_set_output()` は**どのモードでも `-ENOTSUP` を返す**。
-motor クラスの単位（[ADR 0024](../adr/0024-motor-class-si-units.md)）に合わせるのは、後の変更である（ADR 0024 の決定 7）。
-それまで、指令は `robstride.h` を使う。
-`motor_get_info()` は、`output_modes` に 0 を、`counts_per_rev` に 65535 / 4（8π rad で 65535 カウント）を返す。
+`motor_set_output()` が受け付けるのは `MOTOR_OUTPUT_MODE_CURRENT`（A）と `MOTOR_OUTPUT_MODE_VELOCITY`（rad/s）である。
+それぞれ `robstride_set_current()` と `robstride_set_velocity()` と同じで、モードを切り替え、機種の上限に飽和させる。
+モードが変わると、モータを止めてからモードを書き直す（「ハンドシェイク」）。
+ほかのモードには `-ENOTSUP` を、有限でない値には `-EINVAL` を返す。
+`MOTOR_OUTPUT_MODE_TORQUE` は断る。
+運動制御モードで kp と kd を 0 にすればトルクの前置補償だけを渡せるが、実機で確かめていない。
+トルクを指令するときは `robstride_set_motion_target()` を使う。
+位置の指令と運動制御も `robstride.h` を使う。
 
-`motor_get_feedback()` が `valid_mask` に立てるのは `MOTOR_FEEDBACK_POSITION` と `MOTOR_FEEDBACK_TEMPERATURE` だけである。
-速度、トルク、単回転位置は `robstride_get_feedback()` から SI で読む。
+`motor_get_info()` は、`output_modes` に電流と速度を、`counts_per_rev` に 65535 / 4（8π rad で 65535 カウント）を、`zero_counts` に 65535 / 2 を返す。
+カウント 0 が -4π rad なので、0 rad はカウント 32767.5 になる。
+
+`motor_get_feedback()` が `valid_mask` に立てるのは、位置、速度（rad/s）、トルク（Nm）、温度である。
+電流は立てない。モータが報告するのはトルクで、電流ではない。
+単回転位置と、モード、故障の情報は `robstride_get_feedback()` から読む。
 温度は ℃ で、線路上の 0.1 ℃ 刻みのまま入る。
 
 **`valid_mask` が立つのは feedback フレームを 1 度でも受け取ってからである。**

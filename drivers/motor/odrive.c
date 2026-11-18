@@ -60,6 +60,9 @@ LOG_MODULE_REGISTER(motor_odrive, CONFIG_MOTOR_LOG_LEVEL);
  */
 #define ODRIVE_COUNTS_PER_REV 65536.0F
 
+/* odrive.h stays in rev like the wire (ADR 0022); the motor class takes rad. */
+#define ODRIVE_RAD_PER_REV (2.0F * 3.14159265358979F)
+
 /*
  * Vel_FF and Torque_FF of Set_Input_Pos are int16 scaled by the ODrive's
  * input_vel_scale and input_torque_scale, both of which default to 0.001. The
@@ -1155,21 +1158,25 @@ static int odrive_axis_disable(const struct device * dev)
 static int odrive_axis_set_output(
   const struct device * dev, enum motor_output_mode mode, float value)
 {
-  ARG_UNUSED(dev);
-  ARG_UNUSED(mode);
-  ARG_UNUSED(value);
-
-  /* Not wired to the class units yet (doc/adr/0024 decision 7, #55); setpoints go
-   * through include/drivers/motor/odrive.h. */
-  return -ENOTSUP;
+  switch (mode) {
+    case MOTOR_OUTPUT_MODE_TORQUE:
+      return odrive_set_torque(dev, value);
+    case MOTOR_OUTPUT_MODE_VELOCITY:
+      /* The class has no feed-forward, so none is left over from an earlier
+       * odrive_set_velocity(). */
+      return odrive_set_velocity(dev, value / ODRIVE_RAD_PER_REV, 0.0F);
+    default:
+      return -ENOTSUP;
+  }
 }
 
 static int odrive_axis_get_info(const struct device * dev, struct motor_info * info)
 {
   ARG_UNUSED(dev);
 
-  info->output_modes = 0U;
+  info->output_modes = MOTOR_OUTPUT_MODE_TORQUE | MOTOR_OUTPUT_MODE_VELOCITY;
   info->counts_per_rev = ODRIVE_COUNTS_PER_REV;
+  info->zero_counts = 0.0F;
 
   return 0;
 }
@@ -1196,15 +1203,27 @@ static int odrive_axis_get_feedback(const struct device * dev, void * feedback)
   estimates_ms = data->estimates_ms;
   k_spin_unlock(&data->lock, key);
 
-  /*
-   * Velocity, torque and current in the class units come with
-   * doc/adr/0024 decision 7 (#55); until then odrive_get_feedback() reports them in
-   * the drive's own units. Single-turn orientation has no class meaning.
-   */
+  /* Single-turn orientation has no class meaning. */
   if (((snapshot.valid_mask & ODRIVE_FEEDBACK_ESTIMATES) != 0U) &&
       odrive_to_counts(snapshot.position, &counts)) {
     out->valid_mask |= MOTOR_FEEDBACK_POSITION;
     out->position = counts;
+  }
+
+  if (((snapshot.valid_mask & ODRIVE_FEEDBACK_ESTIMATES) != 0U) && isfinite(snapshot.velocity)) {
+    out->valid_mask |= MOTOR_FEEDBACK_VELOCITY;
+    out->velocity = snapshot.velocity * ODRIVE_RAD_PER_REV;
+  }
+
+  if (((snapshot.valid_mask & ODRIVE_FEEDBACK_TORQUES) != 0U) &&
+      isfinite(snapshot.torque_estimate)) {
+    out->valid_mask |= MOTOR_FEEDBACK_TORQUE;
+    out->torque = snapshot.torque_estimate;
+  }
+
+  if (((snapshot.valid_mask & ODRIVE_FEEDBACK_IQ) != 0U) && isfinite(snapshot.iq_measured)) {
+    out->valid_mask |= MOTOR_FEEDBACK_CURRENT;
+    out->current = snapshot.iq_measured;
   }
 
   /*

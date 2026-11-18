@@ -511,6 +511,9 @@ static int robomaster_motor_get_info(const struct device * dev, struct motor_inf
 
   info->output_modes = MOTOR_OUTPUT_MODE_CURRENT;
   info->counts_per_rev = (float)ROBOMASTER_ENCODER_WRAP;
+  /* The accumulator is seeded with the rotor angle, so count 0 is the rotor's
+   * zero in the turn it powered up in. */
+  info->zero_counts = 0.0F;
 
   return 0;
 }
