@@ -110,8 +110,8 @@ struct motor_feedback
    * The driver resolves the wrap of the underlying device and accumulates
    * here, so a control loop sees a continuous value. What one count is worth
    * depends on the device; @ref motor_info.counts_per_rev gives the counts
-   * per turn of the measured shaft. Where zero lies is driver-specific too
-   * (a RobStride's count 0 is -4 pi rad); the driver's document says.
+   * per turn of the measured shaft, and @ref motor_info.zero_counts the count
+   * at the device's own zero.
    */
   int64_t position;
   /** Instantaneous orientation reported by the motor. */
@@ -133,6 +133,15 @@ struct motor_info
   uint32_t output_modes;
   /** @ref motor_feedback.position counts per turn of the measured shaft. */
   float counts_per_rev;
+  /**
+   * @brief @ref motor_feedback.position at the device's own zero.
+   *
+   * The angle of the measured shaft in rad is
+   * (position - zero_counts) * 2 pi / counts_per_rev. This need not be a
+   * whole count. Where the device puts its zero, and whether it survives a
+   * power cycle, is the driver's to document.
+   */
+  float zero_counts;
 };
 
 /** @brief Driver API for enabling motor output. */
@@ -231,7 +240,7 @@ static inline int motor_get_feedback(const struct device * dev, void * feedback)
 }
 
 /**
- * @brief Describe the motor: the modes it accepts and its position counts.
+ * @brief Describe the motor: the modes it accepts and how to read its position.
  *
  * @param dev Motor device instance.
  * @param info Filled on success.

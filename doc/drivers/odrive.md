@@ -39,9 +39,9 @@ odrv0.axis0.config.can.node_id = 5
 # 残りは 0（無効）である。有効にしない測定値は valid_mask が立たない。
 odrv0.axis0.config.can.heartbeat_msg_rate_ms = 100
 odrv0.axis0.config.can.encoder_msg_rate_ms = 10
-odrv0.axis0.config.can.iq_msg_rate_ms = 20          # odrive_feedback の iq_*
+odrv0.axis0.config.can.iq_msg_rate_ms = 20          # iq_*（クラスの電流もこれ）
 odrv0.axis0.config.can.temperature_msg_rate_ms = 200 # 温度（クラスの温度もこれ）
-odrv0.axis0.config.can.torques_msg_rate_ms = 20      # torque_target / torque_estimate
+odrv0.axis0.config.can.torques_msg_rate_ms = 20      # torque_*（クラスのトルクもこれ）
 odrv0.axis0.config.can.bus_voltage_msg_rate_ms = 200 # bus_voltage / bus_current
 odrv0.axis0.config.can.error_msg_rate_ms = 200       # disarm_reason
 
@@ -285,14 +285,33 @@ ODrive の `active_errors` は `Clear_Errors` まで残るので、途中の hea
 
 ## API の振る舞い
 
-`motor_set_output()` は**どのモードでも `-ENOTSUP` を返す**。
-motor クラスの単位（[ADR 0024](../adr/0024-motor-class-si-units.md)）に合わせるのは、後の変更である（ADR 0024 の決定 7）。
-それまで、指令は `odrive.h` を使う。
-`motor_get_info()` は、`output_modes` に 0 を、`counts_per_rev` に 65536 を返す。
+`motor_set_output()` が受け付けるのは `MOTOR_OUTPUT_MODE_TORQUE`（Nm）と `MOTOR_OUTPUT_MODE_VELOCITY`（rad/s）である。
+トルクは `odrive_set_torque()` と同じである。
+速度は 2π で割って rev/s にし、トルクの前置補償を 0 にして `odrive_set_velocity()` に渡す。
+クラスには前置補償が無いので、`odrive.h` で前に渡した値を残さない。
+`odrive.h` は線路と同じ rev 系のままで、rad に直すのはクラスの入口だけである（[ADR 0022](../adr/0022-odrive-control-api-layering.md) の決定 14）。
+ほかのモードには `-ENOTSUP` を、有限でない値には `-EINVAL` を返す。
+`MOTOR_OUTPUT_MODE_CURRENT` は断る。CAN で電流を指令するメッセージが無い。
+`MOTOR_OUTPUT_MODE_VOLTAGE` も断る。ODrive に電圧の制御モードはあるが、実機で確かめていない。
+位置の指令と、`input_mode` は `odrive.h` を使う。
 
-`motor_get_feedback()` が `valid_mask` に立てるのは `MOTOR_FEEDBACK_POSITION` と、
-`has-motor-thermistor` がある軸での `MOTOR_FEEDBACK_TEMPERATURE` だけである。
-速度、電流、トルクは `odrive_get_feedback()` から rev/s、A、Nm で読む。
+`motor_get_info()` は、`output_modes` にトルクと速度を、`counts_per_rev` に 65536 を、`zero_counts` に 0 を返す。
+カウント 0 は `Pos_Estimate` の 0 rev である。
+
+`motor_get_feedback()` が `valid_mask` に立てる値と、その元は次のとおりである。
+どれも、元のメッセージが有効で（`odrive_feedback.valid_mask`）値が有限のときだけ立つ。
+
+| `valid_mask` | 値 | 元 |
+| --- | --- | --- |
+| `MOTOR_FEEDBACK_POSITION` | 1 rev = 65536 カウント | `Get_Encoder_Estimates` の `Pos_Estimate` |
+| `MOTOR_FEEDBACK_VELOCITY` | rad/s（`Vel_Estimate` × 2π） | `Get_Encoder_Estimates` の `Vel_Estimate` |
+| `MOTOR_FEEDBACK_TORQUE` | Nm | `Get_Torques` の `Torque_Estimate` |
+| `MOTOR_FEEDBACK_CURRENT` | A | `Get_Iq` の `Iq_Measured` |
+| `MOTOR_FEEDBACK_TEMPERATURE` | ℃ | `Get_Temperature` の `Motor_Temperature`。`has-motor-thermistor` がある軸だけ |
+
+`Get_Iq` と `Get_Torques` は既定で送られない（「ODrive 側に必要な設定」）。
+送らせていなければ、電流とトルクは立たない。
+FET 温度、電流の指令値、トルクの指令値、バスの電圧と電流は `odrive_get_feedback()` から読む。
 
 どちらの feedback も、heartbeat が `heartbeat-timeout-ms` の間に届いていなければ `-ENODATA` を返す。
 `odrive_get_feedback()` は、encoder estimates が `estimate-timeout-ms` を超えていれば `stale` を立てて `-EAGAIN` を返す。

@@ -465,13 +465,53 @@ ZTEST(robstride_motor, test_rx_filter_matches_extended_frames_addressed_to_the_m
   zassert_equal(rx_filter.id, TEST_MASTER_ID, "filter must key on the configured master ID");
 }
 
-ZTEST(robstride_motor, test_set_output_is_rejected_for_every_mode)
+ZTEST(robstride_motor, test_set_output_takes_current_in_a_and_velocity_in_rad_s)
 {
-  zassert_equal(
-    motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 100), -ENOTSUP,
-    "current has no class-wide unit here");
-  zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_VELOCITY, 100), -ENOTSUP);
-  zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_VOLTAGE, 100), -ENOTSUP);
+  zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 2.0F));
+  enable_and_settle(motor0);
+
+  const struct can_frame * run_mode = find_set_param(TEST_MOTOR0_ID, PARAM_RUN_MODE);
+  const struct can_frame * current = find_set_param(TEST_MOTOR0_ID, PARAM_IQ_REF);
+
+  zassert_not_null(run_mode, "no run mode write");
+  zassert_equal(sys_get_le32(&run_mode->data[4]), 3U, "current is run mode 3");
+  zassert_not_null(current, "no current target");
+  zassert_within(frame_param_float(current), 2.0F, 0.001F, "the class current is in A");
+
+  clear_captures();
+  zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_VELOCITY, 5.0F));
+  k_msleep(HANDSHAKE_MS);
+
+  run_mode = find_set_param(TEST_MOTOR0_ID, PARAM_RUN_MODE);
+  const struct can_frame * velocity = find_set_param(TEST_MOTOR0_ID, PARAM_SPD_REF);
+
+  zassert_not_null(run_mode, "a mode change must write the run mode again");
+  zassert_equal(sys_get_le32(&run_mode->data[4]), 2U, "velocity is run mode 2");
+  zassert_not_null(velocity, "no velocity target");
+  zassert_within(frame_param_float(velocity), 5.0F, 0.001F, "the class velocity is in rad/s");
+}
+
+ZTEST(robstride_motor, test_set_output_rejects_the_modes_the_motor_does_not_take)
+{
+  zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_VOLTAGE, 1.0F), -ENOTSUP);
+  zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_TORQUE, 1.0F), -ENOTSUP);
+  zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_DUTY, 0.5F), -ENOTSUP);
+}
+
+ZTEST(robstride_motor, test_set_output_rejects_a_value_that_is_not_finite)
+{
+  zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, NAN), -EINVAL);
+  zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_VELOCITY, INFINITY), -EINVAL);
+}
+
+ZTEST(robstride_motor, test_info_lists_the_class_modes_and_puts_zero_halfway_through_the_wrap)
+{
+  struct motor_info info;
+
+  zassert_ok(motor_get_info(motor0, &info));
+  zassert_equal(info.output_modes, MOTOR_OUTPUT_MODE_CURRENT | MOTOR_OUTPUT_MODE_VELOCITY);
+  zassert_within(info.counts_per_rev, (float)UINT16_MAX / 4.0F, 0.001F);
+  zassert_within(info.zero_counts, (float)UINT16_MAX / 2.0F, 0.001F, "count 0 is -4 pi rad");
 }
 
 ZTEST(robstride_motor, test_enable_stops_the_motor_before_writing_the_run_mode)
@@ -783,8 +823,10 @@ ZTEST(robstride_motor, test_feedback_decodes_and_accumulates_across_the_wrap)
   inject_feedback(TEST_MOTOR0_ID, 1000U, 0U, 0U, 0);
   zassert_ok(motor_get_feedback(motor0, &feedback));
   zassert_equal(
-    feedback.valid_mask, MOTOR_FEEDBACK_POSITION | MOTOR_FEEDBACK_TEMPERATURE,
-    "only position and temperature have a meaning shared with the other drivers");
+    feedback.valid_mask,
+    MOTOR_FEEDBACK_POSITION | MOTOR_FEEDBACK_VELOCITY | MOTOR_FEEDBACK_TORQUE |
+      MOTOR_FEEDBACK_TEMPERATURE,
+    "the motor reports torque, not current");
   zassert_true(feedback.online, "feedback should be online");
 
   const int64_t seeded = feedback.position;
@@ -828,6 +870,13 @@ ZTEST(robstride_motor, test_feedback_decodes_velocity_torque_and_temperature)
 
   zassert_ok(motor_get_feedback(motor0, &feedback));
   zassert_within(feedback.temperature, 25.5F, 0.01F, "the class field keeps the 0.1 degree steps");
+
+  /* The top code is the positive end of each range. */
+  inject_feedback(TEST_MOTOR0_ID, 32767U, UINT16_MAX, UINT16_MAX, 255);
+
+  zassert_ok(motor_get_feedback(motor0, &feedback));
+  zassert_within(feedback.velocity, RS00_VELOCITY_MAX, 0.01F, "the class velocity is in rad/s");
+  zassert_within(feedback.torque, RS00_TORQUE_MAX, 0.01F, "the class torque is in Nm");
 }
 
 ZTEST(robstride_motor, test_feedback_goes_stale_after_the_timeout)

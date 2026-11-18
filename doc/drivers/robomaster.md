@@ -159,7 +159,9 @@ RobStride ドライバがハンドシェイクの段を巻き戻すのに完了�
 有限でない値には `-EINVAL` を返す。
 値は `model` の係数で電流コードに直し、`±max-current-ma` と機種の全範囲のうち狭い方に飽和させ、四捨五入して保持する。
 
-`motor_get_info()` は、`output_modes` に `MOTOR_OUTPUT_MODE_CURRENT` を、`counts_per_rev` に 8192（ロータ 1 回転）を返す。
+`motor_get_info()` は、`output_modes` に `MOTOR_OUTPUT_MODE_CURRENT` を、`counts_per_rev` に 8192（ロータ 1 回転）を、`zero_counts` に 0 を返す。
+カウント 0 はロータの機械角 0 だが、電源を入れたときのロータの 1 回転の中の 0 である（「位置の積算」）。
+電源を入れ直すと、出力軸に対する零点は変わる。
 
 `motor_get_feedback()` は戻り値に関わらずスナップショットを書き込む。
 

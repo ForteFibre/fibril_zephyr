@@ -320,6 +320,7 @@ ZTEST(robomaster_motor, test_get_info_reports_current_mode_and_rotor_counts)
 	zassert_ok(motor_get_info(motor0, &info));
 	zassert_equal(info.output_modes, MOTOR_OUTPUT_MODE_CURRENT);
 	zassert_within(info.counts_per_rev, 8192.0F, 0.0F);
+	zassert_within(info.zero_counts, 0.0F, 0.0F, "count 0 is the rotor's own zero");
 }
 
 ZTEST(robomaster_motor, test_get_feedback_reports_no_data_and_stale)

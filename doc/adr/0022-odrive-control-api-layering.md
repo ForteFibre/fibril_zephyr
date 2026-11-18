@@ -91,9 +91,17 @@ ODrive 側で `circular_setpoints` を有効にすると `Pos_Estimate` が折�
 
 2. **`motor_driver_api` は実装する。** ADR 0004 の決定 1 と同じ理由で、`enable`、`disable`、`get_feedback` の 3 つは上位がモータの機種を知らずに呼べる。
 
-3. **`motor_set_output()` はどのモードでも `-ENOTSUP` を返す。** 電圧モードはプロトコルに存在するが参照実装が未対応で、実機で確かめられていない。速度と電流については、`enum motor_output_mode` に載せられる単位の契約がクラス側にない。
+3. **`motor_set_output()` は `MOTOR_OUTPUT_MODE_TORQUE`（Nm）と `MOTOR_OUTPUT_MODE_VELOCITY`（rad/s）を受け付ける。** トルクは `odrive_set_torque()` に、速度は 2π で割った rev/s を、トルクの前置補償 0 とともに `odrive_set_velocity()` に渡す。クラスには前置補償が無いので、`odrive.h` で前に渡した値を残さない。rad に直すのはクラスの入口だけで、決定 14 は変えない（[ADR 0024](0024-motor-class-si-units.md) の決定 7）。`MOTOR_OUTPUT_MODE_CURRENT` は断る。CAN に電流を指令するメッセージが無い。電圧モードはプロトコルに存在するが参照実装が未対応で、実機で確かめられていないので、`MOTOR_OUTPUT_MODE_VOLTAGE` も断る。
 
-4. **`motor_feedback` に立てる `valid_mask` は `MOTOR_FEEDBACK_POSITION` と、決定 16 の条件を満たすときの `MOTOR_FEEDBACK_TEMPERATURE` だけとする。** `velocity`、`current`、`orientation` は立てない。ODrive は `Get_Iq` で電流を A で報告しているので、ADR 0004 が RobStride について述べた「報告している量が違う」という理由はここでは成り立たない。立てない理由は、`drivers/motor/robomaster.c` が同じフィールドに生値を入れていて、クラスに単位の契約がないことだけである。
+   はじめはどのモードでも `-ENOTSUP` を返していた（2026-09-13）。
+   速度と電流について、`enum motor_output_mode` に載せられる単位の契約がクラス側に無かったからである。
+   ADR 0024 で単位を決めたので、改めた（2026-11-16、#55）。
+
+4. **`motor_feedback` には、位置と、速度（rad/s）、トルク（Nm）、電流（A）、決定 16 の条件を満たすときの温度を載せる。** 速度は `Vel_Estimate` に 2π を掛ける。トルクは `Get_Torques` の推定値、電流は `Get_Iq` の測定値である。どれも、元の周期メッセージが `odrive_feedback.valid_mask` で有効で、値が有限のときだけ `valid_mask` を立てる。`orientation` は立てない。1 回転の中の角度は、クラスで意味が決まっていない。
+
+   はじめは `MOTOR_FEEDBACK_POSITION` と温度だけを立てていた（2026-09-13）。
+   `drivers/motor/robomaster.c` が同じフィールドに生値を入れていて、クラスに単位の契約が無かったからである。
+   ADR 0024 で単位を決めたので、改めた（2026-11-16、#55）。
 
 5. **`motor_feedback.position` は 1 rev = 65536 カウントに固定する。** ADR 0005 の決定 4 のとおり devicetree には持たせず、`doc/drivers/odrive.md` に書く。float32 の刻み幅は値が 2^k のとき 2^(k-23) なので、1/65536 rev の刻みは 128 rev で float32 の刻みに追いつく。**128 rev まではカウントと `Pos_Estimate` が 1 対 1 に対応し、そこから 2 倍ごとにカウントが 2 段ずつ飛ぶようになる。**
 
@@ -195,8 +203,9 @@ ODrive は 11 bit 標準 ID の classic CAN、fibril_can は CAN FD である。
 `fibril_robomaster_miniv1` と `fibril_robomaster_miniv3` は FDCAN1 のみで、`fibril_canmotor_tourobo2023` は MCP2517FD が 1 本なので、fibril_can との併用はできない。
 
 汎用 motor クラス越しに ODrive を他のモータと差し替えられるのは、
-`enable`、`disable`、死活監視、`motor_feedback.position` までである。
-`position` のスケールがドライバごとに違う点は ADR 0002 の決定 11 と ADR 0004 の Consequences が述べたのと同じである。
+`enable`、`disable`、死活監視、`motor_feedback` の位置、速度、トルク、電流、温度と、トルクと速度の指令である。
+`position` のスケールと零点がドライバごとに違う点は ADR 0002 の決定 11 と ADR 0004 の Consequences が述べたのと同じで、`motor_get_info()` で換算できる（ADR 0024 の決定 4）。
+位置の指令と `input_mode` は機種固有のヘッダに残る。
 
 ROS 側への露出はこの決定の範囲外とする。
 `lib/fibril_can_node/` にブロック型を足す話は、ドライバの形が固まってから別に決める。
