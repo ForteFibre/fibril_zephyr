@@ -21,10 +21,19 @@ STATUS_4 position uses 18000 counts/revolution according to
 shortest path, leaves exactly half a turn unchanged, retains the last position
 through an outage, and uses the actual receive interval for velocity.
 
-> **Hardware TODO:** select the VESC hardware and firmware, then verify CAN ID
-> reservations, SET_CURRENT scaling/sign, STATUS packet layouts and periods,
+The selected controller is the vendor-described **VESC CAN FOC ESC** for a 6S
+(22--26 V) supply, with a 60 A-class MOSFET stage and CAN configurable to
+1 Mbit/s. Its manual uses VESC Tool 6.05, but does not identify the installed
+firmware version. It documents extended CAN IDs, `CAN_PACKET_STATUS` (9), and
+the STATUS ERPM/current/duty layout; it does not document the current-command
+or STATUS_4 contracts used here.
+
+> **Hardware TODO:** identify the installed firmware version, then verify CAN
+> ID reservations, SET_CURRENT scaling/sign and regenerative/0 A behavior,
 > STATUS_4 mechanical meaning/range/direction, fault replies, command timeout,
-> and safe absolute current. The constants are deliberately confined to the
+> and measured STATUS periods. Verify the safe absolute current for the actual
+> motor and power system: the controller manual recommends 60 A absolute for
+> M3508 and 30 A for M2006. The constants are deliberately confined to the
 > protocol/units layer so this does not alter `MdMotor` or diagnostics schemas.
 
 On RoboMaster Mini V4, `miniv4-md-vesc8` assigns MOTCAN1 (`fdcan3`) at 1 Mbit/s

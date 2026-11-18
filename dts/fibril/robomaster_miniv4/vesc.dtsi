@@ -19,10 +19,10 @@
         #size-cells = <0>;
         cans = <&fdcan3>;
 
-        /* TODO(hardware): 60 A is the broad upper bound used only as a
-         * firmware guard. Replace it with the selected VESC/board limit after
-         * checking that hardware; normal operation must set a lower ROS
-         * max_current_a. */
+        /* TODO(hardware): The selected VESC CAN FOC ESC manual recommends
+         * 60 A absolute for M3508 but 30 A for M2006. This broad board guard
+         * must be reduced if the selected motor/power system requires it;
+         * normal operation must set a lower ROS max_current_a. */
         absolute-max-current-ma = <60000>;
         max-feedback-timeout-ms = <5000>;
         min-command-period-us = <1000>;
