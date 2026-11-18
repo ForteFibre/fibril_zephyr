@@ -121,6 +121,17 @@ bool vesc_decode_fault_status(
   return true;
 }
 
+bool vesc_decode_notify_boot(const struct can_frame * frame, struct vesc_notify_boot * status)
+{
+  if ((status == NULL) || !status_frame(frame, VESC_CAN_PACKET_NOTIFY_BOOT, 1U)) {
+    return false;
+  }
+  status->vesc_can_id = (uint8_t)frame->id;
+  status->name_length = frame->dlc;
+  memcpy(status->hardware_name, frame->data, frame->dlc);
+  return true;
+}
+
 int64_t vesc_position_wrap_delta(int32_t current, int32_t previous)
 {
   int64_t delta = (int64_t)current - previous;

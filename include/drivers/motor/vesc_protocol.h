@@ -25,6 +25,7 @@ enum vesc_can_packet_id {
   VESC_CAN_PACKET_STATUS = 9,
   VESC_CAN_PACKET_STATUS_4 = 16,
   VESC_CAN_PACKET_STATUS_5 = 27,
+  VESC_CAN_PACKET_NOTIFY_BOOT = 57,
 };
 
 #define VESC_POSITION_COUNTS_PER_REV 18000
@@ -60,6 +61,12 @@ struct vesc_fault_status {
   uint8_t fault_code;
 };
 
+struct vesc_notify_boot {
+  uint8_t vesc_can_id;
+  uint8_t name_length;
+  uint8_t hardware_name[CAN_MAX_DLEN];
+};
+
 int vesc_encode_set_current(uint8_t vesc_can_id, float current_a, struct can_frame * frame);
 int vesc_encode_get_fault(
   uint8_t vesc_can_id, uint8_t controller_id, struct can_frame * frame);
@@ -68,6 +75,7 @@ bool vesc_decode_status_4(const struct can_frame * frame, struct vesc_status_4 *
 bool vesc_decode_status_5(const struct can_frame * frame, struct vesc_status_5 * status);
 bool vesc_decode_fault_status(
   const struct can_frame * frame, uint8_t controller_id, struct vesc_fault_status * status);
+bool vesc_decode_notify_boot(const struct can_frame * frame, struct vesc_notify_boot * status);
 int64_t vesc_position_wrap_delta(int32_t current, int32_t previous);
 
 #ifdef __cplusplus

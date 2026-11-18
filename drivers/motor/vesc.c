@@ -296,6 +296,7 @@ static const char * diag_invalid_reason(const struct can_frame * frame)
   if ((packet == VESC_CAN_PACKET_STATUS) && (frame->dlc < 8U)) return "short-STATUS";
   if ((packet == VESC_CAN_PACKET_STATUS_4) && (frame->dlc < 8U)) return "short-STATUS_4";
   if ((packet == VESC_CAN_PACKET_STATUS_5) && (frame->dlc < 6U)) return "short-STATUS_5";
+  if ((packet == VESC_CAN_PACKET_NOTIFY_BOOT) && (frame->dlc < 1U)) return "short-NOTIFY_BOOT";
   if (packet == VESC_CAN_PACKET_PROCESS_SHORT_BUFFER) return "malformed-or-other-short-buffer";
   return "unknown-packet";
 }
@@ -327,6 +328,7 @@ static void diag_log_rx(const struct vesc_bus_config * config, const struct vesc
   struct vesc_status_4 status4;
   struct vesc_status_5 status5;
   struct vesc_fault_status fault;
+  struct vesc_notify_boot boot;
   diag_payload(frame, raw, sizeof(raw));
   if (vesc_decode_status(frame, &status)) {
     LOG_INF(
@@ -356,6 +358,14 @@ static void diag_log_rx(const struct vesc_bus_config * config, const struct vesc
       "type=FAULT response_vesc=%u fault=%u assigned=%u",
       event->timestamp_us, frame->id, packet, source, frame->dlc, raw,
       fault.vesc_can_id, fault.fault_code, event->assigned);
+  } else if (vesc_decode_notify_boot(frame, &boot)) {
+    char hardware_name[CAN_MAX_DLEN + 1U] = {0};
+    memcpy(hardware_name, boot.hardware_name, boot.name_length);
+    LOG_INF(
+      "VESC RX t_us=%lld id=0x%08x packet=%u source=%u dlc=%u raw=[%s] decode=ok "
+      "type=NOTIFY_BOOT hardware_name=%s assigned=%u",
+      event->timestamp_us, frame->id, packet, source, frame->dlc, raw, hardware_name,
+      event->assigned);
   } else {
     LOG_WRN(
       "VESC RX t_us=%lld id=0x%08x packet=%u source=%u dlc=%u raw=[%s] decode=fail "
@@ -523,6 +533,7 @@ static void vesc_rx(const struct device * can_dev, struct can_frame * frame, voi
   struct vesc_status_4 status4;
   struct vesc_status_5 status5;
   struct vesc_fault_status fault;
+  struct vesc_notify_boot boot;
   const int64_t now_ms = k_uptime_get();
   const uint32_t cycle = k_cycle_get_32();
   k_spinlock_key_t key;
@@ -571,6 +582,8 @@ static void vesc_rx(const struct device * can_dev, struct can_frame * frame, voi
           fault.fault_code);
       }
     }
+  } else if (vesc_decode_notify_boot(frame, &boot)) {
+    note_rx(bus, boot.vesc_can_id, 0U, now_ms, false, &slot);
   } else {
     data->diag.invalid_rx_count++;
   }

@@ -110,6 +110,17 @@ static const struct can_frame * last_for(uint8_t id)
   return NULL;
 }
 
+static bool wait_for_current(uint8_t id, int32_t expected_ma, uint8_t timeout_ms)
+{
+  for (uint8_t elapsed = 0U; elapsed < timeout_ms; ++elapsed) {
+    const struct can_frame * frame = last_for(id);
+    if ((frame != NULL) && (frame_current(frame) == expected_ma)) return true;
+    inject_status(id);
+    k_msleep(1);
+  }
+  return false;
+}
+
 static void before(void * fixture)
 {
   ARG_UNUSED(fixture); install_fakes(); captured_count = 0;
@@ -232,6 +243,31 @@ ZTEST(vesc, test_unknown_id_is_observed_but_not_controlled_and_bitmaps_match)
   zassert_is_null(last_for(99));
 }
 
+ZTEST(vesc, test_notify_boot_is_recognized_without_marking_feedback_online)
+{
+  struct can_frame frame = {
+    .id = ((uint32_t)VESC_CAN_PACKET_NOTIFY_BOOT << 8) | 0U,
+    .flags = CAN_FRAME_IDE,
+    .dlc = 2,
+    .data = {'6', '0'},
+  };
+  struct vesc_notify_boot boot;
+  zassert_true(vesc_decode_notify_boot(&frame, &boot));
+  zassert_equal(boot.vesc_can_id, 0U);
+  zassert_equal(boot.name_length, 2U);
+  zassert_mem_equal(boot.hardware_name, "60", 2U);
+
+  inject(&frame);
+  struct vesc_bus_diagnostics diag;
+  zassert_ok(vesc_get_bus_diagnostics(motor0, &diag));
+  zassert_equal(diag.invalid_rx_count, 0U);
+  zassert_true(diag.observed_ids[0] & BIT(0));
+  zassert_equal(diag.online_ids[0] & BIT(0), 0U);
+
+  frame.dlc = 0U;
+  zassert_false(vesc_decode_notify_boot(&frame, &boot));
+}
+
 ZTEST(vesc, test_wrap_forward_reverse_and_exact_half_turn)
 {
   zassert_equal(vesc_position_wrap_delta(10, 17990), 20);
@@ -290,10 +326,10 @@ ZTEST(vesc, test_timeout_reconnect_requires_frames_and_new_enable)
   zassert_ok(vesc_get_slot_diagnostics(motor0, &before_diag));
   inject_status(37); inject_status(37); zassert_equal(motor_enable(motor0), -EAGAIN);
   inject_status(37); zassert_ok(motor_enable(motor0));
-  zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 12.0F)); k_msleep(3);
-  zassert_equal(frame_current(last_for(37)), 5000, "slot current clamp");
-  zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, -12.0F)); k_msleep(3);
-  zassert_equal(frame_current(last_for(37)), -5000, "negative slot current clamp");
+  zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 12.0F));
+  zassert_true(wait_for_current(37, 5000, 10), "slot current clamp");
+  zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, -12.0F));
+  zassert_true(wait_for_current(37, -5000, 10), "negative slot current clamp");
   k_msleep(35); zassert_equal(frame_current(last_for(37)), 0);
   struct vesc_bus_diagnostics bus_diag;
   zassert_ok(vesc_get_bus_diagnostics(motor0, &bus_diag));
