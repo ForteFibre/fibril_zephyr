@@ -31,7 +31,9 @@
 
     fcan_vesc: fcan-vesc {
         compatible = "fibril,fcan-vesc";
-        fcan-ns = "vesc_node.motor{i}";
+        /* Share the canonical MdMotor motorN parameter prefix. VescMotor
+         * contributes only VESC-specific parameters and diagnostics. */
+        fcan-ns = "motor{i}";
         motors = <&vesc_motor0>, <&vesc_motor1>, <&vesc_motor2>, <&vesc_motor3>,
                  <&vesc_motor4>, <&vesc_motor5>, <&vesc_motor6>, <&vesc_motor7>;
         status = "okay";

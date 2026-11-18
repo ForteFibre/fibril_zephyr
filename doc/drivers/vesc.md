@@ -2,8 +2,40 @@
 
 The VESC driver owns one classic CAN controller and exposes eight fixed logical
 motor slots. A slot starts unassigned and cannot transmit until the
-`vesc_node.motorN.vesc_can_id` and `max_current_a` parameters have been
+`motorN.vesc_can_id` and `motorN.max_current_a` parameters have been
 accepted. IDs are never discovered into slots automatically.
+
+The VescMotor and its MdMotor intentionally share the canonical `motorN`
+fibril_can namespace. Existing parameters such as `motorN.invert`,
+`motorN.encoder.gain`, and `motorN.velocity.kp` therefore keep the same names
+as RoboMaster deployments. VESC-only slot parameters are added beside them;
+bus-wide defaults are under `vesc_bus`.
+
+For a firmware node with CAN node ID 3, the ROS parameter file is shaped like
+this:
+
+```yaml
+fibril_can_bridge:
+  ros__parameters:
+    can_iface: can0
+
+    # Existing MdMotor parameters, reusable across motor drivers.
+    md_controller3.motor0.invert: false
+    md_controller3.motor0.encoder.gain: "2 * _pi / (18000 * 19)"
+    md_controller3.motor0.velocity.kp: 0.08
+    md_controller3.motor0.velocity.ki: 0.0004
+    md_controller3.motor0.position.kp: 8.0
+    md_controller3.motor0.use_cascade_position: true
+
+    # VESC-only slot parameters.
+    md_controller3.motor0.vesc_can_id: 37
+    md_controller3.motor0.max_current_a: 12.207
+
+    # VESC bus defaults; a motorN value of zero inherits these.
+    md_controller3.vesc_bus.feedback_timeout_ms: 100
+    md_controller3.vesc_bus.reconnect_frames: 3
+    md_controller3.vesc_bus.command_period_us: 5000
+```
 
 `MOTOR_OUTPUT_MODE_CURRENT` is amperes. The driver clamps every frame to
 `absolute-max-current-ma`; `MdMotor` scales duty by the runtime
