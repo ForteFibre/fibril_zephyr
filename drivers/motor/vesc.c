@@ -418,7 +418,10 @@ int vesc_configure_slot(
   struct vesc_slot_data * slot = &data->slot_data[idx];
   slot->diag.requested_can_id = requested->vesc_can_id;
   bool valid = (requested->vesc_can_id >= VESC_CAN_ID_UNASSIGNED) &&
-    (requested->vesc_can_id <= UINT8_MAX) && isfinite(requested->max_current_a) &&
+    (requested->vesc_can_id <= (int16_t)(VESC_CAN_ID_BROADCAST - 1U)) &&
+    ((requested->vesc_can_id < 0) ||
+     (requested->vesc_can_id != limits->controller_id)) &&
+    isfinite(requested->max_current_a) &&
     (((requested->vesc_can_id == VESC_CAN_ID_UNASSIGNED) &&
       (requested->max_current_a >= 0.0F)) ||
      ((requested->max_current_a > 0.0F) &&

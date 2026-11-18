@@ -13,10 +13,10 @@
 extern "C" {
 #endif
 
-/* Protocol values are isolated here because the selected VESC CAN FOC ESC's
- * manual does not identify its installed firmware. These match
- * ForteFibre/ros_vesc@716a9dc and must be checked against that firmware before
- * hardware commissioning. */
+/* Protocol values are isolated here and follow vedderb/bldc
+ * cb79df8960f77fcdf368f3b921d24d5a3ed86345. */
+#define VESC_CAN_ID_BROADCAST 255U
+
 enum vesc_can_packet_id {
   VESC_CAN_PACKET_SET_CURRENT = 1,
   VESC_CAN_PACKET_PROCESS_SHORT_BUFFER = 8,

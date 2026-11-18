@@ -35,7 +35,10 @@ properties:
   controller-id:
     type: int
     default: 255
-    description: Controller ID expected in selective-values fault replies.
+    description: >
+      This node's source ID in selective-values requests and the destination
+      ID in replies. A motor slot may not use this ID; 255 is the VESC
+      broadcast ID and is also forbidden for motor slots.
 
 child-binding:
   description: A logical slot. reg is 0 through 7, not a VESC CAN ID.

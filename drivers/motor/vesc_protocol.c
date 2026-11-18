@@ -109,12 +109,13 @@ bool vesc_decode_fault_status(
   const struct can_frame * frame, uint8_t controller_id, struct vesc_fault_status * status)
 {
   if ((status == NULL) || !status_frame(frame, VESC_CAN_PACKET_PROCESS_SHORT_BUFFER, 8U) ||
-      (frame->data[0] != controller_id) || (frame->data[1] != 1U) ||
+      ((uint8_t)frame->id != controller_id) ||
+      (frame->data[0] == VESC_CAN_ID_BROADCAST) || (frame->data[1] != 1U) ||
       (frame->data[2] != VESC_COMM_GET_VALUES_SELECTIVE) ||
       (sys_get_be32(&frame->data[3]) != VESC_GET_VALUES_SELECTIVE_FAULT_MASK)) {
     return false;
   }
-  status->vesc_can_id = (uint8_t)frame->id;
+  status->vesc_can_id = frame->data[0];
   status->fault_code = frame->data[7];
   return true;
 }

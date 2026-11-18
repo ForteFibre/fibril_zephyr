@@ -23,15 +23,23 @@ through an outage, and uses the actual receive interval for velocity.
 
 The selected controller is the vendor-described **VESC CAN FOC ESC** for a 6S
 (22--26 V) supply, with a 60 A-class MOSFET stage and CAN configurable to
-1 Mbit/s. Its manual uses VESC Tool 6.05, but does not identify the installed
-firmware version. It documents extended CAN IDs, `CAN_PACKET_STATUS` (9), and
-the STATUS ERPM/current/duty layout; it does not document the current-command
-or STATUS_4 contracts used here.
+1 Mbit/s. Its firmware reference is `vedderb/bldc` at
+`cb79df8960f77fcdf368f3b921d24d5a3ed86345`. That source confirms the 29-bit
+ID layout, ID 255 as broadcast, SET_CURRENT ID 1 with signed A x1000,
+STATUS/4/5 layouts, the selective fault reply, and a configurable command
+timeout. Motor IDs are therefore 0--254, excluding this node's controller ID.
 
-> **Hardware TODO:** identify the installed firmware version, then verify CAN
-> ID reservations, SET_CURRENT scaling/sign and regenerative/0 A behavior,
-> STATUS_4 mechanical meaning/range/direction, fault replies, command timeout,
-> and measured STATUS periods. Verify the safe absolute current for the actual
+STATUS_4 PID position is `mc_interface_get_pid_pos_now()` in degrees x50 and
+is normalized to one revolution. With a configured encoder, the firmware
+derives it from the encoder angle and applies encoder inversion, motor
+direction, and PID offset. It is the motor-side sensor angle; any gearbox/output
+shaft conversion remains outside the VESC protocol layer.
+
+> **Hardware TODO:** verify on the selected controller that its flashed image
+> matches the referenced firmware and measure STATUS periods, jitter, loss,
+> bus load, 0 A behavior, and regenerative behavior. Verify the position sign
+> after the actual encoder calibration and motor installation. Also verify the
+> safe absolute current for the actual
 > motor and power system: the controller manual recommends 60 A absolute for
 > M3508 and 30 A for M2006. The constants are deliberately confined to the
 > protocol/units layer so this does not alter `MdMotor` or diagnostics schemas.

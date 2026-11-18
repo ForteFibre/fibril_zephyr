@@ -83,9 +83,9 @@ static void inject_position(uint8_t id, int16_t counts)
 
 static void inject_fault(uint8_t id, uint8_t fault)
 {
-  struct can_frame frame = {.id = ((uint32_t)VESC_CAN_PACKET_PROCESS_SHORT_BUFFER << 8) | id,
+  struct can_frame frame = {.id = ((uint32_t)VESC_CAN_PACKET_PROCESS_SHORT_BUFFER << 8) | 255,
                             .flags = CAN_FRAME_IDE, .dlc = 8};
-  frame.data[0] = 255; frame.data[1] = 1; frame.data[2] = 50;
+  frame.data[0] = id; frame.data[1] = 1; frame.data[2] = 50;
   sys_put_be32(BIT(15), &frame.data[3]); frame.data[7] = fault; inject(&frame);
 }
 
@@ -139,6 +139,8 @@ ZTEST(vesc, test_assignment_rejects_duplicate_and_invalid_without_losing_old_con
   zassert_equal(vesc_configure_slot(motor1, &b), -EINVAL);
   b = config(256, 5.0F, 20, 3);
   zassert_equal(vesc_configure_slot(motor0, &b), -EINVAL);
+  b = config(255, 5.0F, 20, 3);
+  zassert_equal(vesc_configure_slot(motor0, &b), -EINVAL);
   b = config(38, 11.0F, 20, 3);
   zassert_equal(vesc_configure_slot(motor0, &b), -EINVAL);
   struct vesc_slot_runtime_config applied;
@@ -146,7 +148,7 @@ ZTEST(vesc, test_assignment_rejects_duplicate_and_invalid_without_losing_old_con
   zassert_equal(applied.vesc_can_id, 37);
   struct vesc_bus_diagnostics diag;
   zassert_ok(vesc_get_bus_diagnostics(motor0, &diag));
-  zassert_equal(diag.config_error_count, before_diag.config_error_count + 3);
+  zassert_equal(diag.config_error_count, before_diag.config_error_count + 4);
 }
 
 ZTEST(vesc, test_id_change_sends_zero_to_old_id_and_unassigned_sends_nothing)
