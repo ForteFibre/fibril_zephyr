@@ -12,7 +12,6 @@ types:
         dir: s2m
         period_us: 500000
         fields: { words: { type: u32, len: 8 } }
-        ros: { type: fibril_can_msgs/msg/VescIdBitmap }
       online_ids: *id_bitmap
       stale_ids: *id_bitmap
       assigned_ids: *id_bitmap
@@ -28,7 +27,6 @@ types:
           tx_complete_error_count: u32
           invalid_rx_count: u32
           config_error_count: u32
-        ros: { type: fibril_can_msgs/msg/VescBusDiag }
 
   VescMotor:
     params:
@@ -51,7 +49,6 @@ types:
           online: bool
           stale: bool
           fault_code: u8
-        ros: { type: fibril_can_msgs/msg/VescMotorState }
       diagnostics:
         dir: s2m
         period_us: 500000
@@ -70,7 +67,6 @@ types:
           can_id_change_count: u32
           fault_code: u8
           fault_count: u32
-        ros: { type: fibril_can_msgs/msg/VescMotorDiag }
       packet_health:
         dir: s2m
         period_us: 500000
@@ -80,7 +76,6 @@ types:
           status_4_age_ms: u32
           status_5_age_ms: u32
           fault_age_ms: u32
-        ros: { type: fibril_can_msgs/msg/VescPacketHealth }
       telemetry:
         dir: s2m
         period_us: 500000
@@ -92,4 +87,3 @@ types:
           input_voltage_v: f32
           fet_temperature_c: f32
           motor_temperature_c: f32
-        ros: { type: fibril_can_msgs/msg/VescMotorTelemetry }
