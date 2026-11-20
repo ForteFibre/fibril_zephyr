@@ -271,7 +271,7 @@ static void stop_slot(const struct device * bus, struct vesc_slot_data * slot)
   /* Close the local output gate before the old physical ID is stopped. */
   slot->enabled = false;
   slot->command_a = 0.0F;
-  if (slot->config.vesc_can_id >= 0) {
+  if ((slot->config.vesc_can_id >= 0) && slot->seen) {
     (void)send_current(bus, (uint8_t)slot->config.vesc_can_id, 0.0F, 0.0F);
   }
 }
@@ -671,6 +671,12 @@ static void service_work(struct k_work * work)
     UPDATE_PACKET_FRESH(VESC_STATUS_MASK_STATUS_5, last_status_5_ms, status_5_age_ms);
     UPDATE_PACKET_FRESH(VESC_STATUS_MASK_FAULT, last_fault_rx_ms, fault_age_ms);
 #undef UPDATE_PACKET_FRESH
+    /* VESC STATUS is unsolicited. Wait for fresh feedback before sending
+     * periodic traffic to a slot that may have no peer to ACK it.
+     */
+    if (!slot->seen || timed_out) {
+      continue;
+    }
     if ((now_us - slot->last_tx_us) >= slot->config.command_period_us) {
       float command = 0.0F;
       if (slot->enabled && slot->diag.online && !slot->diag.stale &&

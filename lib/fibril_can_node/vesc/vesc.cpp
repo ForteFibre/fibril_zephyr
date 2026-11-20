@@ -168,3 +168,6 @@ static void tick()
 
 FIBRIL_FCAN_FUNC_DEFINE(vesc, .array = fcan_gen::vescmotor::block_array_index,
   .count = VESC_MOTOR_SLOT_COUNT, .init = init, .start = start, .tick = tick);
+
+FIBRIL_FCAN_FUNC_DEFINE(vesc_bus, .array = fcan_gen::vescbus::block_array_index,
+  .count = 1);

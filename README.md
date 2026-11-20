@@ -167,3 +167,16 @@ Apache-2.0（[LICENSE](LICENSE)）
 
 [west_t2]: https://docs.zephyrproject.org/latest/develop/west/workspaces.html#west-t2
 [zephyr_gsg]: https://docs.zephyrproject.org/latest/develop/getting_started/index.html
+## MiniV4 USB firmware build prerequisite
+
+After `west update`, apply the bundled M_CAN patch to the Zephyr v4.4.1
+checkout before building with the `miniv4-usb` snippet. From the west
+workspace root, run this once per clean Zephyr checkout.
+
+```sh
+git -C zephyr apply ../fibril_zephyr/patches/zephyr/mcan-protocol-error-irq.patch
+```
+
+The snippet disables per-error protocol interrupts so physical CAN retries
+without an ACKing peer do not interrupt USB servicing continuously. CAN
+statistics and state-transition interrupts remain enabled.
