@@ -87,7 +87,8 @@ manifest:
       # arrived. The codegen package must be at least v0.3.3: an older
       # fcan_codegen emits a *_complete that returns nothing, and apps/node with
       # MdMotor fails to compile. v0.3.4 changes the runtime only.
-      revision: v0.4.2
+      # VESC validation snapshot pending the fibril_can release.
+      revision: 167f340bb3cf3c00dbeaaca8cfbb490b9701a6d4
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
     - name: fibril_common
