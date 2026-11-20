@@ -4,7 +4,6 @@
  */
 #define DT_DRV_COMPAT fibril_fcan_vesc
 
-#include <cstring>
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -24,8 +23,6 @@ BUILD_ASSERT(ARRAY_SIZE(motors) == VESC_MOTOR_SLOT_COUNT, "VESC requires exactly
 
 static struct k_spinlock lock;
 static bool config_pending = true;
-struct state_snapshot { int16_t id; bool configured; bool online; bool stale; uint8_t fault; bool known; };
-static state_snapshot previous[VESC_MOTOR_SLOT_COUNT];
 
 static void request_config()
 {
@@ -82,63 +79,6 @@ static void apply_config()
 #endif
 }
 
-template<typename Publisher>
-static void copy_words(Publisher & pub, const uint32_t * words)
-{
-  std::memcpy(pub.words, words, VESC_ID_BITMAP_WORDS * sizeof(uint32_t));
-}
-
-static void publish_bus()
-{
-  struct vesc_bus_diagnostics d{};
-  if (vesc_get_bus_diagnostics(motors[0], &d) != 0) return;
-  if (auto p = fcan_gen::vescbus(0).publish_observed_ids()) copy_words(*p, d.observed_ids);
-  if (auto p = fcan_gen::vescbus(0).publish_online_ids()) copy_words(*p, d.online_ids);
-  if (auto p = fcan_gen::vescbus(0).publish_stale_ids()) copy_words(*p, d.stale_ids);
-  if (auto p = fcan_gen::vescbus(0).publish_assigned_ids()) copy_words(*p, d.assigned_ids);
-  if (auto p = fcan_gen::vescbus(0).publish_unexpected_ids()) copy_words(*p, d.unexpected_ids);
-  if (auto p = fcan_gen::vescbus(0).publish_missing_ids()) copy_words(*p, d.missing_ids);
-  if (auto p = fcan_gen::vescbus(0).publish_diagnostics()) {
-    p->rx_count = d.rx_count; p->tx_count = d.tx_count; p->tx_error_count = d.tx_error_count;
-    p->tx_complete_error_count = d.tx_complete_error_count;
-    p->invalid_rx_count = d.invalid_rx_count; p->config_error_count = d.config_error_count;
-  }
-}
-
-static void publish_slot(uint8_t i)
-{
-  struct vesc_slot_diagnostics d{};
-  if (vesc_get_slot_diagnostics(motors[i], &d) != 0) return;
-  state_snapshot & old = previous[i];
-  if (!old.known || (old.id != d.applied_can_id) || (old.configured != d.slot_configured) ||
-      (old.online != d.online) || (old.stale != d.stale) || (old.fault != d.fault_code)) {
-    if (auto p = fcan_gen::vescmotor(i).publish_state_change()) {
-      p->applied_can_id = d.applied_can_id; p->slot_configured = d.slot_configured;
-      p->online = d.online; p->stale = d.stale; p->fault_code = d.fault_code;
-      old = {d.applied_can_id, d.slot_configured, d.online, d.stale, d.fault_code, true};
-    }
-  }
-  if (auto p = fcan_gen::vescmotor(i).publish_diagnostics()) {
-    p->requested_can_id = d.requested_can_id; p->applied_can_id = d.applied_can_id;
-    p->slot_configured = d.slot_configured; p->last_config_request_ok = d.last_config_request_ok;
-    p->online = d.online; p->stale = d.stale; p->last_rx_age_ms = d.last_rx_age_ms;
-    p->status_mask = d.status_mask; p->rx_count = d.rx_count; p->timeout_count = d.timeout_count;
-    p->reconnect_count = d.reconnect_count; p->can_id_change_count = d.can_id_change_count;
-    p->fault_code = d.fault_code; p->fault_count = d.fault_count;
-  }
-  if (auto p = fcan_gen::vescmotor(i).publish_packet_health()) {
-    p->fresh_status_mask = d.fresh_status_mask; p->status_age_ms = d.status_age_ms;
-    p->status_4_age_ms = d.status_4_age_ms; p->status_5_age_ms = d.status_5_age_ms;
-    p->fault_age_ms = d.fault_age_ms;
-  }
-  if (auto p = fcan_gen::vescmotor(i).publish_telemetry()) {
-    p->motor_current_a = d.motor_current_a; p->input_current_a = d.input_current_a;
-    p->erpm = d.erpm; p->duty = d.duty; p->input_voltage_v = d.input_voltage_v;
-    p->fet_temperature_c = d.fet_temperature_c;
-    p->motor_temperature_c = d.motor_temperature_c;
-  }
-}
-
 static int init()
 {
   for (const auto * motor : motors) if (!device_is_ready(motor)) return -ENODEV;
@@ -162,8 +102,6 @@ static void tick()
   config_pending = false;
   k_spin_unlock(&lock, key);
   if (pending) apply_config();
-  publish_bus();
-  for (uint8_t i = 0; i < VESC_MOTOR_SLOT_COUNT; ++i) publish_slot(i);
 }
 
 FIBRIL_FCAN_FUNC_DEFINE(vesc, .array = fcan_gen::vescmotor::block_array_index,

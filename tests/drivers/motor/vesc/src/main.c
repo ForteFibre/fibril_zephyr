@@ -195,7 +195,7 @@ ZTEST(vesc, test_assignment_rejects_duplicate_and_invalid_without_losing_old_con
   zassert_equal(diag.config_error_count, before_diag.config_error_count + 6);
 }
 
-ZTEST(vesc, test_id_change_sends_zero_to_old_id_and_unassigned_sends_nothing)
+ZTEST(vesc, test_id_change_stops_seen_old_id_and_never_transmits_to_unseen_new_id)
 {
   struct vesc_slot_runtime_config c = config(37, 5.0F, 20, 1);
   zassert_ok(vesc_configure_slot(motor0, &c)); inject_status(37);
@@ -206,8 +206,7 @@ ZTEST(vesc, test_id_change_sends_zero_to_old_id_and_unassigned_sends_nothing)
   c.vesc_can_id = 201; zassert_ok(vesc_configure_slot(motor0, &c));
   zassert_not_null(last_for(37)); zassert_equal(frame_current(last_for(37)), 0);
   captured_count = 0; c.vesc_can_id = -1; zassert_ok(vesc_configure_slot(motor0, &c));
-  k_msleep(3); zassert_not_null(last_for(201));
-  zassert_equal(frame_current(last_for(201)), 0, "unassign did not stop old ID");
+  k_msleep(3); zassert_is_null(last_for(201));
   struct vesc_slot_diagnostics after_diag;
   zassert_ok(vesc_get_slot_diagnostics(motor0, &after_diag));
   zassert_equal(after_diag.can_id_change_count, before_diag.can_id_change_count + 2);
@@ -306,6 +305,24 @@ ZTEST(vesc, test_status_4_freshness_expires_while_other_status_keeps_motor_onlin
   zassert_ok(encoder_get_feedback(enc0, &fb));
 }
 
+ZTEST(vesc, test_generic_motor_feedback_exposes_md_current_and_health)
+{
+  struct vesc_slot_runtime_config c = config(37, 5.0F, 20, 1);
+  zassert_ok(vesc_configure_slot(motor0, &c));
+  inject_status(37);
+
+  struct motor_feedback feedback;
+  zassert_ok(motor_get_feedback(motor0, &feedback));
+  zassert_true(feedback.online);
+  zassert_false(feedback.stale);
+  zassert_true(feedback.valid_mask & MOTOR_FEEDBACK_CURRENT);
+  zassert_within(feedback.current, 2.5F, 0.001F);
+
+  inject_fault(37, 3);
+  zassert_ok(motor_get_feedback(motor0, &feedback));
+  zassert_false(feedback.online);
+}
+
 ZTEST(vesc, test_reconnect_frames_do_not_accumulate_across_a_timeout)
 {
   struct vesc_slot_runtime_config c = config(37, 5.0F, 10, 3);
@@ -354,6 +371,7 @@ ZTEST(vesc, test_async_transmit_errors_are_counted)
   zassert_ok(vesc_get_bus_diagnostics(motor0, &before_diag));
   tx_complete_error = -EIO;
   zassert_ok(vesc_configure_slot(motor0, &c));
+  inject_status(37);
   k_msleep(3);
   struct vesc_bus_diagnostics after_diag;
   zassert_ok(vesc_get_bus_diagnostics(motor0, &after_diag));

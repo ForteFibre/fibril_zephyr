@@ -1,5 +1,5 @@
 config FIBRIL_CAN_NODE_VESC
-	bool "VESC runtime configuration and diagnostics"
+	bool "VESC runtime configuration"
 	default y
 	depends on MOTOR_VESC
 	depends on DT_HAS_FIBRIL_FCAN_VESC_ENABLED

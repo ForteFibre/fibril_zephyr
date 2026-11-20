@@ -177,7 +177,7 @@ snippets/miniv4/md-rotor8/
 
 snippets/miniv4/md-vesc8/
 ├── snippet.yml                        ../../common/md/md.conf も append する
-└── fibril_robomaster_miniv4.overlay   VESC 8 slot、MdMotor、VESC parameter/diagnostics
+└── fibril_robomaster_miniv4.overlay   VESC 8 slot、MdMotor、VESC parameter
 
 snippets/miniv4/md-amt4/
 ├── snippet.yml                        ../../common/md/md.conf と amt21.conf を append する

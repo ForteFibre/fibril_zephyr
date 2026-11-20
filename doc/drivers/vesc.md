@@ -11,6 +11,15 @@ fibril_can namespace. Existing parameters such as `motorN.invert`,
 as RoboMaster deployments. VESC-only slot parameters are added beside them;
 bus-wide defaults are under `vesc_bus`.
 
+The ROS control surface is entirely the existing MdMotor contract:
+`fibril_control_msgs/msg/Target` on `motorN/target` and
+`fibril_control_msgs/msg/Feedback` on `motorN/feedback`, plus the existing
+MdMotor services. The VESC block contributes parameters only. It does not
+publish VESC-specific ROS messages or duplicate current, position, velocity,
+output, or readiness under another topic. Protocol-level counters and packet
+ages remain in the driver diagnostics API and in the opt-in diagnostic log;
+they are not part of the motor control API.
+
 For a firmware node with CAN node ID 3, the ROS parameter file is shaped like
 this:
 
@@ -71,7 +80,8 @@ ID layout, ID 255 as broadcast, SET_CURRENT ID 1 with signed A x1000,
 STATUS/4/5 layouts, the selective fault reply, and a configurable command
 timeout. This deployment reserves ID 254 as the MiniV4 fault-reply destination
 and never emits broadcast commands. Runtime motor IDs are therefore 0--253;
-254 and 255 may be observed in diagnostics but are never assigned or controlled.
+254 and 255 may be observed by the opt-in driver diagnostics but are never
+assigned or controlled.
 
 STATUS_4 PID position is `mc_interface_get_pid_pos_now()` in degrees x50 and
 is normalized to one revolution. With a configured encoder, the firmware
@@ -81,10 +91,10 @@ shaft conversion remains outside the VESC protocol layer.
 
 `max_current_a` is both the DUTY 1.0 scale and a slot-local final current clamp;
 the devicetree `absolute-max-current-ma` remains an independent broader guard.
-Diagnostics report ages and fresh masks for STATUS, STATUS_4, STATUS_5, and the
-selective fault reply. CAN transmit-completion errors are counted separately
-from queueing errors and are also included in the aggregate transmit error
-count.
+The internal diagnostics API reports ages and fresh masks for STATUS,
+STATUS_4, STATUS_5, and the selective fault reply. CAN transmit-completion
+errors are counted separately from queueing errors and are also included in
+the aggregate transmit error count.
 
 > **Hardware TODO:** verify on the selected controller that its flashed image
 > matches the referenced firmware and measure STATUS periods, jitter, loss,
@@ -93,8 +103,8 @@ count.
 > safe absolute current for the actual
 > motor and power system: the controller manual recommends 60 A absolute for
 > M3508 and 30 A for M2006. The constants are deliberately confined to the
-> protocol/units layer so this does not alter `MdMotor` or diagnostics schemas.
+> protocol/units layer so this does not alter the `MdMotor` ROS contract.
 
 On RoboMaster Mini V4, `miniv4-md-vesc8` assigns MOTCAN1 (`fdcan3`) at 1 Mbit/s
 and creates the eight VESC slots, encoder shims, `MdMotor` instances, and VESC
-diagnostics.
+runtime configuration.
