@@ -1,0 +1,25 @@
+config FIBRIL_CAN_NODE_VESC
+	bool "VESC runtime configuration"
+	default y
+	depends on MOTOR_VESC
+	depends on DT_HAS_FIBRIL_FCAN_VESC_ENABLED
+
+config FIBRIL_CAN_NODE_VESC_MAX
+	int
+	default 8
+	range 8 8
+	depends on FIBRIL_CAN_NODE_VESC
+
+config FIBRIL_CAN_NODE_VESC_HARDWARE_SELFTEST
+	bool "Inject a zero-output VESC hardware self-test"
+	depends on FIBRIL_CAN_NODE_VESC
+	depends on FIBRIL_CAN_NODE_MD_MOTOR
+	depends on MOTOR_VESC_DIAGNOSTICS
+	help
+	  Hardware bring-up only. Bind slot 0 to VESC CAN ID 0 with conservative
+	  timing, then inject one DUTY target whose value is exactly zero after
+	  feedback makes the motor healthy. This exercises the normal MdMotor,
+	  motor class, and VESC driver path without a fibril_can master.
+
+	  The test never injects a non-zero target. Leave it disabled in normal
+	  firmware and in receive-only diagnostic builds.

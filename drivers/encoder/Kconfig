@@ -19,6 +19,7 @@ source "subsys/logging/Kconfig.template.log_config"
 rsource "Kconfig.amt21"
 rsource "Kconfig.qdec_stm32"
 rsource "Kconfig.robomaster"
+rsource "Kconfig.vesc"
 
 # zephyr-keep-sorted-stop
 

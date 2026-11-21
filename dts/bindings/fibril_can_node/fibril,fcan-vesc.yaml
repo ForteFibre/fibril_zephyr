@@ -1,0 +1,19 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Runtime VESC assignment and diagnostics. motors must contain the fixed eight
+  vesc,motor logical slots in slot order. VescMotor instances are named by
+  fcan-ns; one VescBus instance is named vesc_bus. A VescMotor may share the
+  same motorN namespace as the MdMotor that controls it because their schema
+  members are disjoint.
+compatible: "fibril,fcan-vesc"
+include: base.yaml
+properties:
+  fcan-ns:
+    type: string
+    required: true
+  motors:
+    type: phandles
+    required: true
+    description: Exactly eight vesc,motor logical slots in slot order.

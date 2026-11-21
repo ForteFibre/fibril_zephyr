@@ -59,6 +59,7 @@ overlay は `#include <fibril/...>` で取り込み、`fibril,fcan-*` のノー�
 | `dts/fibril/can-bitrate.h` | fibril_can のバス（1 M / 5 M）と、classic CAN のアクチュエータのバス（1 M）のビットレート |
 | `dts/fibril/robomaster-x8.dtsi` | RoboMaster の ESC 8 台（`rm_motor1..8`、C620）とロータ角（`rm_enc1..8`）。基板に依存しない。`cans` は基板の断片が書く |
 | `dts/fibril/robomaster_miniv4/robomaster.dtsi` | 上を FDCAN2 と FDCAN3 に載せ、両方を 1 Mbps で有効にする |
+| `dts/fibril/robomaster_miniv4/vesc.dtsi` | MOTCAN1（FDCAN3、1 Mbps）の VESC bus、固定8論理slot、encoder shim。物理 CAN ID は未割り当てで起動する |
 | `dts/fibril/robomaster_miniv4/qdec-enc0.dtsi`〜`qdec-enc5.dtsi` | 入力 1 本ずつ（`enc0`〜`enc5`）。timer は基板の文書の表の割り当てで、その timer を確保する |
 | `dts/fibril/robomaster_miniv4/qdec.dtsi` | 上の 6 本をすべて取り込む |
 | `dts/fibril/robomaster_miniv4/adc.dtsi` | ADC1 と ADC2 を有効にする（チャネルは基板の DTS が定義する） |
@@ -173,6 +174,10 @@ snippets/miniv4/md-qdec4/
 snippets/miniv4/md-rotor8/
 ├── snippet.yml                        ../../common/md/md.conf も append する
 └── fibril_robomaster_miniv4.overlay   md_motor ノード（RoboMaster 1〜8 とロータ角）
+
+snippets/miniv4/md-vesc8/
+├── snippet.yml                        ../../common/md/md.conf も append する
+└── fibril_robomaster_miniv4.overlay   VESC 8 slot、MdMotor、VESC parameter
 
 snippets/miniv4/md-amt4/
 ├── snippet.yml                        ../../common/md/md.conf と amt21.conf を append する

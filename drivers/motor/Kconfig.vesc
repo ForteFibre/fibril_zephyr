@@ -1,0 +1,50 @@
+config MOTOR_VESC
+	bool "VESC CAN motor driver"
+	default y
+	depends on CAN
+	depends on DT_HAS_VESC_BUS_ENABLED
+	help
+	  Eight runtime-bindable VESC motor slots on one classic CAN bus.
+
+if MOTOR_VESC
+
+config MOTOR_VESC_WORK_PERIOD_US
+	int "VESC driver service period in microseconds"
+	default 1000
+	range 500 10000
+
+config MOTOR_VESC_DIAGNOSTICS
+	bool "VESC serial diagnostics"
+	depends on LOG
+	help
+	  Emit rate-limited raw RX/TX frames, decoded values, configuration,
+	  state changes, and periodic counters through the Zephyr console. CAN RX
+	  callbacks only enqueue bounded records; formatting runs in system work
+	  queue context. Leave this disabled in normal firmware.
+
+config MOTOR_VESC_DIAGNOSTICS_FIRST_FRAMES
+	int "Initial frames logged per packet and CAN ID"
+	default 3
+	range 1 10
+	depends on MOTOR_VESC_DIAGNOSTICS
+
+config MOTOR_VESC_DIAGNOSTICS_SUMMARY_MS
+	int "Diagnostic summary interval in milliseconds"
+	default 1000
+	range 100 60000
+	depends on MOTOR_VESC_DIAGNOSTICS
+
+config MOTOR_VESC_DIAGNOSTICS_WORKQ_STACK_SIZE
+	int "Diagnostic work queue stack size"
+	default 2048
+	depends on MOTOR_VESC_DIAGNOSTICS
+
+config MOTOR_VESC_DIAGNOSTICS_WORKQ_PRIORITY
+	int "Diagnostic work queue priority"
+	default 14
+	range 0 14
+	depends on MOTOR_VESC_DIAGNOSTICS
+	help
+	  Keep this numerically larger (lower priority) than control and CAN work.
+
+endif

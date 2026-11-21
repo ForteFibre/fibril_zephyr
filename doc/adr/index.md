@@ -57,6 +57,7 @@
 | [0022](0022-odrive-control-api-layering.md) | ODrive の制御 API を push 型 feedback と機種固有ヘッダで載せる | Proposed |
 | [0023](0023-odrive-adapter-block-type.md) | ODrive を fibril_odrive_adapter の後継のブロック型として載せる | Proposed |
 | [0024](0024-motor-class-si-units.md) | 汎用 motor クラスの指令と feedback を float の SI 単位にする | Proposed |
+| [0025](0025-vesc-md-motor-ros-interface.md) | VESCはMdMotorのROSインタフェースだけを公開する | Proposed |
 
 ```{toctree}
 :maxdepth: 1
@@ -86,4 +87,5 @@
 0022-odrive-control-api-layering
 0023-odrive-adapter-block-type
 0024-motor-class-si-units
+0025-vesc-md-motor-ros-interface
 ```

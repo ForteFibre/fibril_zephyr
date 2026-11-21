@@ -45,6 +45,7 @@ rsource "odometry/Kconfig"
 rsource "odrive/Kconfig"
 rsource "robstride/Kconfig"
 rsource "solenoid/Kconfig"
+rsource "vesc/Kconfig"
 
 module = FIBRIL_CAN_NODE
 module-str = fibril_can_node

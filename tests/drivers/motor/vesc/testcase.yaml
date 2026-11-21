@@ -1,0 +1,7 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+tests:
+  drivers.motor.vesc:
+    tags: [drivers, motor, encoder, can, vesc]
+    integration_platforms: [native_sim, native_sim/native/64]

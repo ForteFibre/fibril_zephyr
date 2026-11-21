@@ -14,6 +14,7 @@ add_subdirectory(odometry)
 add_subdirectory(odrive)
 add_subdirectory(robstride)
 add_subdirectory(solenoid)
+add_subdirectory(vesc)
 
 # Each block type contributes two things on global properties, which the
 # application reads and hands to the codegen: its type.yaml, and the

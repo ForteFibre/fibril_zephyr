@@ -1,0 +1,58 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#ifndef FIBRIL_MINIV4_VESC_DTSI
+#define FIBRIL_MINIV4_VESC_DTSI
+
+#include <fibril/can-bitrate.h>
+
+#ifdef FIBRIL_CLAIM_FDCAN3
+#error "FDCAN3 claimed twice; the VESC bus is one claimant"
+#endif
+#define FIBRIL_CLAIM_FDCAN3 1
+
+/ {
+    vesc_bus: vesc-bus {
+        compatible = "vesc,bus";
+        #address-cells = <1>;
+        #size-cells = <0>;
+        cans = <&fdcan3>;
+        controller-id = <254>;
+
+        /* TODO(hardware): The selected VESC CAN FOC ESC manual recommends
+         * 60 A absolute for M3508 but 30 A for M2006. This broad board guard
+         * must be reduced if the selected motor/power system requires it;
+         * normal operation must set a lower ROS max_current_a. */
+        absolute-max-current-ma = <60000>;
+        max-feedback-timeout-ms = <5000>;
+        min-command-period-us = <1000>;
+        max-reconnect-frames = <10>;
+
+        vesc_motor0: motor@0 { compatible = "vesc,motor"; reg = <0>; };
+        vesc_motor1: motor@1 { compatible = "vesc,motor"; reg = <1>; };
+        vesc_motor2: motor@2 { compatible = "vesc,motor"; reg = <2>; };
+        vesc_motor3: motor@3 { compatible = "vesc,motor"; reg = <3>; };
+        vesc_motor4: motor@4 { compatible = "vesc,motor"; reg = <4>; };
+        vesc_motor5: motor@5 { compatible = "vesc,motor"; reg = <5>; };
+        vesc_motor6: motor@6 { compatible = "vesc,motor"; reg = <6>; };
+        vesc_motor7: motor@7 { compatible = "vesc,motor"; reg = <7>; };
+    };
+
+    vesc_enc0: vesc-encoder-0 { compatible = "vesc,encoder"; motor = <&vesc_motor0>; };
+    vesc_enc1: vesc-encoder-1 { compatible = "vesc,encoder"; motor = <&vesc_motor1>; };
+    vesc_enc2: vesc-encoder-2 { compatible = "vesc,encoder"; motor = <&vesc_motor2>; };
+    vesc_enc3: vesc-encoder-3 { compatible = "vesc,encoder"; motor = <&vesc_motor3>; };
+    vesc_enc4: vesc-encoder-4 { compatible = "vesc,encoder"; motor = <&vesc_motor4>; };
+    vesc_enc5: vesc-encoder-5 { compatible = "vesc,encoder"; motor = <&vesc_motor5>; };
+    vesc_enc6: vesc-encoder-6 { compatible = "vesc,encoder"; motor = <&vesc_motor6>; };
+    vesc_enc7: vesc-encoder-7 { compatible = "vesc,encoder"; motor = <&vesc_motor7>; };
+};
+
+/* MOTCAN1 is the dedicated VESC bus in the first deployment. */
+&fdcan3 {
+    status = "okay";
+    bitrate = <FIBRIL_ACTUATOR_CAN_BITRATE>;
+};
+
+#endif

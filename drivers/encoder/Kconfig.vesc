@@ -1,0 +1,7 @@
+config ENCODER_VESC
+	bool "VESC position encoder shim"
+	default y
+	depends on MOTOR_VESC
+	depends on DT_HAS_VESC_ENCODER_ENABLED
+	help
+	  Expose VESC STATUS_4 position as a continuous encoder-class device.
