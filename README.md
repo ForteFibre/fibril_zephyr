@@ -165,3 +165,15 @@ Apache-2.0（[LICENSE](LICENSE)）
 
 [west_t2]: https://docs.zephyrproject.org/latest/develop/west/workspaces.html#west-t2
 [zephyr_gsg]: https://docs.zephyrproject.org/latest/develop/getting_started/index.html
+## MiniV4 USB with no ACKing CAN peer
+
+If repeated protocol errors interfere with USB servicing, apply the bundled
+patch to the Zephyr v4.4.1 checkout from the west workspace root:
+
+```sh
+git -C zephyr apply ../fibril_zephyr/patches/zephyr/mcan-protocol-error-irq.patch
+```
+
+Append `-- -DEXTRA_CONF_FILE=miniv4-usb-no-protocol-error-irq.conf` to the
+MiniV4 USB node build. This opts out of M_CAN protocol-error interrupt
+statistics for that image. Bus state interrupts remain enabled.

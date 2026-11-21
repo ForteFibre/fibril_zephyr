@@ -1,0 +1,52 @@
+diff --git a/drivers/can/Kconfig.mcan b/drivers/can/Kconfig.mcan
+index db09fc800c1..2a0f9be9271 100644
+--- a/drivers/can/Kconfig.mcan
++++ b/drivers/can/Kconfig.mcan
+@@ -7,3 +7,12 @@ config CAN_MCAN
+ 	bool
+ 	help
+ 	  Enable the Bosch M_CAN CAN IP module driver backend.
++
++config CAN_MCAN_PROTOCOL_ERROR_IRQ
++	bool "Collect M_CAN protocol error statistics in interrupts"
++	depends on CAN_MCAN && CAN_STATS
++	default y
++	help
++	  Enable protocol error interrupts for statistics. Disable this on
++	  systems that must keep servicing other interfaces while an M_CAN
++	  bus repeatedly reports errors, for example with no ACKing peer.
+diff --git a/drivers/can/can_mcan.c b/drivers/can/can_mcan.c
+index 513daad8219..291b0e39857 100644
+--- a/drivers/can/can_mcan.c
++++ b/drivers/can/can_mcan.c
+@@ -653,7 +653,11 @@ void can_mcan_line_0_isr(const struct device *dev)
+ {
+ 	const uint32_t events = CAN_MCAN_IR_BO | CAN_MCAN_IR_EP | CAN_MCAN_IR_EW |
+ 				CAN_MCAN_IR_TEFN | CAN_MCAN_IR_TEFL | CAN_MCAN_IR_ARA |
+-				CAN_MCAN_IR_MRAF | CAN_MCAN_IR_PEA | CAN_MCAN_IR_PED;
++				CAN_MCAN_IR_MRAF
++#ifdef CONFIG_CAN_MCAN_PROTOCOL_ERROR_IRQ
++				| CAN_MCAN_IR_PEA | CAN_MCAN_IR_PED
++#endif
++				;
+ 	struct can_mcan_data *data = dev->data;
+ 	uint32_t ir;
+ 	int err;
+@@ -691,7 +695,7 @@ void can_mcan_line_0_isr(const struct device *dev)
+ 			LOG_ERR("Message RAM access failure");
+ 		}
+ 
+-#ifdef CONFIG_CAN_STATS
++#ifdef CONFIG_CAN_MCAN_PROTOCOL_ERROR_IRQ
+ 		if ((ir & (CAN_MCAN_IR_PEA | CAN_MCAN_IR_PED)) != 0U) {
+ 			uint32_t reg;
+ 			/* This function automatically updates protocol error stats */
+@@ -1547,7 +1551,7 @@ int can_mcan_init(const struct device *dev)
+ 	reg = CAN_MCAN_IE_BOE | CAN_MCAN_IE_EWE | CAN_MCAN_IE_EPE | CAN_MCAN_IE_MRAFE |
+ 	      CAN_MCAN_IE_TEFLE | CAN_MCAN_IE_TEFNE | CAN_MCAN_IE_RF0NE | CAN_MCAN_IE_RF1NE |
+ 	      CAN_MCAN_IE_RF0LE | CAN_MCAN_IE_RF1LE;
+-#ifdef CONFIG_CAN_STATS
++#ifdef CONFIG_CAN_MCAN_PROTOCOL_ERROR_IRQ
+ 	/* These ISRs are only enabled/used for statistics, they are otherwise
+ 	 * disabled as they may produce a significant amount of frequent ISRs.
+ 	 */
