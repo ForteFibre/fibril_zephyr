@@ -17,6 +17,7 @@
 / {
     fcan_md_motor: fcan-md-motor {
         compatible = "fibril,fcan-md-motor";
+        require-motor-feedback;
         fcan-ns = "motor{i}";
         motors = <&vesc_motor0>, <&vesc_motor1>, <&vesc_motor2>, <&vesc_motor3>,
                  <&vesc_motor4>, <&vesc_motor5>, <&vesc_motor6>, <&vesc_motor7>;
