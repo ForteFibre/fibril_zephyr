@@ -142,6 +142,8 @@ struct motor_info
    * power cycle, is the driver's to document.
    */
   float zero_counts;
+  /** Current in A for duty 1.0, or 0 to use the build-time scale. */
+  float current_scale_a;
 };
 
 /** @brief Driver API for enabling motor output. */

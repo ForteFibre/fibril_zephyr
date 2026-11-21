@@ -71,6 +71,13 @@ properties:
       on the paired motor, or the loops run away; flip the encoder
       (`invert-direction` on a qdec) rather than the motor to fix it.
 
+  require-motor-feedback:
+    type: boolean
+    description: |
+      Require fresh motor feedback for output and readiness. On feedback loss,
+      stop and disable output until feedback returns and a new command arrives.
+      Leave unset when control can operate with an independent encoder.
+
   duty-full-scale-ma:
     type: array
     required: true
