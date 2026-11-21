@@ -12,7 +12,7 @@ types:
     params:
       # 254 is the MiniV4 fault-reply destination and 255 is VESC broadcast.
       vesc_can_id: { type: i16, default: -1, min: -1, max: 253 }
-      max_current_a: { type: f32, default: 0.0, min: 0.0 }
+      vesc_max_current_a: { type: f32, default: 0.0, min: 0.0 }
       # Zero inherits the VescBus common value.
       feedback_timeout_ms: { type: u32, default: 0 }
       reconnect_frames: { type: u8, default: 0, max: 10 }

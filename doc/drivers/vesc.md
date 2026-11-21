@@ -2,7 +2,7 @@
 
 The VESC driver owns one classic CAN controller and exposes eight fixed logical
 motor slots. A slot starts unassigned and cannot transmit until the
-`motorN.vesc_can_id` and `motorN.max_current_a` parameters have been
+`motorN.vesc_can_id` and `motorN.vesc_max_current_a` parameters have been
 accepted. IDs are never discovered into slots automatically.
 
 The VescMotor and its MdMotor intentionally share the canonical `motorN`
@@ -38,7 +38,7 @@ fibril_can_bridge:
 
     # VESC-only slot parameters.
     md_controller3.motor0.vesc_can_id: 37
-    md_controller3.motor0.max_current_a: 12.207
+    md_controller3.motor0.vesc_max_current_a: 12.207
 
     # VESC bus defaults; a motorN value of zero inherits these.
     md_controller3.vesc_bus.feedback_timeout_ms: 100
@@ -48,7 +48,7 @@ fibril_can_bridge:
 
 `MOTOR_OUTPUT_MODE_CURRENT` is amperes. The driver clamps every frame to
 `absolute-max-current-ma`; `MdMotor` scales duty by the runtime
-`max_current_a`. CAN packet IDs and physical conversions live in
+`vesc_max_current_a`. CAN packet IDs and physical conversions live in
 `vesc_protocol.c`, separately from connection and safety state.
 
 Any valid STATUS packet contributes to connection state. A slot becomes online
@@ -89,7 +89,7 @@ derives it from the encoder angle and applies encoder inversion, motor
 direction, and PID offset. It is the motor-side sensor angle; any gearbox/output
 shaft conversion remains outside the VESC protocol layer.
 
-`max_current_a` is both the DUTY 1.0 scale and a slot-local final current clamp;
+`vesc_max_current_a` is both the DUTY 1.0 scale and a slot-local final current clamp;
 the devicetree `absolute-max-current-ma` remains an independent broader guard.
 The internal diagnostics API reports ages and fresh masks for STATUS,
 STATUS_4, STATUS_5, and the selective fault reply. CAN transmit-completion

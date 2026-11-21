@@ -23,7 +23,7 @@
                  <&vesc_motor4>, <&vesc_motor5>, <&vesc_motor6>, <&vesc_motor7>;
         encoders = <&vesc_enc0>, <&vesc_enc1>, <&vesc_enc2>, <&vesc_enc3>,
                    <&vesc_enc4>, <&vesc_enc5>, <&vesc_enc6>, <&vesc_enc7>;
-        /* Runtime VescMotor.max_current_a overrides these before a slot can
+        /* Runtime VescMotor.vesc_max_current_a overrides these before a slot can
          * become ready. The nonzero placeholders satisfy MdMotor's generic
          * binding without creating a usable startup assignment. */
         duty-full-scale-ma = <1000 1000 1000 1000 1000 1000 1000 1000>;

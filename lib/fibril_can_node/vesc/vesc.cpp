@@ -63,7 +63,7 @@ static void apply_config()
     const fcan_gen::vescmotor motor(i);
     struct vesc_slot_runtime_config config{
       motor.param_vesc_can_id(),
-      motor.param_max_current_a(),
+      motor.param_vesc_max_current_a(),
       motor.param_feedback_timeout_ms() != 0U ? motor.param_feedback_timeout_ms() :
                                                 bus.param_feedback_timeout_ms(),
       motor.param_reconnect_frames() != 0U ? motor.param_reconnect_frames() :
