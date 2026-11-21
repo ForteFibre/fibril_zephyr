@@ -523,6 +523,23 @@ static void apply_commands(uint8_t inst)
   }
 }
 
+#if defined(CONFIG_FIBRIL_CAN_NODE_VESC_HARDWARE_SELFTEST)
+static bool apply_hardware_selftest_target(uint8_t inst)
+{
+  static bool injected;
+  if ((inst != 0U) || injected || !states[inst].motor_healthy) return false;
+
+  const fcan_gen::mdmotor::target target{.type = TARGET_DUTY, .value = 0.0F};
+  if (!apply_target(inst, target)) return false;
+
+  states[inst].command_age = 0U;
+  states[inst].command_lapsed = false;
+  injected = true;
+  LOG_WRN("motor 0: injected hardware self-test target type=DUTY value=0");
+  return true;
+}
+#endif
+
 /*
  * The open-loop and speed modes need the master to keep sending: a duty or a
  * speed held past the master's attention runs the mechanism into whatever is
@@ -1023,7 +1040,11 @@ static void md_motor_func_tick(void)
       s->control.stop();
     }
 
+#if defined(CONFIG_FIBRIL_CAN_NODE_VESC_HARDWARE_SELFTEST)
+    if (!apply_commands(i)) apply_hardware_selftest_target(i);
+#else
     apply_commands(i);
+#endif
     watch_command(i);
     drive(i, s->control.update(sample));
     update_current(i);
