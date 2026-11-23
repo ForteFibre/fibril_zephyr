@@ -178,3 +178,7 @@ ROT1 を最下位ビットとする 4 ビットの値として読み、fibril_ca
    west flash
 
 ``west flash`` の runner は STM32CubeProgrammer、OpenOCD、pyOCD、J-Link に対応する。
+
+``app/`` は ``robomaster_controller`` のノードを要し、それを書いた overlay は ``app/boards/nucleo_g474re.overlay`` にしか無い。
+そのため、このボードでは ``app/`` をそのままビルドできない。
+ドライバだけを確かめるときは、Zephyr の ``samples/hello_world`` にドライバのノードを書いた overlay を重ねる。

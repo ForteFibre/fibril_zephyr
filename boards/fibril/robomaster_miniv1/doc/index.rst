@@ -103,3 +103,7 @@ USB はこのボードの devicetree では設定していない。
 
 ``west flash`` の runner は STM32CubeProgrammer、OpenOCD、pyOCD、J-Link に対応する。
 既定以外を使うときは ``west flash -r jlink`` のように指定する。
+
+``app/`` は ``robomaster_controller`` のノードを要し、それを書いた overlay は ``app/boards/nucleo_g474re.overlay`` にしか無い。
+そのため、このボードでは ``app/`` をそのままビルドできない。
+ドライバだけを確かめるときは、Zephyr の ``samples/hello_world`` にドライバのノードを書いた overlay を重ねる。

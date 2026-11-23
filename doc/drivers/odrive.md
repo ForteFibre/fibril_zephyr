@@ -224,6 +224,10 @@ IDLE が送信メールボックスで待っている間に有効化の段が進
 線路に出てから `Set_Axis_State(CLOSED_LOOP_CONTROL)` までは少なくとも 2 周期あり、ODrive が IDLE を処理するには足りる。
 ACK の無いバスでは完了が報告されないので、待つのは `CONFIG_MOTOR_ODRIVE_STATE_RETRY_MS` までとする。
 
+有効化の段と停止の要求は、それぞれ別のフラグで追っている。
+古い完了の報告や送信の追い越しで、armed を取り違えうる形が残っている。
+状態を 1 つにまとめる案が Issue #47 にある。この部分を直すときは、継ぎ足さずに、状態をまとめてから手を入れる。
+
 ### 無効化と非常停止
 
 `motor_disable()` と `odrive_estop()` は、フレームを次の周期を待たずにその場で送る。
@@ -360,6 +364,7 @@ west twister -T tests/drivers/motor/odrive --integration
 `custom_fake` は before hook で入れ直す。
 差し替えた `can_send()` は、完了コールバックが渡されなければ失敗する。
 特定のコマンドをキューに入れない、線路で失ったと報告する、完了の報告をテストが離すまで遅らせる、送信メールボックスの数を絞る、の 4 つを真似られる。
+完了の報告を遅らせたまま次のテストに持ち越すと、次のテストの有効化が待たされるので、テストの終わりに離す。
 各テストの前に両軸を無効化し、IDLE の heartbeat を流して、無効化が始めた IDLE の要求を止める。
 
 native_sim の `k_sleep()` は次の tick に切り上げるので、`CONFIG_MOTOR_ODRIVE_TX_INTERVAL_MS` ずつ数えて待つと、指定より長く待つ。

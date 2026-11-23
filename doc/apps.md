@@ -58,7 +58,7 @@ overlay は `#include <fibril/...>` で取り込み、`fibril,fcan-*` のノー�
 | --- | --- |
 | `dts/fibril/can-bitrate.h` | fibril_can のバス（1 M / 5 M）と、classic CAN のアクチュエータのバス（1 M）のビットレート |
 | `dts/fibril/robomaster-x8.dtsi` | RoboMaster の ESC 8 台（`rm_motor1..8`、C620）とロータ角（`rm_enc1..8`）。基板に依存しない。`cans` は基板の断片が書く |
-| `dts/fibril/robomaster_miniv4/robomaster.dtsi` | 上を FDCAN2 と FDCAN3 に載せ、両方を 1 Mbps で有効にする |
+| `dts/fibril/robomaster_miniv4/robomaster.dtsi` | 上を FDCAN2 と FDCAN3 に載せ、両方を 1 Mbps で有効にする。両方を確保するので、片方を別の用途（RobStride など）に使う構成はまだ書けない |
 | `dts/fibril/robomaster_miniv4/qdec-enc0.dtsi`〜`qdec-enc5.dtsi` | 入力 1 本ずつ（`enc0`〜`enc5`）。timer は基板の文書の表の割り当てで、その timer を確保する |
 | `dts/fibril/robomaster_miniv4/qdec.dtsi` | 上の 6 本をすべて取り込む |
 | `dts/fibril/robomaster_miniv4/adc.dtsi` | ADC1 と ADC2 を有効にする（チャネルは基板の DTS が定義する） |
@@ -404,7 +404,12 @@ ROS 側は、`pc_main_interface` の driver を外し、bridge の topic を rem
 | `/<node>/odom/encoder` | `encoder`（`basic_deadreckoning`） |
 | `/<node>/odom/imu` | `imu/raw_data`（`imu_covariance`） |
 
-> **header はまだ使えない。** fibril_can の bridge は、`header.stamp` を埋めない（2026-10-26 時点の v0.4.2）。`basic_deadreckoning` は受けた `header.stamp` を TF の時刻にするので、このままでは TF の時刻が 0 になる。bridge が stamp を埋めるまでは、この topic で TF を出す構成にしない。
+どちらの型も `std_msgs/Header` を持つが、スキーマは `header` を写さない。
+`header.stamp` は、fibril_can の bridge が受信時刻で埋める（fibril_can の ADR-0021。bridge の v0.4.3 から）。
+`basic_deadreckoning` は受けた `header.stamp` を TF の時刻にするので、それより前の bridge では TF の時刻が 0 になる。
+この topic で TF を出すなら、bridge を v0.4.3 以上にする。
+ワイヤと slave には何も足していないので、`west.yml` が固定する fibril_can の版（slave の runtime）とは関係しない。
+`imu` の `frame_id` は `imu_covariance` が埋め直すので、bridge の `frame_id` の param は要らない。
 
 ### CAN の健全性（can_diag）
 
@@ -460,6 +465,34 @@ RAM が足りないときは、`CONFIG_CAN_STATS=n` でエラーカウンタだ�
 - `RobstrideMotor` は保持中の目標を当て直さないので、`reset_encoder`、`gear_ratio`、`invert` の変更は次の指令から効く。
 - `Solenoid` は止めない。master が途絶えても、弁の状態を保持する。
 
+### ROS から見た名前と単位
+
+モータを駆動する型（`MdMotor`、`RobstrideMotor`、`ODriveMotor`）は、ROS への出方に次の約束を共有する。
+どの型も前の実装と同じメッセージの型と param の名前を名乗るので、購読側と調整したゲインの表は名前を変えずに移せる。
+変わるのは topic の頭と param の置き場所である。
+
+- topic と service は `/<node>/motor<N>/<名前>` に出る。`target`（`fibril_control_msgs/msg/Target`）と `feedback`（`fibril_control_msgs/msg/Feedback`）はどの型にもある。頭は fibril_can の bridge の `name_remap` で前の実装の名前に付け替えられる。
+- param は bridge の node に `<node>.motor<N>.<名前>` で載る。`type.yaml` の `/` は `.` になる。起動の YAML のキーも、`ros2 param set` の宛先もこの名前である。
+- param の `min` と `max` はマスターが検査し、slave は検査しない。範囲を検査しないマスターから範囲外の値が届いたときの扱いは型ごとに違う。たとえば `RobstrideMotor` は、モードごとの値の負の値と NaN をドライバが断り、`mode N parameters rejected` のログを出して前の値を残すが、`gear_ratio` の 0 は断らずに、その値で割る。
+- `feedback.is_ready` は、型が指令を受けられる状態かを表す。`MdMotor` はエンコーダの値が有効で失速ブレーカが落ちていない間、`RobstrideMotor` は設定を読み戻して Running になってから、`ODriveMotor` は最初の `target` で closed loop に入ってから立つ。`is_ready` を待ってから最初の `target` を送る master では、`ODriveMotor` はいつまでも始まらない。
+
+ROS に出す値の単位は次のとおりで、正本は各 `type.yaml` のコメントである。
+
+| 値 | `MdMotor` | `RobstrideMotor` | `ODriveMotor` |
+| --- | --- | --- | --- |
+| 位置、速度（`target`、`feedback`） | `encoder/gain` × カウント（利用者が決める） | 関節側の rad、rad/s（`gear_ratio` で割ってモータへ送る） | `encoder_gain` × rev |
+| `feedback.output` | duty（-1..1） | 関節側のトルク（Nm） | トルクの推定値（Nm、`Get_Torques`） |
+| `feedback.current` | A（モータが報告する電流） | 無い（スキーマが持たず、bridge が 0 で埋める） | A（`Iq_Measured`） |
+| `target` の DUTY | duty | devicetree の `max-current-ma` に対する比 | `duty_full_scale`（Nm）を掛けたトルク。既定の 0 では断る |
+
+`RobstrideMotor` で `gear_ratio` が掛かるのは関節側の値だけである。
+`*/max_vel`、`*/acc` と、`motion_target` の `position`、`velocity`、`torque_ff` には掛かる。
+ループのゲイン（`*_kp`、`*_ki`）と、`motion_target` と `motion/*` の `kp`、`kd` はモータ側で、掛からない。
+前の ROS 2 実装と同じ扱いにして、調整した値をそのまま移せるようにしてある。
+
+型、単位、param の意味を変えるときは、ADR を書き、この節と各型の節を同じ PR で直す。
+ROS の側で値を読んでいるところ（機体の param の YAML、しきい値、記録のスクリプト、シミュレータ）も洗い出す。
+
 ## 機能を 1 つ足す
 
 `lib/fibril_can_node/<type>/` に 4 つのファイルと、binding を 1 つ置く。
@@ -476,6 +509,10 @@ codegen には `LANGUAGE CXX` を渡してあるので、生成物は `schema_ge
 | `Kconfig` | devicetree にノードがあるときだけ y になる真偽値と、`_MAX` |
 | `CMakeLists.txt` | ソースの登録、`type.yaml` の登録、`fibril_can_node_instances()` |
 | `dts/bindings/fibril_can_node/fibril,fcan-<type>.yaml` | ハードウェアの記述と `fcan-ns` |
+
+`type.yaml` に param を足すときは、末尾に足す。
+宣言の順が、params-changed のハンドラが受け取る変更のマスクのビットの位置になる。
+並べ替えると、黙ってすべてのビットがずれる。
 
 `CMakeLists.txt` はこの形になる。
 
