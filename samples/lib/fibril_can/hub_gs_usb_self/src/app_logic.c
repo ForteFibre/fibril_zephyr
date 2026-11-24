@@ -13,8 +13,8 @@
  * main thread -- the hub+self topology puts fcan_poll(self) on the hub
  * driver thread (via fcan_hub_poll) while app_logic_tick() runs on main.
  * Topic begin/commit/read and param_read stay safe across that boundary via
- * fcan_seqlock.h, and since fibril_can v0.3.3 fcan_svc_complete() only
- * stages the reply for the hub thread's next fcan_poll (GCC/Clang builds).
+ * the runtime's critical section, and fcan_svc_complete() only stages the
+ * reply for the hub thread's next fcan_poll.
  * The `home` service handler still completes synchronously here (returns
  * FCAN_SVC_OK with a filled response): handing a call handle from the hub
  * thread to app_logic_tick() would need its own synchronisation, and the

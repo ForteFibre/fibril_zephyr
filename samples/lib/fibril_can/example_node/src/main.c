@@ -132,7 +132,7 @@ int main(void)
 	/* fcan_node_storage_size() is a runtime function (returns
 	 * sizeof(fcan_node_t) — opaque on purpose), so we heap-allocate the
 	 * node instead of trying to size a static array. 8-byte alignment
-	 * satisfies the seqlock and u64-hash fields the runtime keeps inside. */
+	 * satisfies the pointer and u64-hash fields the runtime keeps inside. */
 	fcan_node_t *node = k_heap_aligned_alloc(&fcan_heap, 8,
 						 fcan_node_storage_size(),
 						 K_NO_WAIT);

@@ -108,7 +108,7 @@ int main(void)
 	/* fcan_node_storage_size() is a runtime function (returns
 	 * sizeof(fcan_node_t) -- opaque on purpose), so we heap-allocate the
 	 * node instead of trying to size a static array. 8-byte alignment
-	 * satisfies the seqlock and u64-hash fields the runtime keeps inside. */
+	 * satisfies the pointer and u64-hash fields the runtime keeps inside. */
 	fcan_node_t *self = k_heap_aligned_alloc(&fcan_heap, 8,
 						 fcan_node_storage_size(),
 						 K_NO_WAIT);
@@ -221,9 +221,9 @@ int main(void)
 		 * thread (fcan_hub_poll drives it at the end of each pass),
 		 * so this main-thread app_logic_tick() must only use fcan APIs
 		 * that are documented cross-thread-safe -- topic begin/commit/
-		 * read and param_read are seqlock-protected per fcan_seqlock.h,
+		 * read and param_read run in the runtime's critical section,
 		 * and fcan_svc_complete only stages the reply for the hub
-		 * thread's next fcan_poll (fibril_can v0.3.3). app_logic.c
+		 * thread's next fcan_poll. app_logic.c
 		 * still completes the `home` service synchronously; the
 		 * ACCEPTED demo lives in the example_node sample. */
 		app_logic_tick(0.01f);

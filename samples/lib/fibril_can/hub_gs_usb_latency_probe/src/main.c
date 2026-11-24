@@ -14,8 +14,7 @@
  * The hub driver thread owns fcan_hub_on_rx() and calls
  * fcan_poll(self) at CONFIG_CAN_FCAN_HUB_POLL_INTERVAL_US granularity.
  * This main thread only calls probe_logic_tick() (topic begin/commit/read,
- * all seqlock-protected). Do NOT add fcan_svc_* calls here — they would
- * race the hub thread's fcan_service_poll() slots.
+ * each in the runtime's critical section).
  *
  * Latency vs the single-bus sample
  * --------------------------------
