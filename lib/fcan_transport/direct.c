@@ -89,10 +89,8 @@ int fcan_transport_attach(fcan_node_t * node)
   return 0;
 }
 
-void fcan_transport_run(fcan_node_t * node, void (*tick)(void), void (*on_rx)(void))
+void fcan_transport_run(fcan_node_t * node, void (*tick)(void))
 {
-  fcan_zephyr_can_hal_set_wake_on_rx(&hal, on_rx != NULL);
-
   if (tick != NULL) {
     k_timer_init(&tick_timer, tick_expiry, NULL);
     k_timer_user_data_set(&tick_timer, node);
@@ -104,16 +102,12 @@ void fcan_transport_run(fcan_node_t * node, void (*tick)(void), void (*on_rx)(vo
 
   while (true) {
     /* Block until the HAL posts a wake (a queued config command or service
-     * request, TX complete, topic commit, an M→S arrival when on_rx is set,
-     * or the timer above) or fcan's next deadline falls due, then let
-     * fcan_poll handle the queued frames and run the TX scheduler.
+     * request, TX complete, topic commit, or the timer above) or fcan's next
+     * deadline falls due, then let fcan_poll handle the queued frames and run
+     * the TX scheduler.
      */
     fcan_zephyr_can_hal_scheduler_wait(&hal, node);
     fcan_poll(node);
-
-    if (on_rx != NULL && fcan_zephyr_can_hal_take_rx(&hal)) {
-      on_rx();
-    }
 
     const uint32_t now_ms = k_uptime_get_32();
 

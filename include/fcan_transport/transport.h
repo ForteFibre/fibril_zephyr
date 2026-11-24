@@ -57,18 +57,15 @@ int fcan_transport_attach(fcan_node_t * node);
 /**
  * @brief Give the calling thread to the transport.
  *
- * @param node   the attached node.
- * @param tick   periodic application work, or NULL when nothing is periodic.
- *               Called at roughly 1 kHz from this thread.
- * @param on_rx  work to run when an M→S frame for the node arrives, or NULL.
- *               Called from this thread soon after the arrival, without
- *               waiting for the next tick. With NULL, arrivals wake nothing.
+ * @param node  the attached node.
+ * @param tick  periodic application work, or NULL when nothing is periodic.
+ *              Called at roughly 1 kHz from this thread.
  *
  * Whether this returns depends on the backend: one that owns the poll loop
  * never does, one whose frames are driven by a driver thread returns as soon
- * as there is neither @p tick nor @p on_rx left to run.
+ * as there is no @p tick left to run.
  */
-void fcan_transport_run(fcan_node_t * node, void (*tick)(void), void (*on_rx)(void));
+void fcan_transport_run(fcan_node_t * node, void (*tick)(void));
 
 /** @} */
 

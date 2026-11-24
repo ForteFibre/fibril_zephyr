@@ -94,15 +94,6 @@ static void run_ticks(void)
 #endif
 }
 
-static void run_on_rx(void)
-{
-  STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
-    if (f->on_rx != nullptr) {
-      f->on_rx();
-    }
-  }
-}
-
 int main(void)
 {
   /* Indexed by fcan_gen::<type>::block_array_index, so a function fills its
@@ -115,7 +106,6 @@ int main(void)
    */
   static uint8_t counts[fcan_gen::num_block_arrays];
   bool any_tick = false;
-  bool any_on_rx = false;
 
   STRUCT_SECTION_FOREACH(fibril_fcan_func, f) {
     int ret = (f->init != nullptr) ? f->init() : 0;
@@ -127,7 +117,6 @@ int main(void)
 
     counts[f->array] = f->count;
     any_tick = any_tick || (f->tick != nullptr);
-    any_on_rx = any_on_rx || (f->on_rx != nullptr);
     LOG_INF("%s: %u instance(s) on block array %u", f->name, f->count, f->array);
   }
 
@@ -226,7 +215,7 @@ int main(void)
 
   LOG_INF("handing over to the transport (periodic ticks %s)", any_tick ? "on" : "off");
 
-  fcan_transport_run(node, any_tick ? run_ticks : nullptr, any_on_rx ? run_on_rx : nullptr);
+  fcan_transport_run(node, any_tick ? run_ticks : nullptr);
 
   return 0;
 }

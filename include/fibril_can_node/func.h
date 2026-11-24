@@ -58,19 +58,6 @@ struct fibril_fcan_func
    * nothing while nothing happens.
    */
   void (*tick)(void);
-  /**
-   * Act on a command as soon as it arrives. Called from the thread that runs
-   * tick, soon after the runtime writes an M→S frame for this node into its
-   * topics; which topics changed, the function finds by comparing
-   * fcan_topic_read_seq() generations with the ones it last acted on. The
-   * same rules as tick apply.
-   *
-   * Optional, and only worth having for a function that can act between two
-   * ticks. One that reads its commands at a fixed point of its period gains
-   * nothing, and the transport wakes on arrivals only when some function
-   * has this.
-   */
-  void (*on_rx)(void);
 };
 
 /**
