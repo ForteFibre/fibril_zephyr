@@ -88,10 +88,9 @@ manifest:
       # fcan_codegen emits a *_complete that returns nothing, and apps/node with
       # MdMotor fails to compile. v0.3.4 changes the runtime only.
       #
-      # Temporarily the head of the branch that implements fibril_can's
-      # ADR-0027, whose Zephyr adapter no longer takes a k_msgq and whose HAL
-      # needs a critical section. Replace with the release that contains it
-      # before merging.
+      # Pinned to a commit, not a tag: lib/fcan_transport and the samples need
+      # fcan_zephyr_can_hal_init(h, dev) and the HAL's critical section, which
+      # no release has yet. Replace with the release tag before merging.
       revision: 91e628afcd3124b4d8566799243898c0d8920a44
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can

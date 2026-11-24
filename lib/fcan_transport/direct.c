@@ -106,9 +106,7 @@ void fcan_transport_run(fcan_node_t * node, void (*tick)(void), void (*on_rx)(vo
     /* Block until the HAL posts a wake (a queued config command or service
      * request, TX complete, topic commit, an M→S arrival when on_rx is set,
      * or the timer above) or fcan's next deadline falls due, then let
-     * fcan_poll handle the queued frames and run the TX scheduler. The CAN
-     * driver's RX callback hands frames to the runtime directly; this node's
-     * topic frames are already in place.
+     * fcan_poll handle the queued frames and run the TX scheduler.
      */
     fcan_zephyr_can_hal_scheduler_wait(&hal, node);
     fcan_poll(node);
