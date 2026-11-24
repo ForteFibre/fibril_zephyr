@@ -8,7 +8,7 @@
  *
  * Design points
  * -------------
- * - Main loop order is `drain_rx -> probe_logic_tick -> fcan_poll -> sleep`,
+ * - Main loop order is `probe_logic_tick -> fcan_poll -> sleep`,
  *   the §3.4.1 recommendation for latency-critical firmware: change-driven
  *   echo commits during the tick are emitted by the same fcan_poll pass.
  * - Hot path holds no LOG / printf / malloc calls (§5). Status logging runs
@@ -73,10 +73,6 @@ LOG_MODULE_REGISTER(fcan_latency_probe, LOG_LEVEL_INF);
 #endif
 
 K_HEAP_DEFINE(fcan_heap, 8 * 1024);
-
-#define FCAN_RX_QUEUE_DEPTH 32
-K_MSGQ_DEFINE(fcan_rx_msgq, sizeof(struct fcan_zephyr_can_rx_item),
-	      FCAN_RX_QUEUE_DEPTH, 4);
 
 static void *heap_alloc(size_t size, size_t align, void *ctx)
 {
@@ -143,7 +139,7 @@ int main(void)
 		return rc;
 	}
 
-	rc = fcan_zephyr_can_hal_init(&hal, can_dev, &fcan_rx_msgq);
+	rc = fcan_zephyr_can_hal_init(&hal, can_dev);
 	if (rc != 0) {
 		return rc;
 	}
@@ -225,7 +221,6 @@ int main(void)
 		(int64_t)k_us_to_ticks_ceil64(1000000ULL / TICK_HZ);
 	int64_t next = k_uptime_ticks();
 	while (true) {
-		fcan_zephyr_can_hal_drain_rx(&hal);
 		probe_logic_tick();
 		fcan_poll(node);
 

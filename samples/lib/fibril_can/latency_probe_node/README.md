@@ -37,7 +37,7 @@ seq 変化で重複除外するので、warmup と実サンプルは seq==0 で�
 
 - 1 kHz 周期の `echo` は `latency_probe.yaml` の `period_us: 1000` に従い
   常に flush される (ping 未着でも継続)。
-- Main loop は `drain_rx → probe_logic_tick (commit) → fcan_poll (emit) → sleep`。
+- Main loop は `probe_logic_tick (commit) → fcan_poll (emit) → sleep`。
   §3.4.1 の recommendation どおり change-driven `echo_change` を同 tick で
   emit する構成。
 - Tick rate は build option `TICK_HZ` で上書き可 (§3.4.3):
