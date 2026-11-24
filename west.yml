@@ -91,7 +91,7 @@ manifest:
       # Pinned to a commit, not a tag: lib/fcan_transport and the samples need
       # fcan_zephyr_can_hal_init(h, dev) and the HAL's critical section, which
       # no release has yet. Replace with the release tag before merging.
-      revision: c4591c7883032f2fa1792651b465f335145dfb68
+      revision: 25d8d914448c294b9c2f094d087ce1345932f86f
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
     - name: fibril_common
