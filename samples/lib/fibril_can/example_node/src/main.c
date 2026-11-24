@@ -57,7 +57,7 @@ LOG_MODULE_REGISTER(fcan_example_node, LOG_LEVEL_INF);
 #define CAN_BUS_DEV    DEVICE_DT_GET(CAN_NODE)
 
 /* Default 0x10 keeps this sample self-contained; override without patching
- * the source by passing -DCONFIG_EXTRA_CFLAGS=-DNODE_ID=0x?? on the west
+ * the source by passing -DEXTRA_CFLAGS=-DNODE_ID=0x?? on the west
  * build line, or by adding the same via a board-specific overlay conf. */
 #ifndef NODE_ID
 #define NODE_ID        0x10

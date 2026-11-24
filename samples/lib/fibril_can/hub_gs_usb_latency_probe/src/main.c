@@ -61,7 +61,7 @@ LOG_MODULE_REGISTER(fcan_hub_latency_probe, LOG_LEVEL_INF);
 #define HUB_DEV DEVICE_DT_GET(HUB_NODE)
 
 /* §6 default; probe launch expects --node-id 0x20. Override via
- * -DCONFIG_EXTRA_CFLAGS=-DNODE_ID=0x?? when running two boards side by side. */
+ * -DEXTRA_CFLAGS=-DNODE_ID=0x?? when running two boards side by side. */
 #ifndef NODE_ID
 #define NODE_ID 0x20
 #endif

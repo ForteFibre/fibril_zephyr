@@ -59,7 +59,7 @@ LOG_MODULE_REGISTER(hub_gs_usb_self, LOG_LEVEL_INF);
 
 /* Default 0x10 matches the fibril_can example schema's assumed slave ID; the
  * host bridge picks this up during ANNOUNCE. Override at build time with
- * -DCONFIG_EXTRA_CFLAGS=-DNODE_ID=0x?? if you need to run more than one of
+ * -DEXTRA_CFLAGS=-DNODE_ID=0x?? if you need to run more than one of
  * these boards on the same bus. */
 #ifndef NODE_ID
 #define NODE_ID        0x10

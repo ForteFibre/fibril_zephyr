@@ -43,7 +43,7 @@ seq 変化で重複除外するので、warmup と実サンプルは seq==0 で�
 - Tick rate は build option `TICK_HZ` で上書き可 (§3.4.3):
 
   ```sh
-  west build ... -- -DCONFIG_EXTRA_CFLAGS="-DTICK_HZ=5000"
+  west build ... -- -DEXTRA_CFLAGS="-DTICK_HZ=5000"
   ```
 
 - build option `WAKE_ON_RX=1` にすると、ping が届いたとき（ランタイムの
@@ -51,7 +51,7 @@ seq 変化で重複除外するので、warmup と実サンプルは seq==0 で�
   0（既定）と 1 の `echo_change` のレイテンシを比べると、到着で起こす効果が分かる。
 
   ```sh
-  west build ... -- -DCONFIG_EXTRA_CFLAGS="-DWAKE_ON_RX=1"
+  west build ... -- -DEXTRA_CFLAGS="-DWAKE_ON_RX=1"
   ```
 
 ## §4 — スレーブタイムスタンプ
@@ -74,7 +74,7 @@ seq 変化で重複除外するので、warmup と実サンプルは seq==0 で�
 ## §6 — Node ID / warmup
 
 - 既定 node ID: **0x20** (probe launch の `--node-id 0x20` と一致)。
-  `-DCONFIG_EXTRA_CFLAGS="-DNODE_ID=0x??"` で上書き可。
+  `-DEXTRA_CFLAGS="-DNODE_ID=0x??"` で上書き可。
 - Boot から `echo` 周期送信開始までの想定時間: **≦ 1 s**
   (T_listen 300 ms + boot_id ジッタ + fcan_init + fcan_register_all)。
   probe launch は `--slave-warmup-s 1` を推奨。

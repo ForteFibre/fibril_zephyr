@@ -56,7 +56,7 @@ LOG_MODULE_REGISTER(fcan_latency_probe, LOG_LEVEL_INF);
 
 /* §6: probe launch defaults --node-id to 0x20 — match it here so the sample
  * is a drop-in target for the reference launch. Override without patching
- * source by passing -DCONFIG_EXTRA_CFLAGS=-DNODE_ID=0x?? on the west build
+ * source by passing -DEXTRA_CFLAGS=-DNODE_ID=0x?? on the west build
  * line. */
 #ifndef NODE_ID
 #define NODE_ID     0x20
