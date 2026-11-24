@@ -474,13 +474,13 @@ RAM が足りないときは、`CONFIG_CAN_STATS=n` でエラーカウンタだ�
 - topic と service は `/<node>/motor<N>/<名前>` に出る。`target`（`fibril_control_msgs/msg/Target`）と `feedback`（`fibril_control_msgs/msg/Feedback`）はどの型にもある。頭は fibril_can の bridge の `name_remap` で前の実装の名前に付け替えられる。
 - param は bridge の node に `<node>.motor<N>.<名前>` で載る。`type.yaml` の `/` は `.` になる。起動の YAML のキーも、`ros2 param set` の宛先もこの名前である。
 - param の `min` と `max` はマスターが検査し、slave は検査しない。範囲を検査しないマスターから範囲外の値が届いたときの扱いは型ごとに違う。たとえば `RobstrideMotor` は、モードごとの値の負の値と NaN をドライバが断り、`mode N parameters rejected` のログを出して前の値を残すが、`gear_ratio` の 0 は断らずに、その値で割る。
-- `feedback.is_ready` は、型が指令を受けられる状態かを表す。`MdMotor` はエンコーダの値が有効で失速ブレーカが落ちていない間、`RobstrideMotor` は設定を読み戻して Running になってから、`ODriveMotor` は最初の `target` で closed loop に入ってから立つ。`is_ready` を待ってから最初の `target` を送る master では、`ODriveMotor` はいつまでも始まらない。
+- `feedback.is_ready` は、型が指令を受けられる状態かを表す。`MdMotor` はエンコーダの値が有効で失速ブレーカが落ちていない間、`RobstrideMotor` は設定を読み戻して Running になってから、`ODriveMotor` は最初の `target` で closed loop に入ってから立つ。`is_ready` は指令を送ってよいかの合図ではない。`RobstrideMotor` は出力を入れてから（最初の `target`、`motion_target`、または `enable(on=true)` の後で）、`ODriveMotor` は最初の `target` の後でしか立たないので、`is_ready` を待ってから最初の指令を送る master では、どちらもいつまでも始まらない。
 
 ROS に出す値の単位は次のとおりで、正本は各 `type.yaml` のコメントである。
 
 | 値 | `MdMotor` | `RobstrideMotor` | `ODriveMotor` |
 | --- | --- | --- | --- |
-| 位置、速度（`target`、`feedback`） | `encoder/gain` × カウント（利用者が決める） | 関節側の rad、rad/s（`gear_ratio` で割ってモータへ送る） | `encoder_gain` × rev |
+| 位置、速度（`target`、`feedback`） | `encoder/gain` × カウント、`encoder/gain` × カウント/s（利用者が決める） | 関節側の rad、rad/s（指令は `gear_ratio` を掛けてモータへ送り、feedback はモータの値を `gear_ratio` で割る） | `encoder_gain` × rev、`encoder_gain` × rev/s |
 | `feedback.output` | duty（-1..1） | 関節側のトルク（Nm） | トルクの推定値（Nm、`Get_Torques`） |
 | `feedback.current` | A（モータが報告する電流） | 無い（スキーマが持たず、bridge が 0 で埋める） | A（`Iq_Measured`） |
 | `target` の DUTY | duty | devicetree の `max-current-ma` に対する比 | `duty_full_scale`（Nm）を掛けたトルク。既定の 0 では断る |

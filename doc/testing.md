@@ -79,7 +79,7 @@ FCAN_CODEGEN_FROM_SOURCE=ON west twister -T apps --integration             # deb
 | `tests/lib/custom` | `lib/custom` | 制限なし |
 
 いずれも実機を必要としない。
-ハードウェアの振る舞いはテスト側のスタブで模擬しており、`native_sim` 上で完結する。
+ハードウェアの振る舞いはテスト側のスタブで模擬しており、`native_sim` 上で完結する。`tests/lib/custom` だけは `qemu_cortex_m3` で走る。
 
 `tests/drivers/encoder/accum` だけはデバイスを介さず、`drivers/encoder/encoder_accum.c` を直接ビルドして関数を呼ぶ。
 STM32 のタイマには `uart_emul` に相当するエミュレータがなく、`drivers/encoder/qdec_stm32.c` は `native_sim` ではコンパイルできない。
@@ -89,7 +89,7 @@ STM32 のタイマには `uart_emul` に相当するエミュレータがなく�
 ### 注意
 
 - **native_sim の tick は既定で 100 Hz である。** `k_sleep()` は次の tick に切り上げるので、数十 ms の閾値を試すテストでは待ち時間が黙って延びる（`k_sleep(K_MSEC(10))` がほぼ 20 ms になる）。そうしたテストは、`prj.conf` で `CONFIG_SYS_CLOCK_TICKS_PER_SEC` を上げるか（`tests/drivers/encoder/amt21`、`tests/drivers/imu/r6093u`）、`k_uptime_get()` で経過時間を測って待つ。
-- **native_sim は Linux でしか動かない。** macOS と Windows の twister は、`tests/` の構成を「Native platform requires Linux」で外す。ドライバとライブラリのテストは Linux で確かめる。
+- **native_sim は Linux でしか動かない。** macOS と Windows の twister は、native_sim を使う構成を「Native platform requires Linux」で外す。ドライバと `lib/motor_control`、`lib/odrive_sequencer` のテストは Linux で確かめる。`qemu_cortex_m3` を使う `tests/lib/custom` は、この制限を受けない。
 - **`tests/lib/motor_control` の `native_sim/native/64` は、ホストの g++ 15 ではビルドできない。** Zephyr の C++ の `BUILD_ASSERT` が `declaration does not declare anything` で拒まれる。手元の twister でこれだけが落ちるのは、変更のせいではない。
 
 ## Kconfig の組み合わせ
@@ -110,7 +110,7 @@ AMT21x のテストは 3 通りに分かれている。
 ## CI
 
 `.github/workflows/build.yml` が Ubuntu、macOS、Windows の 3 つで `app` と `tests` の両方を走らせ、Ubuntu と macOS では `apps` もビルドする。
-`tests/` は native_sim なので、実際に走るのは Ubuntu だけである（上の「注意」）。
+`tests/` のうち native_sim を使う構成は、実際に走るのは Ubuntu だけである（上の「注意」）。`qemu_cortex_m3` を使う `tests/lib/custom` は OS で外していない。
 `fibril_can` が private repository のため、CI は GitHub App のトークンを取得して `git config url.insteadOf` を張ってから `west update` を実行する。
 
 `.github/workflows/docs.yml` は Doxygen と Sphinx を Doxygen 1.9.6 と 1.14.0 の両方でビルドし、`main` では GitHub Pages に公開する。
