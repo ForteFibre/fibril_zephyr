@@ -46,6 +46,14 @@ seq 変化で重複除外するので、warmup と実サンプルは seq==0 で�
   west build ... -- -DCONFIG_EXTRA_CFLAGS="-DTICK_HZ=5000"
   ```
 
+- build option `WAKE_ON_RX=1` にすると、ping が届いたとき（ランタイムの
+  `notify_rx`）にも tick を回し、次の tick を待たずに `echo_change` を出す。
+  0（既定）と 1 の `echo_change` のレイテンシを比べると、到着で起こす効果が分かる。
+
+  ```sh
+  west build ... -- -DCONFIG_EXTRA_CFLAGS="-DWAKE_ON_RX=1"
+  ```
+
 ## §4 — スレーブタイムスタンプ
 
 - 実装: `k_cyc_to_us_floor32(k_cycle_get_32())`。実 MCU 上では DWT CYCCNT に

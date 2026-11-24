@@ -72,6 +72,14 @@ LOG_MODULE_REGISTER(fcan_latency_probe, LOG_LEVEL_INF);
 #define TICK_HZ     1000U
 #endif
 
+/* 1: also run the tick as soon as a ping lands (the runtime's notify_rx),
+ * instead of only at the next tick boundary. Compare the echo_change latency
+ * with 0 and 1 to see what waking on arrival buys. Override via
+ * -DWAKE_ON_RX=1 on the build line. */
+#ifndef WAKE_ON_RX
+#define WAKE_ON_RX  0
+#endif
+
 K_HEAP_DEFINE(fcan_heap, 8 * 1024);
 
 static void *heap_alloc(size_t size, size_t align, void *ctx)
@@ -122,6 +130,13 @@ static void status_thread_entry(void *a, void *b, void *c)
 }
 K_THREAD_DEFINE(status_tid, 1024, status_thread_entry, NULL, NULL, NULL,
 		7, 0, 0);
+
+#if WAKE_ON_RX
+static void tick_timer_expiry(struct k_timer *timer)
+{
+	fcan_notify_tx_ready(k_timer_user_data_get(timer));
+}
+#endif
 
 int main(void)
 {
@@ -220,6 +235,30 @@ int main(void)
 	const int64_t period_ticks =
 		(int64_t)k_us_to_ticks_ceil64(1000000ULL / TICK_HZ);
 	int64_t next = k_uptime_ticks();
+#if WAKE_ON_RX
+	/* The wait below returns on the HAL's wake event; the timer posts it at
+	 * every tick boundary, a ping posts it on arrival. */
+	static struct k_timer tick_timer;
+
+	k_timer_init(&tick_timer, tick_timer_expiry, NULL);
+	k_timer_user_data_set(&tick_timer, node);
+	k_timer_start(&tick_timer, K_TICKS(period_ticks), K_TICKS(period_ticks));
+	fcan_zephyr_can_hal_set_wake_on_rx(&hal, true);
+
+	while (true) {
+		fcan_zephyr_can_hal_scheduler_wait(&hal, node);
+		const bool arrived = fcan_zephyr_can_hal_take_rx(&hal);
+		const bool due = (k_uptime_ticks() - next) >= 0;
+
+		if (arrived || due) {
+			probe_logic_tick();
+		}
+		if (due) {
+			next += period_ticks;
+		}
+		fcan_poll(node);
+	}
+#else
 	while (true) {
 		probe_logic_tick();
 		fcan_poll(node);
@@ -227,5 +266,6 @@ int main(void)
 		next += period_ticks;
 		k_sleep(K_TIMEOUT_ABS_TICKS(next));
 	}
+#endif
 	/* unreachable */
 }
