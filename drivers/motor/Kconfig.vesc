@@ -28,6 +28,15 @@ config MOTOR_VESC_DIAGNOSTICS_FIRST_FRAMES
 	range 1 10
 	depends on MOTOR_VESC_DIAGNOSTICS
 
+config MOTOR_VESC_DIAGNOSTICS_STATUS_PERIOD_MS
+	int "Periodic STATUS frames logged per CAN ID"
+	default 0
+	range 0 10000
+	depends on MOTOR_VESC_DIAGNOSTICS
+	help
+	  Log one received VESC STATUS frame at this interval for each CAN ID,
+	  in addition to the initial sample. Zero disables periodic STATUS logs.
+
 config MOTOR_VESC_DIAGNOSTICS_SUMMARY_MS
 	int "Diagnostic summary interval in milliseconds"
 	default 1000
