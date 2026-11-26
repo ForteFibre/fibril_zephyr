@@ -69,7 +69,7 @@ worktree 側を編集すると hardlink が切れるので、編集のたびに�
 west build -b <board> apps/node -S <transport> -S <deployment>   # 実機に焼く fibril_can スレーブ
 west build -b <board> app                                   # ボード持ち込みの動作確認アプリ
 west build -b <board> app -- -DEXTRA_CONF_FILE=debug.conf   # 診断用 Kconfig を重ねる
-west twister -T tests --integration                          # ztest（native_sim で完結する）
+west twister -T tests --integration                          # ztest（実機は要らない。native_sim と qemu_cortex_m3）
 west twister -T apps -T app --integration                    # アプリのビルド確認のみ
 ```
 

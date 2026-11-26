@@ -130,3 +130,7 @@ RS485 の設定例は :doc:`/drivers/amt21`、モータ CAN の使い方は :doc
    west flash
 
 ``west flash`` の runner は STM32CubeProgrammer、OpenOCD、pyOCD、J-Link に対応する。
+
+``app/`` は ``robomaster_controller`` のノードを要し、それを書いた overlay は ``app/boards/nucleo_g474re.overlay`` にしか無い。
+そのため、このボードでは ``app/`` をそのままビルドできない。
+ドライバだけを確かめるときは、Zephyr の ``samples/hello_world`` にドライバのノードを書いた overlay を重ねる。

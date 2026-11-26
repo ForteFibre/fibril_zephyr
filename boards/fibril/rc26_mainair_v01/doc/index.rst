@@ -193,3 +193,7 @@ PB9 は TIM17_CH1 と SPI2_NSS のどちらでも駆動できるため、devicet
    west flash
 
 ``west flash`` の runner は STM32CubeProgrammer、OpenOCD、pyOCD、J-Link に対応する。
+
+``app/`` は ``robomaster_controller`` のノードを要し、それを書いた overlay は ``app/boards/nucleo_g474re.overlay`` にしか無い。
+そのため、このボードでは ``app/`` をそのままビルドできない。
+ドライバだけを確かめるときは、Zephyr の ``samples/hello_world`` にドライバのノードを書いた overlay を重ねる。

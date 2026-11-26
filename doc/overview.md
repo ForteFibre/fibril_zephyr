@@ -29,6 +29,9 @@ Zephyr 本体はこのリポジトリの外に clone され、`west.yml` がそ�
 `modules/hal` と `modules/lib` 以下の残りは、`zephyr` プロジェクトの `import` に `name-allowlist` を与えて必要なものだけ取り込んでいる。
 workspace のディレクトリに他のものが置かれていても、この manifest が管理する対象ではない。
 
+この workspace で外のアプリケーション（自前の `west.yml` を持つもの）を `west build -s <path>` でビルドすると、module の版はこのリポジトリの `west.yml` で決まる。
+アプリケーション側の `west.yml` は読まれないので、そこで module の版やパッチを変えても効かない。
+
 サンプルが参照する fibril_can はこのリポジトリの中ではなく `modules/lib/fibril_can` にある。
 private repository なので、`west update` を通すには先に GitHub の認証が必要である。
 
@@ -52,6 +55,8 @@ v1.4.0 の gs_usb は、どれが起きても、列挙し直すまでホスト�
 `5719a54` は、v1.4.0 の状態変化のコールバックの関数名と前後の行が衝突したので、手で解いた。中身は本家のままである。
 本家は v1.5.0 で 3 つとも直したが、v1.5.0 は Zephyr 4.5 の `can_add_state_change_callback()` を使うので、v4.4.1 のこの workspace では使えない。
 Zephyr を 4.5 に上げるときに、本家の v1.5.0 以降へ戻す。
+同じ修正を `west patch`（`zephyr/patches.yml`）で当てる形は採らなかった。
+`west update` だけではパッチが当たらず、`west patch apply` を忘れても、パッチ無しのソースで黙ってビルドが通るためである。
 
 fibril_can の revision はブランチではなくタグで固定してある（現在は v0.4.2）。
 v0.4.2 で、host の CMake が 3.28（Ubuntu 24.04 の apt）のときも codegen をビルドできるようになった。v0.4.1 では `fibril_can.pb.h` が見つからずに止まる。
@@ -116,8 +121,11 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 | --- | --- | --- |
 | エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/amt21.c` | [AMT21x](drivers/amt21.md) |
 | エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/qdec_stm32.c` | [直交エンコーダ](drivers/qdec_stm32.md) |
+| エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/robomaster_encoder.c` | [RoboMaster のロータ角](drivers/robomaster_encoder.md) |
 | IMU（`include/drivers/imu.h`） | `drivers/imu/r6093u.c` | [R6093U](drivers/r6093u.md) |
 | モータ（`include/drivers/motor.h`） | `drivers/motor/robomaster.c` | [RoboMaster](drivers/robomaster.md) |
+| モータ（`include/drivers/motor.h`） | `drivers/motor/robstride.c` | [RobStride](drivers/robstride.md) |
+| モータ（`include/drivers/motor.h`） | `drivers/motor/odrive.c` | [ODrive](drivers/odrive.md) |
 
 ラップ解決・速度・オフセットはエンコーダドライバに共通なので、`drivers/encoder/encoder_accum.c` に切り出してある。
 公開 API ではなく `drivers/encoder/` の内部ヘッダである。
@@ -130,5 +138,9 @@ AMT21x の統計取得がその例で、トランザクションの失敗の分�
 
 `west.yml` の `zephyr` プロジェクトの `revision` が正本である。
 現在は v4.4.1 に固定してある。
+
+4.5 へは、まだ上げられない。
+fibril_can の relay が 4.5 で消えた CAN ドライバの op（`set_state_change_callback`）を実装しているなど、`app` と `apps` の多くがビルドできない。
+CANnectivity を本家に戻すのも、このときである（上の「workspace の構成」）。
 
 上げるときは `west.yml` を書き換えて `west update` を実行し、README のバージョン記述も合わせて直す。
