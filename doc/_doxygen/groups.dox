@@ -11,6 +11,10 @@
  * @ingroup encoder_interface
  * @brief Diagnostics specific to the Same Sky AMT21x driver
  *
+ * @defgroup encoder_as5047p AS5047P driver
+ * @ingroup encoder_interface
+ * @brief Diagnostics and zero point specific to the ams AS5047P driver
+ *
  * @defgroup imu_interface IMU driver class
  * @brief Inertial measurement unit and attitude sensor interface
  *

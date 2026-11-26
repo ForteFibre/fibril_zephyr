@@ -67,6 +67,7 @@ FCAN_CODEGEN_FROM_SOURCE=ON west twister -T apps --integration             # deb
 | --- | --- | --- |
 | `tests/drivers/encoder/accum` | 積算・速度・オフセットの共通コア | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/encoder/amt21` | AMT21x ドライバ | `native_sim`、`native_sim/native/64` |
+| `tests/drivers/encoder/as5047p` | AS5047P ドライバ（SPI のエミュレータ） | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/encoder/robomaster` | RoboMaster のロータ角 | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/imu/r6093u` | R6093U ドライバ | `native_sim`、`native_sim/native/64` |
 | `tests/drivers/motor/robomaster` | RoboMaster ドライバ | `native_sim`、`native_sim/native/64` |
