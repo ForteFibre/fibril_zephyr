@@ -88,8 +88,8 @@ manifest:
       # arrived. The codegen package must be at least v0.3.3: an older
       # fcan_codegen emits a *_complete that returns nothing, and apps/node with
       # MdMotor fails to compile. v0.3.4 changes the runtime only.
-      # v0.4.2 plus the startup listen-window wrap fix.
-      revision: 1ed7c916cc21109134320d4b3e6568cb1a5e1be5
+      # fibril_can main as of 2026-11-27.
+      revision: 773afdd1e807e21df2dd47bce58307f122ba6f59
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
     - name: fibril_common
