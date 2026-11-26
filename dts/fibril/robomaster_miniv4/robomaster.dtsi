@@ -1,0 +1,48 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The RoboMaster ESCs a Mini V4 can drive: ids 1..8 across both motor CAN
+ * buses, each with its rotor angle as an encoder (rm_motor1..8, rm_enc1..8).
+ * Included by every miniv4 overlay that names one of them.
+ */
+
+#ifndef FIBRIL_MINIV4_ROBOMASTER_DTSI
+#define FIBRIL_MINIV4_ROBOMASTER_DTSI
+
+#include <fibril/can-bitrate.h>
+#include <fibril/robomaster-x8.dtsi>
+
+#ifdef FIBRIL_CLAIM_FDCAN2
+#error "FDCAN2 claimed twice; the RoboMaster bus is one claimant"
+#endif
+#define FIBRIL_CLAIM_FDCAN2 1
+
+#ifdef FIBRIL_CLAIM_FDCAN3
+#error "FDCAN3 claimed twice; the RoboMaster bus is one claimant"
+#endif
+#define FIBRIL_CLAIM_FDCAN3 1
+
+/* Both motor buses, MOTCAN0 and MOTCAN1. The driver learns which bus a motor
+ * is on from its feedback, so the ids are unique across the pair rather than
+ * per bus. A bus with no ESC on it starts and stays idle. A bus with its
+ * supply off cannot start; the driver retries it from the transmit work it
+ * shares with the other bus, at most every 500 ms, and each retry can hold
+ * that work for up to the controller's init timeout (see
+ * doc/drivers/robomaster.md).
+ */
+&robomaster {
+    cans = <&fdcan2 &fdcan3>;
+};
+
+&fdcan2 {
+    status = "okay";
+    bitrate = <FIBRIL_ACTUATOR_CAN_BITRATE>;
+};
+
+&fdcan3 {
+    status = "okay";
+    bitrate = <FIBRIL_ACTUATOR_CAN_BITRATE>;
+};
+
+#endif /* FIBRIL_MINIV4_ROBOMASTER_DTSI */

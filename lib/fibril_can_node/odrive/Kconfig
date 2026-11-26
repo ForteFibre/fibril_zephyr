@@ -1,0 +1,30 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config FIBRIL_CAN_NODE_ODRIVE
+	bool
+	default y
+	depends on DT_HAS_FIBRIL_FCAN_ODRIVE_ENABLED
+	select MOTOR
+	select MOTOR_ODRIVE
+	select ODRIVE_SEQUENCER
+	help
+	  Compiled whenever the devicetree describes the axes, which is also
+	  what puts ODriveMotor instances into the schema. Describing the
+	  wiring is the whole of adding this function to an image.
+
+config FIBRIL_CAN_NODE_ODRIVE_MAX
+	int "ODriveMotor instances to allocate for"
+	default 8
+	range 1 32
+	depends on FIBRIL_CAN_NODE_ODRIVE
+	help
+	  The schema's max_count for ODriveMotor: how many instances the
+	  generated code reserves state for. It is a ceiling, not a count; the
+	  bus and the ROS graph see only the axes the devicetree names.
+
+	  The driver has a ceiling of its own, MOTOR_ODRIVE_MAX_AXES, which
+	  counts the axes on each odrive,bus node. The axes this function names
+	  may sit on more than one bus, so neither ceiling derives from the
+	  other. Overshooting the driver's makes its registration fail at init,
+	  which this function reports as a failed device_is_ready().

@@ -1,0 +1,35 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * An R6093U gyro in the RC26 MainAir V01's gyro socket J25 (UART5: TX=PC12,
+ * RX=PD2), as gyro.
+ *
+ * J25 shares UART5 with the J15 PH breakout, so a gyro here leaves J15
+ * unusable; the claim makes a second user of UART5 a build error.
+ *
+ * The driver uses the interrupt-driven UART API, which it selects itself,
+ * so the including snippet needs no Kconfig for it.
+ */
+
+#ifndef FIBRIL_RC26_MAINAIR_V01_R6093U_DTSI
+#define FIBRIL_RC26_MAINAIR_V01_R6093U_DTSI
+
+#ifdef FIBRIL_CLAIM_UART5
+#error "UART5 claimed twice; the J25 gyro is one claimant"
+#endif
+#define FIBRIL_CLAIM_UART5 1
+
+&uart5 {
+    /* The R6093U's rate is fixed. */
+    current-speed = <38400>;
+    status = "okay";
+
+    /* The binding's timeouts: stale after four missed 10 ms packets,
+     * offline and re-armed after half a second of silence. */
+    gyro: r6093u {
+        compatible = "cruizcore,r6093u";
+    };
+};
+
+#endif /* FIBRIL_RC26_MAINAIR_V01_R6093U_DTSI */

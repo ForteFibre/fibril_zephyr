@@ -1,0 +1,203 @@
+# DJI RoboMaster モータ（`dji,robomaster`）
+
+DJI の RoboMaster モータコントローラ C610 と C620 を CAN 経由で駆動するドライバ。
+モータ 1 台が 1 つの device として現れ、電流指令と feedback スナップショットを扱う。
+
+共通のモータインタフェースは [include/drivers/motor.h](../../include/drivers/motor.h) にある。
+このドライバに固有の公開 API は、ロータ角を受信のたびに受け取る `robomaster_motor_set_rotor_callback()` だけである（[include/drivers/motor/robomaster.h](../../include/drivers/motor/robomaster.h)）。
+ロータ角を encoder クラスとして見せる [robomaster_encoder](robomaster_encoder.md) が使う。
+
+## デバイスの構成
+
+devicetree のノードは 2 段になる。
+
+**トランスポートノード**（`dji,robomaster`）が CAN コントローラを占有し、送信タイマーと受信フィルタを持つ。
+**モータノード**（`dji,robomaster-motor`）はその子で、モータ 1 台に対応する。
+
+```devicetree
+robomaster_controller: robomaster-controller {
+        compatible = "dji,robomaster";
+        #address-cells = <1>;
+        #size-cells = <0>;
+        cans = <&fdcan2 &fdcan3>;
+        feedback-timeout-ms = <100>;
+
+        motor_front_left: motor@1 {
+                compatible = "dji,robomaster-motor";
+                reg = <1>;
+                model = "c620";
+                max-current-ma = <12207>;
+        };
+};
+```
+
+トランスポートの `cans` には CAN コントローラを 1 個以上並べる。
+上限は 4 個で、超えるとビルドが `BUILD_ASSERT` で止まる。
+モータ ID は 1 つのトランスポート内で重複してはならない。
+
+モータノードの `reg` がモータ ID で、範囲は 1 から 8 である。
+`max-current-ma` は、ドライバが指令する電流の上限（mA）で、正の値にする（0 以下はビルドで止める）。
+省略すると、機種の全範囲（C620 は 20000、C610 は 10000）になる。
+それより大きい値を書いても、全範囲で止まる。
+
+`model` で、電流の A と、コントローラの電流コードを換算する。
+
+| `model` | 電流コード | 温度 |
+| --- | --- | --- |
+| `c620` | ±16384 = ±20 A（指令と feedback で同じ） | 報告する |
+| `c610` | ±10000 = ±10 A（指令と feedback で同じ） | 報告しない |
+
+**この表は仮の値である**（[ADR 0024](../adr/0024-motor-class-si-units.md)）。
+C620 の値と C610 の指令の値は広く使われている値だが、DJI の資料で確かめていない。
+C610 の feedback の倍率と、C610 が温度を報告しないことは、確かめていない推測である。
+違っていたら、`drivers/motor/robomaster.c` の `robomaster_model_scales` だけを直す。
+
+`gear-ratio` は config に保持されるだけで、ドライバは読まない。
+上位の制御側がメタデータとして参照するためのプロパティである。
+
+## Kconfig
+
+`CONFIG_MOTOR` でモータドライバクラス全体を有効にする。
+`CONFIG_MOTOR_DJI_ROBOMASTER` は `CONFIG_CAN` と `dji,robomaster` ノードの存在に依存し、条件が揃えば既定で有効になる。
+初期化優先度は `CONFIG_MOTOR_INIT_PRIORITY`（既定 85、`POST_KERNEL`）で決まる。
+
+## 送信
+
+トランスポートは 1 ms 周期のタイマーでワークをキューに積み、そのワークが指令フレームを送る。
+
+モータ ID はグループ 2 つに分かれ、それぞれ 1 つの CAN フレームに 4 台ぶんの電流指令が入る。
+
+| モータ ID | CAN ID | フレーム内の位置 |
+| --- | --- | --- |
+| 1 から 4 | `0x200` | `(ID - 1)` 番目の 16 ビット |
+| 5 から 8 | `0x1FF` | `(ID - 5)` 番目の 16 ビット |
+
+各スロットは符号付き 16 ビットのビッグエンディアンである。
+そのグループに属するモータが 1 台もそのバスにいなければ、フレームは送らない。
+
+`can_send()` は `K_NO_WAIT` で呼び、戻り値を見ない。
+コントローラが受け取らなかったフレームは、次のタイマー刻みのフレームに置き換わる。
+
+### 送信は完了を待たない
+
+`can_send()` に完了コールバックを渡さないと、**フレームが線路に出るまで `K_FOREVER` で待つ**（`zephyr/drivers/can/can_common.c` の `z_impl_can_send()`）。
+`K_NO_WAIT` が縛るのは送信メールボックスの空き待ちだけである。
+誰も ACK を返さないバスではこれが送信ワークを止め、システムワークキュー全体を巻き込む。
+正常なバスでも、線路に出るまでの時間だけワークキューを占有する。
+
+そのためドライバは**常に完了コールバックを渡す**。
+同じ理由で fibril_can の hub も `NULL` を禁じている。
+
+ただしコールバックは何もしない。
+このドライバは毎周期その時点の指令からフレームを組み直すので、線路に出なかったフレームには取り消す状態が無く、次の刻みのフレームがそれを置き換える。
+RobStride ドライバがハンドシェイクの段を巻き戻すのに完了の失敗を使っているのとはここが違う（[robstride.md](robstride.md) の「送信は完了を待たない」）。
+
+## CAN バスの自動検出
+
+`cans` に複数のコントローラを並べたとき、どのモータがどのバスにいるかは devicetree に書かない。
+ドライバが feedback フレームの到着したバスから学習する。
+
+このため、**モータが一度も feedback を返していないあいだ、そのモータには電流指令が送られない**。
+バスが未知の状態では、送信ワークがそのモータをどのフレームにも入れないためである。
+`motor_set_output()` で与えた値は保持され、バスが判明した時点から送信に乗る。
+
+一度バスが確定した後は、同じモータ ID の feedback が別のバスから来ても無視する。
+
+## 受信
+
+受信フィルタは ID `0x200`、マスク `0x7F0` で登録する。
+`0x201` から `0x208` のフレームをモータ ID 1 から 8 に対応させ、それ以外は捨てる。
+7 バイト未満のフレームも捨てる。
+
+| バイト | 内容 |
+| --- | --- |
+| 0 から 1 | 機械角（0 から 8191、ビッグエンディアン） |
+| 2 から 3 | 速度（符号付き 16 ビット） |
+| 4 から 5 | 電流（符号付き 16 ビット） |
+| 6 | 温度 |
+
+スナップショットには、motor クラスの単位に直して入れる。
+
+- 電流は、`model` の係数で A に直す。
+- 速度は、ロータの rpm を rad/s に直す。減速機の後の軸ではない。
+- 温度は ℃ のまま入れる。
+
+`struct motor_feedback` の `valid_mask` には、電流、速度、位置、機械角が立つ。
+温度は、温度を報告する機種（C620）でだけ立つ。
+`torque` は立たない。トルク定数を知らないからである。
+
+### 位置の積算
+
+`orientation` は受信した機械角そのままで、1 回転で 0 から 8191 を巡る。
+`position` はその差分を積算した値で、8192 の折り返しを跨ぐときに補正する（差分が 4096 を超えたら 8192 を引き、-4096 を下回ったら足す）。
+
+最初の feedback フレームでは、`position` の初期値として機械角の生の値をそのまま入れる。
+0 から始まるわけではないので、起動後の変位を見たい場合は最初の読み値を基準として引く。
+
+### ロータ角の通知
+
+`robomaster_motor_set_rotor_callback()` で、モータ 1 台につき 1 つの受け手を登録できる。
+受け手は、そのモータの feedback フレームを受け取るたびに、機械角と受信時刻（`k_cycle_get_32()`）を受け取る。
+呼ばれるのは CAN の受信コールバックの中で、モータのロックを外した後である。
+多くのコントローラでは割り込み文脈なので、受け手はブロックしてはいけない。
+
+`continuous` は、その角度が直前の角度から続いているかを表す。
+モータからの最初のフレームと、`feedback-timeout-ms` より長く途絶えた後の最初のフレームで偽になる。
+途絶えている間にロータが何回転したかは分からないので、直前との差は意味を持たない。
+
+2 つ目の受け手は `-EBUSY`、RoboMaster のモータでない device は `-EINVAL` で断る。
+
+## API の振る舞い
+
+`motor_enable()` と `motor_disable()` はフラグを立てるだけで、CAN には何も送らない。
+無効なモータのスロットには、フレームを組むときに明示的に 0 を書き込む。
+指令を止めるのではなく、0 電流を送り続ける動作になる。
+
+`motor_set_output()` が受け付けるのは `MOTOR_OUTPUT_MODE_CURRENT`（A）だけである。
+ほかのモードには `-ENOTSUP` を返す。
+`MOTOR_OUTPUT_MODE_TORQUE` も断る。電流からトルクを作るには、ドライバが知らないトルク定数が要る。
+有限でない値には `-EINVAL` を返す。
+値は `model` の係数で電流コードに直し、`±max-current-ma` と機種の全範囲のうち狭い方に飽和させ、四捨五入して保持する。
+
+`motor_get_info()` は、`output_modes` に `MOTOR_OUTPUT_MODE_CURRENT` を、`counts_per_rev` に 8192（ロータ 1 回転）を、`zero_counts` に 0 を返す。
+カウント 0 はロータの機械角 0 だが、電源を入れたときのロータの 1 回転の中の 0 である（「位置の積算」）。
+電源を入れ直すと、出力軸に対する零点は変わる。
+
+`motor_get_feedback()` は戻り値に関わらずスナップショットを書き込む。
+
+| 戻り値 | 意味 |
+| --- | --- |
+| `0` | 有効かつ新鮮な feedback |
+| `-ENODATA` | 一度も feedback を受け取っていない |
+| `-EAGAIN` | `feedback-timeout-ms` より古い。`stale` が立つ |
+| `-EINVAL` | 引数が NULL |
+
+`-EAGAIN` のときも直前の値は読めるので、1 回の取りこぼしで制御ループを止める必要はない。
+
+## トランシーバに電源が入っていない場合
+
+初期化時の `can_start()` の失敗は致命的として扱わない。
+
+トランシーバに電源が来ていないバスは RX がドミナントに張り付き、コントローラが初期化モードから出られない。
+これはデバッグプローブだけで基板に給電しているときの通常の状態なので、ここで初期化を失敗させると他のバスとモータ device まで使えなくなる。
+
+代わりに警告をログに出して先へ進み、送信ワークから起動を再試行する。
+再試行は 500 ms に 1 回までに絞ってある。
+初期化モードで固まったコントローラに対する `can_start()` はハードウェアのタイムアウトを待つため、毎周期呼ぶと 1 ms の送信周期を守れない。
+
+モータ電源が入った時点でバスは自然に立ち上がる。
+
+バスが起動したあとでモータ電源が落ちている場合は、送ったフレームに誰も ACK を返さない。
+それでも送信ワークが止まらないのは、上の「送信は完了を待たない」による。
+
+## テスト
+
+振る舞いは `native_sim` 上の ztest で固定してある。
+
+- [tests/drivers/motor/robomaster](../../tests/drivers/motor/robomaster/src/main.c) — 指令のグループ振り分け、無効化でスロットが 0 になること、未対応モードの拒否、`-ENODATA` と stale、feedback のデコードと折り返し、モータ ID とバスによる振り分け、バス自動検出と保持していた指令の反映、完了が返らないバスでも送信ワークが回り続けること
+- [tests/drivers/encoder/robomaster](../../tests/drivers/encoder/robomaster/src/main.c) — ロータ角の通知（受け手が 1 つに限られること、`continuous` が途絶えた後に偽になること）を、それを使うエンコーダ越しに確かめる
+- [tests/drivers/motor/robomaster_start_retry](../../tests/drivers/motor/robomaster_start_retry/src/main.c) — 起動できないバスがあってもモータ device を失わず、後から復帰すること
+
+```shell
+west twister -T tests/drivers/motor -T tests/drivers/encoder/robomaster --integration
+```

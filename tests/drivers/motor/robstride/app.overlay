@@ -1,0 +1,54 @@
+/ {
+	test_can0: fake_can0 {
+		compatible = "zephyr,fake-can";
+		status = "okay";
+	};
+
+	robstride_test: robstride-bus {
+		compatible = "robstride,bus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cans = <&test_can0>;
+		master-can-id = <0xfd>;
+		/* Short enough that a test can wait it out. */
+		feedback-timeout-ms = <50>;
+
+		motor0: motor@7f {
+			compatible = "robstride,motor";
+			reg = <0x7f>;
+			model = "rs00";
+		};
+
+		motor1: motor@1 {
+			compatible = "robstride,motor";
+			reg = <1>;
+			model = "rs05";
+			max-current-ma = <5000>;
+		};
+
+		/* Asks for more than the rs05 can do, so the driver has to hold
+		 * it down to the model limit of 50 rad/s. */
+		motor2: motor@2 {
+			compatible = "robstride,motor";
+			reg = <2>;
+			model = "rs05";
+			max-velocity-mrad-s = <100000>;
+		};
+
+		/* Never enabled and never answered by any test, so it stays a motor
+		 * that has said nothing at all. */
+		motor3: motor@3 {
+			compatible = "robstride,motor";
+			reg = <3>;
+			model = "rs00";
+		};
+
+		/* Never enabled either; the one test that touches it answers a
+		 * presence probe and nothing else. */
+		motor4: motor@4 {
+			compatible = "robstride,motor";
+			reg = <4>;
+			model = "rs00";
+		};
+	};
+};

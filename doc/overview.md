@@ -1,0 +1,146 @@
+# 全体像
+
+`fibril_zephyr` は ForteFibre のロボット用基板で動く Zephyr ファームウェアを 1 か所にまとめたリポジトリである。
+自作ボードの定義、out-of-tree のドライバ、CAN FD 通信フレームワーク fibril_can を使ったサンプルが入る。
+
+Zephyr の [T2 topology](https://docs.zephyrproject.org/latest/develop/west/workspaces.html#west-t2) に沿った **workspace application** で、このリポジトリ自身が west manifest（`west.yml`）を提供する。
+Zephyr 本体はこのリポジトリの外に clone され、`west.yml` がその revision を固定する。
+
+## workspace の構成
+
+`west init -m https://github.com/ForteFibre/fibril_zephyr <workspace>` を実行すると、次の配置ができる。
+`<workspace>` の名前は init の引数で決まる。
+
+```text
+<workspace>/
+├── .west/config                  manifest = fibril_zephyr/west.yml、zephyr base = zephyr
+├── zephyr/                       Zephyr 本体（v4.4.1 に固定）
+├── modules/
+│   ├── hal/stm32                 STM32 の HAL
+│   ├── hal/cmsis_6               Cortex-M ポートが要求する CMSIS
+│   ├── lib/cmsis-dsp             CMSIS-DSP
+│   ├── lib/fibril_can            CAN FD 通信フレームワーク（private repo）
+│   ├── lib/fibril_common         ROS 2 側と共通の C++ ライブラリ（private repo）
+│   └── third_party/cannectivity  gs_usb による USB-CAN ゲートウェイ
+└── fibril_zephyr/                このリポジトリ
+```
+
+`west.yml` が直接宣言しているのは `zephyr`、`cannectivity`、`fibril_can`、`fibril_common` の 4 つだけである。
+`modules/hal` と `modules/lib` 以下の残りは、`zephyr` プロジェクトの `import` に `name-allowlist` を与えて必要なものだけ取り込んでいる。
+workspace のディレクトリに他のものが置かれていても、この manifest が管理する対象ではない。
+
+この workspace で外のアプリケーション（自前の `west.yml` を持つもの）を `west build -s <path>` でビルドすると、module の版はこのリポジトリの `west.yml` で決まる。
+アプリケーション側の `west.yml` は読まれないので、そこで module の版やパッチを変えても効かない。
+
+サンプルが参照する fibril_can はこのリポジトリの中ではなく `modules/lib/fibril_can` にある。
+private repository なので、`west update` を通すには先に GitHub の認証が必要である。
+
+fibril_common は ROS 2 のノードが使っているものと同じ制御器とシリアライザを基板の上でも使うために載せてある。
+`CONFIG_FIBRIL_COMMON` が立つまで何もビルドしないので、載せているだけではイメージに現れない。
+取り込みの調査結果と部品ごとの状態は [ADR 0008](adr/0008-fibril-common-integration.md) にある。
+
+fibril_common の revision は、タグではなくコミットで固定してある（現在は `8f336f4`）。Zephyr module の入口（fibril_common#69）と `-Wdouble-promotion` の修正（fibril_common#74）を含むタグが、まだ無いためである。
+これより前の版では、`CONFIG_FIBRIL_COMMON` を立てたビルドが twister の `-Werror` で止まる。
+
+CANnectivity は、本家ではなく ForteFibre の fork のコミットで固定してある（現在は `4ffbdd8`、ブランチ `backport/gs-usb-out-restart`）。
+v1.4.0 に、本家の gs_usb の修正を 3 つ、本家の順に載せたものである。作者とメッセージは本家のままにしてある。
+v1.4.0 の gs_usb は、どれが起きても、列挙し直すまでホストから CAN に送れなくなる。
+
+| 本家 | 直すこと |
+|---|---|
+| `0fd5538` | チャネルを止めるたびに、プールのバッファを 1 つ漏らす |
+| `5719a54` | プールが尽きているときに OUT の転送が終わると、OUT の endpoint を二度と張り直さない。バッファが戻ったら work から張り直すようにする |
+| `9cb0d90` | CAN への送信が失敗すると echo を返さないので、Linux の gs_usb ドライバがその TX URB を解放できない |
+
+`5719a54` は、v1.4.0 の状態変化のコールバックの関数名と前後の行が衝突したので、手で解いた。中身は本家のままである。
+本家は v1.5.0 で 3 つとも直したが、v1.5.0 は Zephyr 4.5 の `can_add_state_change_callback()` を使うので、v4.4.1 のこの workspace では使えない。
+Zephyr を 4.5 に上げるときに、本家の v1.5.0 以降へ戻す。
+同じ修正を `west patch`（`zephyr/patches.yml`）で当てる形は採らなかった。
+`west update` だけではパッチが当たらず、`west patch apply` を忘れても、パッチ無しのソースで黙ってビルドが通るためである。
+
+fibril_can の revision はブランチではなくタグで固定してある（現在は v0.4.2）。
+v0.4.2 で、host の CMake が 3.28（Ubuntu 24.04 の apt）のときも codegen をビルドできるようになった。v0.4.1 では `fibril_can.pb.h` が見つからずに止まる。
+v0.4.1 で、`fcan_codegen` が見つからなければ、`fcan_invoke_codegen` が fibril_can の木から host 向けにビルドするようになった（ビルドディレクトリの `fcan_codegen_host/`。protobuf と yaml-cpp が要る）。この CLI は runtime と同じ版になる。deb の版がずれているときは `-DFCAN_CODEGEN_FROM_SOURCE=ON` で木からのビルドを使う。runtime は v0.4.0 から変わらない。
+v0.4.0 で、slave の RAM、Flash、スタックが減った。`service_buffer` が 0 のスキーマでは分割転送のコードがイメージから外れ、FRAME_DEFINE は ISR のスタックをほとんど使わなくなった。router は、node 宛の DISCOVER でそのノードの学習だけを消す。互換を壊す変更は組み込み master にだけあり、このリポジトリは使っていない。
+v0.3.7 で、ACCEPTED を返した呼び出しはタイムアウトではなくノードの状態で終わるようになり（fibril_can の ADR-0018）、MdMotor の `trigger` が使う。呼び出しの handle は runtime が世代を入れて作る。
+v0.3.5 で、基板の CAN の健全性を出すブロック型（`CanPortDiag`、`CanHubDiag`）と、それを読む Zephyr の関数が入り、`can_diag` が使う。
+v0.3.4 で `fcan_state` を `fcan_poll` と別のスレッドから読めるようになり、hub 構成の tick から `fibril_fcan_node_state()` を呼べる。
+deb の `fcan_codegen`（`ros-jazzy-fibril-can-codegen`）を使うなら v0.4.0 以上にする。v0.4.0 の codegen は生成コードが小さく、`max_copy_entries` を Topic のフィールド数で抑える（v0.3.7 の codegen でもビルドと動作はできる）。**`ros-jazzy-fibril-can-core` も同じ版に上げる。** codegen のパッケージは core に版を指定せずに依存するので、`apt install` で codegen だけを上げると古い `libfibril_can_core.so` が残る。v0.4.0 で core の `SerializedBlob` が変わったので、この組では生成が失敗することがある。`ldd /opt/ros/jazzy/lib/fibril_can_codegen/fcan_codegen` と `dpkg -l | grep fibril-can` で確かめる。v0.3.7 より前の codegen は handle を runtime から受け取らないので、コンパイルは通っても、後送の応答（`calibrate_current_baseline`、`trigger`）がすべて古いとして捨てられる。v0.3.3 より前の codegen が出す `*_complete` は戻り値を返さず、MdMotor が `FCAN_E_BUSY` を見られない。v0.3.2 より前の codegen は、MdMotor が使う `read_<topic>(seq)` も出さない。
+codegen が決めるブロック配列の並びはワイヤの契約の一部で、`main` を追いかけていると `fcan_config_t::instance_counts` の割り当てが黙って変わる。
+上げるときは意図して上げ、必要な移行を同じ変更に含める。
+指したいものにタグが無いときだけコミットで固定する。
+
+## Zephyr module としての入口
+
+このリポジトリは Zephyr module でもある。
+`zephyr/module.yml` がビルドシステムから見た入口を宣言している。
+
+| 宣言 | 指す先 | 効果 |
+| --- | --- | --- |
+| `build.kconfig` | `Kconfig` | Kconfig ツリーの Zephyr → Modules 以下に生える |
+| `build.cmake` | `.`（`CMakeLists.txt`） | `drivers/` と `lib/` を `add_subdirectory` する |
+| `settings.board_root` | `.` | `boards/` を追加のボード検索パスにする |
+| `settings.dts_root` | `.` | `dts/` と `dts/bindings/` を追加の検索パスにする |
+| `settings.snippet_root` | `.` | `snippets/` を snippet の検索パスにする |
+| `runners` | `scripts/example_runner.py` | `west flash` の runner を追加する |
+| `name` | `fibril_zephyr` | `ZEPHYR_FIBRIL_ZEPHYR_MODULE_DIR` を clone 先の名前から切り離す |
+
+`CMakeLists.txt` は `include/` をインクルードパスに加え、`zephyr_syscall_include_directories()` も呼ぶ。
+`include/drivers/motor.h` などが `__syscall` を使うため、これがないとシステムコールが生成されない。
+
+## リポジトリの構成
+
+| ディレクトリ | 内容 |
+| --- | --- |
+| `apps/` | 実機に焼くアプリケーション。`apps/node/` が fibril_can スレーブ |
+| `app/` | ボード持ち込みの動作確認用アプリケーション |
+| `snippets/` | 焼く単位。トランスポート層とデプロイ層に分かれる。`snippets/common/` は基板によらない役割（ノードヘッダと Kconfig） |
+| `boards/fibril/` | 自作ボードの定義。ボードごとの詳細は各 `doc/index.rst` |
+| `drivers/` | out-of-tree ドライバの実装 |
+| `dts/bindings/` | 上記ドライバと機能の devicetree binding |
+| `dts/fibril/` | snippet の overlay が include するハードウェアの断片（基板に依存しないものと、`<board>/` の下の基板ごとのもの） |
+| `include/` | 公開ヘッダ。ドライバクラスの API はここが正本 |
+| `lib/` | out-of-tree ライブラリ。`lib/fibril_can_node/` にブロック型の実装、`lib/fcan_transport/` にバスへの繋ぎ方、`lib/motor_control/` にモータ 1 台ぶんの制御のコア、`lib/odrive_sequencer/` に ODrive の軸 1 つぶんの状態機械、`lib/node_id/` に基板の ID スイッチから node_id を読む処理 |
+| `samples/` | ドライバ単体および fibril_can と組み合わせたサンプル |
+| `tests/` | Twister から走る ztest |
+| `scripts/` | west の拡張コマンドと runner |
+| `doc/` | このドキュメントと Doxygen の設定 |
+
+`apps/` と `lib/fibril_can_node/` と `snippets/` の関係は [アプリケーションと機能](apps.md) にある。
+どの機能を載せるかは snippet の overlay が置く `fibril,fcan-*` ノードが決め、アプリケーションはブロック型の名前を持たない。
+
+`apps/node/` と `lib/fibril_can_node/` は C++17 で、codegen にも `LANGUAGE CXX` を渡している。
+`lib/motor_control/` も C++17 である。fibril_common の制御器（テンプレート）を使うためで、codegen とは関係しない。
+`lib/odrive_sequencer/` は、それを使う `ODriveMotor` に合わせて C++17 で書いた。fibril_can にもドライバの実装にも依存しないので、host でテストできる。
+`drivers/`、`lib/fcan_transport/`、`app/`、`samples/`、`tests/` は C のままである（`tests/lib/motor_control/` と `tests/lib/odrive_sequencer/` だけは、試す対象に合わせて C++ で書く）。
+理由と、C++ 標準ライブラリに要求が付く点は [ADR 0007](adr/0007-cpp-node-implementation.md) にある。
+
+## ドライバ
+
+| クラス | 実装 | ドキュメント |
+| --- | --- | --- |
+| エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/amt21.c` | [AMT21x](drivers/amt21.md) |
+| エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/qdec_stm32.c` | [直交エンコーダ](drivers/qdec_stm32.md) |
+| エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/robomaster_encoder.c` | [RoboMaster のロータ角](drivers/robomaster_encoder.md) |
+| IMU（`include/drivers/imu.h`） | `drivers/imu/r6093u.c` | [R6093U](drivers/r6093u.md) |
+| モータ（`include/drivers/motor.h`） | `drivers/motor/robomaster.c` | [RoboMaster](drivers/robomaster.md) |
+| モータ（`include/drivers/motor.h`） | `drivers/motor/robstride.c` | [RobStride](drivers/robstride.md) |
+| モータ（`include/drivers/motor.h`） | `drivers/motor/odrive.c` | [ODrive](drivers/odrive.md) |
+
+ラップ解決・速度・オフセットはエンコーダドライバに共通なので、`drivers/encoder/encoder_accum.c` に切り出してある。
+公開 API ではなく `drivers/encoder/` の内部ヘッダである。
+
+ドライバクラスの API は `include/` に置き、実装は `drivers/` に置く。
+ドライバ固有の診断のように、クラスの API に載せられないものは `include/drivers/<class>/<driver>.h` に分ける。
+AMT21x の統計取得がその例で、トランザクションの失敗の分類は RS485 プロトコルの性質であってエンコーダ一般の性質ではないため、エンコーダクラスには載せていない。
+
+## Zephyr のバージョン
+
+`west.yml` の `zephyr` プロジェクトの `revision` が正本である。
+現在は v4.4.1 に固定してある。
+
+4.5 へは、まだ上げられない。
+fibril_can の relay が 4.5 で消えた CAN ドライバの op（`set_state_change_callback`）を実装しているなど、`app` と `apps` の多くがビルドできない。
+CANnectivity を本家に戻すのも、このときである（上の「workspace の構成」）。
+
+上げるときは `west.yml` を書き換えて `west update` を実行し、README のバージョン記述も合わせて直す。

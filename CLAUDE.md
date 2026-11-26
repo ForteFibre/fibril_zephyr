@@ -1,0 +1,187 @@
+# fibril_zephyr
+
+ForteFibre のロボット用基板で動く Zephyr ファームウェアを 1 か所にまとめた **workspace application** かつ **Zephyr module**。
+
+## 何より先に読むもの
+
+- 全体像と workspace のどこに何があるか: [doc/overview.md](doc/overview.md)
+- 触るボードのピン配置とクロック: `boards/fibril/<board>/doc/index.rst`
+- 触るドライバの配線要件と失敗の扱い: [doc/drivers/](doc/drivers)
+- 構成の決定と却下案: [doc/adr/](doc/adr)
+
+## workspace 上の位置
+
+このリポジトリは workspace のルートではない。
+west の workspace ディレクトリ（名前は `west init` の引数で決まる）の直下に `fibril_zephyr/` として置かれ、`zephyr/` と `modules/` は 1 つ上の階層にある兄弟である。
+
+サンプルが参照する fibril_can は **このリポジトリの中にはない**。
+`modules/lib/fibril_can` にあり、`west.yml` が revision を固定している。
+fibril_can 側の設計と不変条件はそのリポジトリの `CLAUDE.md` と `SPEC.md` が正本で、こちらで再実装しない。
+
+## ディレクトリ構成
+
+各ディレクトリの責務は [doc/overview.md](doc/overview.md) の「リポジトリの構成」にある。
+
+## 作業の進め方
+
+ForteFibre の部内では、このリポジトリを作業場所 fibril の `west_ws/fibril_zephyr` に置いて扱い、変更は原則として fibril を経由して行う。
+fibril の外の clone や、fibril の共有の `west_ws` では、編集もコミットもしない。
+fibril が作業ごとに worktree と使い捨ての west topdir を作るので、下の手作業は要らない。手順と規約は fibril の `CLAUDE.md` にあり、エージェントは fibril のルートで起動する。
+やむを得ず fibril を経由せずに変更したときは、PR の本文にそう書く。
+
+以下は、fibril の外で作業するときの手順である。
+
+**変更は worktree で行う。** main checkout は複数のブランチとセッションで共有されるので、そこで編集すると無関係な作業と混ざる。
+
+```shell
+git worktree add .claude/worktrees/<name> -b <branch> origin/main
+```
+
+worktree は `.claude/worktrees/` の下に置く（`.gitignore` 済み）。
+ブランチは `origin/main` から切る。`main` の上では作業しない。
+このパスは main checkout を起点にした相対指定である。
+既に worktree の中にいるなら絶対パスで書く。相対のまま叩くと worktree の中に worktree ができる。
+
+git stash のスタックは main checkout と全ての worktree で共有される。
+退避が要るなら stash ではなく WIP コミットを積む。
+
+### worktree からビルドを検証するとき
+
+**worktree の中で `west build` / `west twister` を回しても、`lib/`、`boards/`、`snippets/` は main checkout の（＝別ブランチの）中身が読まれる。**
+このリポジトリが west の manifest repository そのものなので、`ZEPHYR_FIBRIL_ZEPHYR_MODULE_DIR` が main checkout を指すためである。
+**エラーにならず黙って通るので、検証したつもりになる。**
+
+検証するなら使い捨ての west topdir を別の場所に作り、`zephyr/`、`modules/`、この worktree を **hardlink コピー（`cp -al`）** で並べる。
+worktree は `fibril_zephyr/` という名前で置く（`.west/config` の `[manifest] path` に合わせる）。
+その `.west/config` は workspace のものをコピーする。
+各コピーの `.git` は消さない。無いと west が zephyr を未 clone とみなし、`west twister` が生えない。
+symlink では west と CMake が realpath を取るため落ちる。
+worktree 側を編集すると hardlink が切れるので、編集のたびにコピーし直す。
+
+どちらの木を読んだかは `build/zephyr/zephyr_modules.txt` の `fibril_zephyr` の行に出る絶対パスで確認する。
+モジュールごとに 1 行あるので、`fibril_can` など他の木の取り違えも同時に見える。
+
+## ビルドとテスト
+
+**`west build` と `west flash` はサンドボックスの外で実行する。** ツールチェーンと USB デバイスにアクセスする必要がある。
+
+```shell
+west build -b <board> apps/node -S <transport> -S <deployment>   # 実機に焼く fibril_can スレーブ
+west build -b <board> app                                   # ボード持ち込みの動作確認アプリ
+west build -b <board> app -- -DEXTRA_CONF_FILE=debug.conf   # 診断用 Kconfig を重ねる
+west twister -T tests --integration                          # ztest（実機は要らない。native_sim と qemu_cortex_m3）
+west twister -T apps -T app --integration                    # アプリのビルド確認のみ
+```
+
+`apps/node` と `samples/lib/fibril_can/` 以下は `fcan_codegen` を必要とする。
+`ros-jazzy-fibril-can-codegen` パッケージが入っていれば自動で見つかる。
+見つからなければ、`modules/lib/fibril_can` から host 向けにビルドする（ビルドディレクトリの `fcan_codegen_host/`。protobuf と yaml-cpp が要る）。
+手元の CLI を使うなら `-DFCAN_CODEGEN=/abs/path/fcan_codegen`、木からのビルドを必ず使うなら `-DFCAN_CODEGEN_FROM_SOURCE=ON` を渡す。
+twister には CMake 引数ではなく同じ名前の環境変数で渡す（`--extra-args` はこのヘルパに届かない）。
+
+`apps/` の構成と機能の足し方は [doc/apps.md](doc/apps.md)、判断の理由は [doc/adr/0003-multi-app-structure.md](doc/adr/0003-multi-app-structure.md) にある。
+
+ドキュメントのビルドは `doc/` で行う。
+
+```shell
+cd doc && pip install -r requirements.txt && doxygen && make html
+```
+
+## ドキュメント更新責務
+
+コードを変えたら、対応する文書を**同じ PR で**更新する。
+
+| 変更の種別 | 必須更新先 |
+| --- | --- |
+| ドライバの追加 | `doc/drivers/<driver>.md`、`doc/index.rst` の toctree、`doc/_doxygen/groups.dox`、公開ヘッダの `@defgroup` |
+| ドライバの振る舞いの変更 | 該当する `doc/drivers/<driver>.md` |
+| ボードの追加 | `boards/fibril/<board>/doc/index.rst`、`doc/boards/<board>.rst` のインクルードスタブ、`doc/index.rst` の toctree、README のボード表 |
+| ボードの devicetree の変更 | 該当ボードの `doc/index.rst`（ピン表と既定の状態） |
+| `west.yml` の revision | README と `doc/overview.md` のバージョン記述 |
+| ディレクトリの責務、ビルド構成 | `doc/overview.md` |
+| サンプルの追加 | サンプルの `README.md`、README のサンプル表 |
+| 機能（ブロック型）の追加 | `lib/fibril_can_node/<type>/` に `type.yaml`、実装、`dts/bindings/` の binding を対で置く、`doc/apps.md` |
+| snippet（焼く単位）の追加 | README の snippet 表、`apps/node/sample.yaml` のシナリオ、`doc/apps.md` |
+| `west.yml` の fibril_can revision | `doc/overview.md` の固定の説明、必要なら `instance_counts` の移行 |
+| 非自明な設計判断 | `doc/adr/` に新規 ADR と `doc/adr/index.md` の一覧 |
+
+### 文書を書くときの制約
+
+`.github/workflows/docs.yml` は Sphinx を `-W` で走らせる。
+**toctree に載っていない文書があると CI が落ちる。**
+`doc/` に Markdown を足すときは toctree に加えるか、`conf.py` の `exclude_patterns` に入れる。
+
+ボード文書は Sphinx の srcdir の外にあるため、`doc/boards/<board>.rst` のスタブを忘れると公開されない。
+ボード文書の中から他の文書を参照するときは ``:doc:`/drivers/<driver>` `` のように srcdir 起点の絶対パスを使う。
+スタブ側の相対位置に依存する書き方をすると解決に失敗する。
+
+Markdown 内の相対リンクは、拡張子のないパスを書くと myst が文書への相互参照と解釈して警告になる。
+ディレクトリではなくファイルを指す。
+
+## インターフェイスの単位
+
+- **数値を受け渡すところには、単位を書く。** 対象は、公開ヘッダの引数と構造体のフィールド、binding の property、`type.yaml` の param と、topic と service のフィールドである。単位のほかに、基準（どの軸か、減速の前か後か、零点）、正の向き、値が無いときの表し方も書く。
+- **汎用のデバイスクラス（`include/drivers/motor.h` など）は、SI 単位で受け渡す。** 機種の生のコードを使ってよいのは、ドライバの中と機種専用の API だけである。機種専用の API でも、単位をヘッダに書く。ブロック型が ROS に出す値も、SI 単位か、param で利用者が決める単位にし、生のコードを出さない（[ADR 0024](doc/adr/0024-motor-class-si-units.md)）。
+- **物理量の binding の property は、名前の末尾に単位を付ける**（`feedback-timeout-ms`、`max-current-ma`、`max-velocity-mrad-s`）。無次元の値（比、カウント）は、何に対する値かを description に書く。
+- **クラスに単位の決まりが無いことが理由で機能を断るとき（`-ENOTSUP` を返すなど）は、それで終わりにしない。** Issue を立て、ADR の Consequences にその番号を書く。
+
+## コメント
+
+- **devicetree のコメントには、その値を選んだ理由を書く。** クロックの分周やタイミングのプロパティは、値だけ見ても妥当性が判断できない。既存のボード定義はこれを守っており、ドキュメントの一次情報にもなっている。
+- **ドキュメントに書いた背景をコードで繰り返さない。** コードに残すのは、その行を読んでいる人にしか意味のない局所的な why（呼び出し順の制約、暗黙の不変条件、非自明な副作用）に絞る。
+- **変更履歴をコメントに書かない。** 履歴は git log と ADR が正本である。
+- **テストは名前で意図を語る。** 名前で言えないなら名前を延ばす。直上に同じ内容のコメントを重ねない。
+
+## コミット
+
+Conventional Commits に日本語の subject を組み合わせる。
+`git log` に出ている形に揃える。
+
+```
+feat(boards): rc26_mainair_v01 の board 定義を追加
+fix(boards/rc26_mainair_v01): timer node に pinctrl-0 を持たせない
+chore(west): fibril_can を main branch に repin
+refactor(samples): hub_gs_usb_latency_probe main.c を整形
+```
+
+論理的に独立な変更（別レイヤ、別責務、テスト追加、コメント整理）は別コミットに切る。
+1 つの PR に複数コミットを載せてよい。
+コミットメッセージには **why** を書く（what は diff から読める）。
+
+`main` に直接コミットしない。
+
+## コードスタイル
+
+`.clang-format` を置いていないため、整形は強制されていない。
+スコープごとに違う形が使われているので、触るファイルの周囲に合わせる。
+
+**`drivers/` と `include/` の C コード**
+
+- インデントは半角スペース 2 つ
+- `struct` の定義と関数定義は、次の行に `{` を置く
+- `enum` の定義と制御構文は、同じ行に `{` を置く
+- ポインタは `const struct device * dev` のように `*` の両側を空ける
+
+**`apps/node/` と `lib/fibril_can_node/` の C++ コード**
+
+C++17。`drivers/` と `include/` の C と同じ形を使う（半角スペース 2 つ、`struct` と関数定義は次の行に `{`、`const auto & x` のようにポインタと参照の両側を空ける）。
+
+- ハンドラは `start` で登録し、λ が捕捉するのはインスタンス番号までにする
+- 生成物（`fcan_gen::`）以外に例外と RTTI を持ち込まない
+- `FCAN_ARRAY_<TYPE>` ではなく `fcan_gen::<type>::block_array_index` を使う
+
+理由は [doc/adr/0007-cpp-node-implementation.md](doc/adr/0007-cpp-node-implementation.md) にある。
+
+**`samples/` の C コード**
+
+Zephyr 上流のスタイルに従う。
+インデントはタブ、ポインタは `struct can_frame *frame` と詰める。
+
+**devicetree と binding**
+
+- `boards/` の `.dts` はタブ
+- `app/` の overlay は半角スペース 4 つ
+- `dts/bindings/` の YAML は半角スペース 2 つ（YAML はタブを許さない）
+
+既存のファイルがこれと違う形なら、そのファイルの形に従う。
+無関係な整形を混ぜない。

@@ -1,0 +1,19 @@
+sample:
+  name: Quadrature encoder read
+  description: Poll quadrature encoders decoded by an STM32 timer and log their state.
+
+tests:
+  sample.drivers.qdec:
+    tags:
+      - drivers
+      - encoder
+    filter: dt_compat_enabled("fibril,stm32-qdec")
+    harness: console
+    # A console harness without a configuration is rejected when twister loads
+    # the testsuite, so the sample would not even be discovered.
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "counts per revolution"
+        - "pos=-?\\d+ \\(-?\\d+\\.\\d+ rev\\)"

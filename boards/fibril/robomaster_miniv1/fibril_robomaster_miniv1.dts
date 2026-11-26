@@ -58,11 +58,17 @@
 	status = "okay";
 };
 
+/* PLL_Q is used as the FDCAN kernel clock (see &fdcan1 below). We need it at
+ * or below FDCAN's 80 MHz ceiling and high enough that the 5 Mbps FD data
+ * phase has integer time-quanta per bit. VCO = 24 MHz / div-m * mul-n = 320
+ * MHz, so div-q = 4 lands PLL_Q at 80 MHz — 16 tq @ 5 Mbps, 80 tq @ 1 Mbps.
+ * HSE (24 MHz) would leave 4.8 tq/bit at 5 Mbps, which is not representable.
+ */
 &pll {
 	div-m = <6>;
 	mul-n = <80>;
 	div-p = <2>;
-	div-q = <2>;
+	div-q = <4>;
 	div-r = <2>;
 	clocks = <&clk_hse>;
 	status = "okay";
@@ -92,13 +98,14 @@
 	pinctrl-names = "default";
 };
 
-/* Kernel clock is HSE (24 MHz), which is under the 80 MHz FDCAN ceiling and
- * shared with the other FDCAN instances on this SoC. Overlays only need to
- * flip status to "okay" and set the bitrate.
+/* Kernel clock is PLL_Q at 80 MHz — the FDCAN ceiling. That kernel rate is
+ * shared across every FDCAN instance on this SoC and is high enough to divide
+ * cleanly at both 1 Mbps arbitration (80 tq/bit) and 5 Mbps FD data (16 tq/bit).
+ * Overlays only need to flip status to "okay" and set the bitrate.
  */
 &fdcan1 {
 	clocks = <&rcc STM32_CLOCK(APB1, 25)>,
-		 <&rcc STM32_SRC_HSE FDCAN_SEL(0)>;
+		 <&rcc STM32_SRC_PLL_Q FDCAN_SEL(1)>;
 	pinctrl-0 = <&fdcan1_rx_pd0 &fdcan1_tx_pd1>;
 	pinctrl-names = "default";
 };

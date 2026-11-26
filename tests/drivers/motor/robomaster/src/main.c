@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <math.h>
 #include <string.h>
 
 #include <zephyr/device.h>
@@ -12,6 +13,7 @@
 #include <zephyr/fff.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/ztest.h>
 
@@ -35,6 +37,11 @@ static const struct device * const motor1 = DEVICE_DT_GET(TEST_MOTOR1_NODE);
 static const struct device * const motor2 = DEVICE_DT_GET(TEST_MOTOR2_NODE);
 static const struct device * const motor3 = DEVICE_DT_GET(TEST_MOTOR3_NODE);
 
+/* motor0, motor1 and motor3 are C620s, motor2 a C610 (app.overlay). */
+#define C620_CODES_PER_A (16384.0F / 20.0F)
+#define C610_CODES_PER_A (10000.0F / 10.0F)
+#define RAD_S_PER_RPM (2.0F * 3.14159265F / 60.0F)
+
 struct captured_filter {
 	can_rx_callback_t callback;
 	void *user_data;
@@ -51,6 +58,10 @@ struct captured_tx {
 
 static struct captured_filter captured_filters[TEST_CAN_COUNT];
 static struct captured_tx captured_tx[TEST_CAN_COUNT];
+
+/* Makes the controller take the frame and never report a completion, which is
+ * what a bus nobody acknowledges looks like until it goes bus-off. */
+static atomic_t send_swallows_completion;
 
 DEFINE_FFF_GLOBALS;
 
@@ -101,7 +112,7 @@ static int test_fake_can_send(const struct device *dev, const struct can_frame *
 		captured_tx[idx].group1_count++;
 	}
 
-	if (callback != NULL) {
+	if ((callback != NULL) && (atomic_get(&send_swallows_completion) == 0)) {
 		callback(dev, 0, user_data);
 	}
 
@@ -131,6 +142,7 @@ static void reset_runtime_state(void)
 		memset(&captured_tx[i], 0, sizeof(captured_tx[i]));
 	}
 
+	atomic_set(&send_swallows_completion, 0);
 	fake_can_send_fake.custom_fake = test_fake_can_send;
 	fake_can_start_fake.custom_fake = test_fake_can_start;
 }
@@ -222,16 +234,16 @@ ZTEST(robomaster_motor, test_set_output_routes_to_expected_can_group)
 	wait_for_tx_flush();
 	reset_runtime_state();
 
-	zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 100));
-	zassert_ok(motor_set_output(motor1, MOTOR_OUTPUT_MODE_TORQUE, -200));
-	zassert_ok(motor_set_output(motor2, MOTOR_OUTPUT_MODE_CURRENT, 300));
+	zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 0.625F));
+	zassert_ok(motor_set_output(motor1, MOTOR_OUTPUT_MODE_CURRENT, -1.25F));
+	zassert_ok(motor_set_output(motor2, MOTOR_OUTPUT_MODE_CURRENT, 0.3F));
 	wait_for_tx_flush();
 
 	zassert_true(captured_tx[0].group0_count > 0, "expected at least one batched send on can0");
 	zassert_true(captured_tx[1].group1_count > 0, "expected at least one send on can1");
 
-	expect_be16_slot(&captured_tx[0].group0_frame, 0, 100);
-	expect_be16_slot(&captured_tx[0].group0_frame, 1, -200);
+	expect_be16_slot(&captured_tx[0].group0_frame, 0, 512);
+	expect_be16_slot(&captured_tx[0].group0_frame, 1, -1024);
 	expect_be16_slot(&captured_tx[0].group0_frame, 2, 0);
 	expect_be16_slot(&captured_tx[0].group0_frame, 3, 0);
 
@@ -247,7 +259,7 @@ ZTEST(robomaster_motor, test_enable_uses_cached_output_and_disable_clears_slot)
 
 	inject_feedback(test_can_devs[0], 0x201, 10, 0, 0, 20);
 
-	zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 512));
+	zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 0.625F));
 	wait_for_tx_flush();
 	zassert_true(captured_tx[0].group0_count > 0, "disabled motor should still flush zeroed frame");
 	expect_be16_slot(&captured_tx[0].group0_frame, 0, 0);
@@ -273,6 +285,42 @@ ZTEST(robomaster_motor, test_rejects_unsupported_output_modes)
 		      "velocity mode should be unsupported");
 	zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_VOLTAGE, 1), -ENOTSUP,
 		      "voltage mode should be unsupported");
+	zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_TORQUE, 1), -ENOTSUP,
+		      "torque needs a torque constant the driver does not have");
+	zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_DUTY, 1), -ENOTSUP,
+		      "duty mode should be unsupported");
+}
+
+ZTEST(robomaster_motor, test_rejects_a_non_finite_current)
+{
+	zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, NAN), -EINVAL);
+	zassert_equal(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, INFINITY), -EINVAL);
+}
+
+ZTEST(robomaster_motor, test_set_output_clamps_to_max_current_ma_in_the_models_codes)
+{
+	inject_feedback(test_can_devs[0], 0x201, 10, 0, 0, 20);
+	inject_feedback(test_can_devs[1], 0x205, 30, 0, 0, 20);
+	zassert_ok(motor_enable(motor0));
+	zassert_ok(motor_enable(motor2));
+
+	/* 12000 mA on a C620 is 9830.4 codes; 8000 mA on a C610 is 8000. */
+	zassert_ok(motor_set_output(motor0, MOTOR_OUTPUT_MODE_CURRENT, 100.0F));
+	zassert_ok(motor_set_output(motor2, MOTOR_OUTPUT_MODE_CURRENT, -100.0F));
+	wait_for_tx_flush();
+
+	expect_be16_slot(&captured_tx[0].group0_frame, 0, 9830);
+	expect_be16_slot(&captured_tx[1].group1_frame, 0, -8000);
+}
+
+ZTEST(robomaster_motor, test_get_info_reports_current_mode_and_rotor_counts)
+{
+	struct motor_info info;
+
+	zassert_ok(motor_get_info(motor0, &info));
+	zassert_equal(info.output_modes, MOTOR_OUTPUT_MODE_CURRENT);
+	zassert_within(info.counts_per_rev, 8192.0F, 0.0F);
+	zassert_within(info.zero_counts, 0.0F, 0.0F, "count 0 is the rotor's own zero");
 }
 
 ZTEST(robomaster_motor, test_get_feedback_reports_no_data_and_stale)
@@ -296,7 +344,7 @@ ZTEST(robomaster_motor, test_feedback_decode_and_wraparound)
 {
 	struct motor_feedback feedback;
 	struct motor_feedback previous;
-	int32_t expected_position;
+	int64_t expected_position;
 
 	if (motor_get_feedback(motor0, &previous) != -ENODATA) {
 		expected_position = previous.position + wrapped_delta(8000, previous.orientation);
@@ -311,19 +359,20 @@ ZTEST(robomaster_motor, test_feedback_decode_and_wraparound)
 			      MOTOR_FEEDBACK_POSITION | MOTOR_FEEDBACK_ORIENTATION |
 			      MOTOR_FEEDBACK_TEMPERATURE,
 		      "unexpected valid mask");
-	zassert_equal(feedback.current, 230, "wrong current");
-	zassert_equal(feedback.velocity, 120, "wrong velocity");
+	zassert_within(feedback.current, 230.0F / C620_CODES_PER_A, 1e-6F, "wrong current");
+	zassert_within(feedback.velocity, 120.0F * RAD_S_PER_RPM, 1e-4F, "wrong velocity");
 	zassert_equal(feedback.orientation, 8000, "wrong orientation");
 	zassert_equal(feedback.position, expected_position, "wrong initial position");
-	zassert_equal(feedback.temperature, 55, "wrong temperature");
+	zassert_within(feedback.temperature, 55.0F, 0.0F, "wrong temperature");
 
 	inject_feedback(test_can_devs[0], 0x201, 10, -10, -20, 56);
 	zassert_ok(motor_get_feedback(motor0, &feedback));
 	zassert_equal(feedback.orientation, 10, "wrong updated orientation");
 	zassert_equal(feedback.position, expected_position + 202, "wrong wrapped position");
-	zassert_equal(feedback.current, -20, "wrong updated current");
-	zassert_equal(feedback.velocity, -10, "wrong updated velocity");
-	zassert_equal(feedback.temperature, 56, "wrong updated temperature");
+	zassert_within(feedback.current, -20.0F / C620_CODES_PER_A, 1e-6F,
+		       "wrong updated current");
+	zassert_within(feedback.velocity, -10.0F * RAD_S_PER_RPM, 1e-4F, "wrong updated velocity");
+	zassert_within(feedback.temperature, 56.0F, 0.0F, "wrong updated temperature");
 }
 
 ZTEST(robomaster_motor, test_feedback_is_routed_by_can_bus_and_motor_id)
@@ -337,16 +386,17 @@ ZTEST(robomaster_motor, test_feedback_is_routed_by_can_bus_and_motor_id)
 		      "motor1 should not receive can1 feedback");
 	zassert_ok(motor_get_feedback(motor2, &feedback2));
 	zassert_equal(feedback2.orientation, 1024, "wrong can1 orientation");
-	zassert_equal(feedback2.velocity, 77, "wrong can1 velocity");
-	zassert_equal(feedback2.current, 88, "wrong can1 current");
-	zassert_equal(feedback2.temperature, 40, "wrong can1 temperature");
+	zassert_within(feedback2.velocity, 77.0F * RAD_S_PER_RPM, 1e-4F, "wrong can1 velocity");
+	zassert_within(feedback2.current, 88.0F / C610_CODES_PER_A, 1e-6F, "wrong can1 current");
+	zassert_equal(feedback2.valid_mask & MOTOR_FEEDBACK_TEMPERATURE, 0U,
+		      "a C610 reports no temperature");
 }
 
 ZTEST(robomaster_motor, test_feedback_autodetects_can_bus_and_flushes_cached_output)
 {
 	struct motor_feedback feedback;
 
-	zassert_ok(motor_set_output(motor3, MOTOR_OUTPUT_MODE_CURRENT, 321));
+	zassert_ok(motor_set_output(motor3, MOTOR_OUTPUT_MODE_CURRENT, 0.5F));
 	zassert_equal(captured_tx[1].group0_count, 0,
 		      "auto-detect motor should not transmit on can1 before feedback");
 
@@ -358,22 +408,43 @@ ZTEST(robomaster_motor, test_feedback_autodetects_can_bus_and_flushes_cached_out
 
 	zassert_true(captured_tx[1].group0_count > 0,
 		     "feedback should flush cached output on detected bus");
-	expect_be16_slot(&captured_tx[1].group0_frame, 2, 321);
+	expect_be16_slot(&captured_tx[1].group0_frame, 2, 410);
 
 	zassert_ok(motor_get_feedback(motor3, &feedback));
 	zassert_equal(feedback.orientation, 2048, "wrong mechanical angle");
 	zassert_equal(feedback.position, 2048, "wrong initial position");
-	zassert_equal(feedback.velocity, 33, "wrong velocity");
-	zassert_equal(feedback.current, 44, "wrong current");
-	zassert_equal(feedback.temperature, 41, "wrong temperature");
+	zassert_within(feedback.velocity, 33.0F * RAD_S_PER_RPM, 1e-4F, "wrong velocity");
+	zassert_within(feedback.current, 44.0F / C620_CODES_PER_A, 1e-6F, "wrong current");
+	zassert_within(feedback.temperature, 41.0F, 0.0F, "wrong temperature");
 
 	reset_runtime_state();
 	inject_feedback(test_can_devs[0], 0x203, 3000, 99, 100, 42);
 	zassert_ok(motor_get_feedback(motor3, &feedback));
 	zassert_equal(feedback.orientation, 2048, "feedback from a different bus should be ignored");
 
-	zassert_ok(motor_set_output(motor3, MOTOR_OUTPUT_MODE_CURRENT, -222));
+	zassert_ok(motor_set_output(motor3, MOTOR_OUTPUT_MODE_CURRENT, -0.25F));
 	wait_for_tx_flush();
 	zassert_true(captured_tx[1].group0_count > 0, "detected motor should transmit on can1");
-	expect_be16_slot(&captured_tx[1].group0_frame, 2, -222);
+	expect_be16_slot(&captured_tx[1].group0_frame, 2, -205);
+}
+
+/*
+ * Frames only leave from the transmit work, so a send that waits for the wire
+ * shows up as the work never coming back for the next tick, taking the rest of
+ * the system workqueue with it. ztest runs a suite in test-name order, so this
+ * name is what keeps a regression here from failing every other test too.
+ */
+ZTEST(robomaster_motor, test_transmit_work_keeps_running_when_a_completion_never_arrives)
+{
+	inject_feedback(test_can_devs[0], 0x201, 10, 0, 0, 20);
+	zassert_ok(motor_enable(motor0));
+	wait_for_tx_flush();
+
+	reset_runtime_state();
+	atomic_set(&send_swallows_completion, 1);
+	k_msleep(10);
+
+	zassert_true(captured_tx[0].group0_count > 1,
+		     "the transmit work is still waiting for a completion the controller never "
+		     "reports");
 }

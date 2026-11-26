@@ -1,0 +1,30 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Encoder input ENC0 (PA6/PA7) on TIM3, as enc0. See qdec.dtsi for the
+ * settings every input shares.
+ */
+
+#ifndef FIBRIL_MINIV4_QDEC_ENC0_DTSI
+#define FIBRIL_MINIV4_QDEC_ENC0_DTSI
+
+#ifdef FIBRIL_CLAIM_TIM3
+#error "TIM3 claimed twice; ENC0 is one claimant"
+#endif
+#define FIBRIL_CLAIM_TIM3 1
+
+&timers3 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc0: encoder0 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim3_ch1_pa6 &tim3_ch2_pa7>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+#endif /* FIBRIL_MINIV4_QDEC_ENC0_DTSI */

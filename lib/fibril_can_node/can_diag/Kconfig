@@ -1,0 +1,25 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config FIBRIL_CAN_NODE_CAN_DIAG
+	bool "Report this board's CAN health on the bus"
+	default y
+	depends on FCAN_TRANSPORT
+	imply STATS
+	imply CAN_STATS
+	help
+	  Publish the CanPortDiag and CanHubDiag block types (fibril_can's
+	  zephyr/schema/can_diag.yaml): each CAN controller's state, error
+	  counters, bus-off count and CAN_STATS, and a hub's forwarding
+	  counters. The bridge turns them into /<node>/can{i}/diag and
+	  /<node>/can_hub/diag.
+
+	  Unlike the other functions this one is not described in the
+	  devicetree. The transport decides the instances: one CanPortDiag for
+	  the zephyr,canbus controller, or one per hub peer plus a CanHubDiag.
+	  On by default so every board reports; turning it off removes the
+	  instances from the schema.
+
+	  STATS and CAN_STATS are implied rather than selected, so a board
+	  short of RAM can drop the error counters (stats_valid then reads
+	  false) and keep the rest.

@@ -1,0 +1,37 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * hub+latency-probe self+gs_usb sample on the Fibril RoboMaster Mini V1.
+ *   external port (port 0) = USB FS (PA11/PA12) -> gs_usb subsys -> fcan_hub device
+ *   peer port     (port 1) = FDCAN1 (PD0/PD1)   (board DTS already sets pinctrl + PLL_Q clock)
+ *
+ * Mirrors samples/lib/fibril_can/hub_gs_usb_self.overlay so both samples
+ * share the same host udev/gs_usb setup — see that overlay's comments for
+ * the HSI16/PLL rationale. Only the compatible strings and app source
+ * differ between the two samples.
+ */
+
+/ {
+	gs_usb0: gs_usb0 {
+		compatible = "gs_usb";
+		label = "gs_usb";
+	};
+
+	fcan_hub: fcan_hub {
+		compatible = "fibril,can-hub";
+		status = "okay";
+		peers = <&fdcan>;
+	};
+};
+
+&fdcan {
+	/* 1 Mbps arbitration / 5 Mbps FD data phase — matches the single-bus
+	 * latency_probe_node sample so wire timings are directly comparable. */
+	bitrate = <1000000>;
+	bitrate-data = <5000000>;
+	status = "okay";
+};
+
+&rng {
+	status = "okay";
+};

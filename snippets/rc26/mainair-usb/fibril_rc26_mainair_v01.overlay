@@ -1,0 +1,47 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * MainAir V01 as a USB gateway onto RC26's bus.
+ *   external port (port 0) = USB FS -> gs_usb -> fcan_hub device
+ *   peer port     (port 1) = FDCAN3, board silkscreen CAN0
+ *
+ * Only the transport. A deployment snippet adds the fibril,fcan-* nodes and
+ * must reference board labels only, never the labels defined here, so that
+ * the two overlays can be applied in either order. The transceiver's STB and
+ * the RNG that boot_id draws from are the board's.
+ */
+
+#include <fibril/can-bitrate.h>
+
+#ifdef FIBRIL_CLAIM_FDCAN3
+#error "FDCAN3 claimed twice; rc26-mainair-usb is one claimant"
+#endif
+#define FIBRIL_CLAIM_FDCAN3 1
+
+/ {
+    gs_usb0: gs_usb0 {
+        compatible = "gs_usb";
+        label = "gs_usb";
+    };
+
+    /* No zephyr,canbus chosen node: the hub owns the controller exclusively,
+     * and handing it to a second consumer would give two owners to the same
+     * filters and the same start/stop.
+     */
+    fcan_hub: fcan_hub {
+        compatible = "fibril,can-hub";
+        status = "okay";
+        peers = <&fdcan3>;
+    };
+};
+
+/* The board leaves every FDCAN disabled and hands the bitrate to the user, so
+ * that a node picks the bus it is wired to. The board leaves HSI48 running,
+ * which is what feeds USB.
+ */
+&fdcan3 {
+    status = "okay";
+    bitrate = <FIBRIL_FCAN_BITRATE>;
+    bitrate-data = <FIBRIL_FCAN_BITRATE_DATA>;
+};

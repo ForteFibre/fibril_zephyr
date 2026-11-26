@@ -1,0 +1,11 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config ODRIVE_SEQUENCER
+	bool "ODrive axis bring-up and recovery ported from fibril_odrive_adapter"
+	depends on CPP && STD_CPP17
+	help
+	  Calibrates an ODrive axis, arms it when a command arrives, switches
+	  control modes through idle and clears errors until the axis can be
+	  armed again. The caller reads the ODrive driver's snapshot once per
+	  tick and carries out what the sequencer asks of the axis.

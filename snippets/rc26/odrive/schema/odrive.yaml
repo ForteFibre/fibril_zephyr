@@ -1,0 +1,24 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# Who RC26's ODrive node is on the bus.
+#
+# `{i}` in the node name is replaced with the node id at startup, so this file
+# describes a role rather than one board. There is no `types:` and no
+# `instances:` here; see snippets/rc26/robstride/schema/robstride.yaml.
+
+node: rc26_odrive{i}
+protocol: 2
+
+options:
+  allocation: static
+
+limits:
+  # Sized for CONFIG_FIBRIL_CAN_NODE_ODRIVE_MAX (8) axes rather than the four
+  # wired, so a machine adding axes does not also have to find this file. The
+  # codegen's frame budget in the .report.txt says how close it is.
+  max_frames: 16
+  max_copy_entries: 224
+  # ODriveMotor has no services.
+  service_buffer: 0
+  service_reassembly: 1

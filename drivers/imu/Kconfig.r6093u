@@ -1,0 +1,12 @@
+config IMU_R6093U
+	bool "CruizCore R6093U gyro driver"
+	default y
+	depends on SERIAL
+	depends on SERIAL_SUPPORT_INTERRUPT
+	depends on DT_HAS_CRUIZCORE_R6093U_ENABLED
+	select UART_INTERRUPT_DRIVEN
+	help
+	  Enable support for the CruizCore R6093U, which streams its attitude,
+	  angular velocity and acceleration over a UART. The driver follows the
+	  wrap of the yaw so that it reads continuously, and re-arms the
+	  receiver when the stream stops.

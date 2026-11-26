@@ -1,0 +1,32 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The ground encoders and the gyro of a dead reckoning, wired to the board's
+ * own sockets. The hardware comes from dts/fibril/rc26_mainair_v01/; which
+ * input is encoder0 and which is encoder1 is said here.
+ */
+
+#include <fibril/rc26_mainair_v01/qdec-enc3.dtsi>
+#include <fibril/rc26_mainair_v01/qdec-enc4.dtsi>
+#include <fibril/rc26_mainair_v01/r6093u.dtsi>
+
+#ifdef FIBRIL_CLAIM_FCAN_ODOMETRY
+#error "FCAN_ODOMETRY claimed twice; rc26-odom is one claimant"
+#endif
+#define FIBRIL_CLAIM_FCAN_ODOMETRY 1
+
+/ {
+    fcan_odometry: fcan-odometry {
+        compatible = "fibril,fcan-odometry";
+
+        /* /<node>/odom/encoder and /<node>/odom/imu on the ROS side. */
+        fcan-ns = "odom";
+
+        /* Encoder3 (J11) and Encoder4 (J12), as encoder0 and encoder1 in
+         * silkscreen order. */
+        encoders = <&enc3 &enc4>;
+        imu = <&gyro>;
+        status = "okay";
+    };
+};

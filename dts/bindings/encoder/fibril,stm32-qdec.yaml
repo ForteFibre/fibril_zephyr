@@ -1,0 +1,112 @@
+description: |
+  Quadrature encoder decoded by an STM32 general purpose timer.
+
+  This node must be a child of the timer node it drives. The timer node itself
+  does not take pinctrl-0; the two input pins belong to this node.
+
+  Do not name the node "qdec". The SoC dtsi already declares a disabled child of
+  that name under every st,stm32-timers node for the upstream st,stm32-qdec
+  driver, so a node of the same name merges into it and inherits its properties.
+
+  Give each node a distinct name when a target has more than one. These nodes
+  carry no reg, so the device name is the bare node name, and two encoders named
+  alike produce two devices that nothing can tell apart by name.
+
+    &timers3 {
+        status = "okay";
+        st,prescaler = <0>;
+
+        qdec3: encoder3 {
+            compatible = "fibril,stm32-qdec";
+            pinctrl-0 = <&tim3_ch1_pb4 &tim3_ch2_pb5>;
+            pinctrl-names = "default";
+            counts-per-revolution = <2048>;
+            status = "okay";
+        };
+    };
+
+  The driver sets the timer's auto-reload to the full width of its counter, so
+  the counter wraps at a power of two and the accumulated position stays
+  continuous across the wrap. This is the difference from the upstream
+  st,stm32-qdec binding, which sets auto-reload to a multiple of the counts per
+  revolution and does not publish the value, leaving a consumer unable to tell
+  where the counter wraps.
+
+  The parent's st,prescaler must be zero. The prescaler divides in encoder mode
+  as well, so a non-zero value drops counts.
+
+compatible: "fibril,stm32-qdec"
+
+include: [base.yaml, pinctrl-device.yaml]
+
+properties:
+  pinctrl-0:
+    required: true
+
+  pinctrl-names:
+    required: true
+
+  counts-per-revolution:
+    type: int
+    required: true
+    description: |
+      Counts the timer records per revolution of the encoder shaft, after the
+      x1, x2 or x4 multiplication that encoder-mode selects.
+
+      The driver does not use this. It is here because converting counts to a
+      physical quantity needs it and it is a property of the device rather than
+      of the application, unlike the gear ratio and the wheel radius.
+
+  poll-interval-us:
+    type: int
+    default: 1000
+    description: |
+      Interval between two reads of the hardware counter.
+
+      The driver samples on its own rather than when a reading is requested,
+      because the counter has to be observed at least twice per wrap for the
+      accumulated position to stay continuous. At 16 bits the counter wraps
+      every 65536 counts, so the interval bounds the speed that can be
+      resolved.
+
+      An interval shorter than one kernel tick is rounded up to a tick.
+
+  encoder-mode:
+    type: int
+    default: 3
+    enum:
+      - 1       # x2, counting on tim_ti1fp1 edges only
+      - 2       # x2, counting on tim_ti2fp2 edges only
+      - 3       # x4, counting on both inputs
+      - 0x10006 # x1, counting on tim_ti1fp1
+      - 0x10007 # x1, counting on tim_ti2fp2
+    description: |
+      Slave mode selection written to SMCR.SMS, using the values the reference
+      manual gives.
+
+      The default is x4, which resolves every edge of both inputs and is what
+      the counts-per-revolution of a datasheet usually assumes.
+
+      The x1 modes need SMS bit 3, which not every STM32 has. Selecting one on
+      a part without it fails the build rather than silently decoding wrong.
+
+  input-filter-level:
+    type: int
+    default: 0
+    enum: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    description: |
+      Digital filter on both inputs, as the sampling rate and the number of
+      consecutive equal samples needed to accept a transition. 0 disables it.
+
+      Raise this when a long or unshielded encoder cable produces counts that
+      do not correspond to motion. The mapping from this number to a rate and a
+      sample count is in the reference manual, under TIMx_CCMR1 ICxF.
+
+  invert-direction:
+    type: boolean
+    description: |
+      Report motion with the opposite sign.
+
+      The sign is flipped in software rather than by inverting an input
+      polarity. In x4 mode inverting both inputs does not reverse the direction
+      at all, and inverting only one shifts the phase relationship as well.

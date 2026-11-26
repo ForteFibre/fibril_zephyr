@@ -1,0 +1,54 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * RoboMaster Mini V4 as a USB gateway onto a fibril_can bus.
+ *   external port (port 0) = USB FS -> gs_usb -> fcan_hub device
+ *   peer port     (port 1) = FDCAN1 (PD0/PD1), the external CAN port
+ *
+ * Only fibril_can devices belong on FDCAN1: the hub relays every frame as
+ * CAN FD, unfiltered, and the motor buses' protocols overlap fibril_can's ID
+ * space, so FDCAN2/FDCAN3 never join the hub.
+ *
+ * Only the transport. A deployment snippet adds the fibril,fcan-* nodes and
+ * must reference board labels only, never the labels defined here, so that
+ * the two overlays can be applied in either order. The transceiver's STB and
+ * the RNG that boot_id draws from are the board's.
+ */
+
+#include <fibril/can-bitrate.h>
+
+#ifdef FIBRIL_CLAIM_FDCAN1
+#error "FDCAN1 claimed twice; miniv4-usb is one claimant"
+#endif
+#define FIBRIL_CLAIM_FDCAN1 1
+
+/ {
+    gs_usb0: gs_usb0 {
+        compatible = "gs_usb";
+        label = "gs_usb";
+    };
+
+    /* No zephyr,canbus chosen node: the hub owns the controller exclusively,
+     * and handing it to a second consumer would give two owners to the same
+     * filters and the same start/stop.
+     */
+    fcan_hub: fcan_hub {
+        compatible = "fibril,can-hub";
+        status = "okay";
+        peers = <&fdcan1>;
+    };
+};
+
+/* The board leaves USB off so that a build on the external CAN port alone
+ * does not enumerate. HSI48, which feeds it, is the board's.
+ */
+&usb {
+    status = "okay";
+};
+
+&fdcan1 {
+    status = "okay";
+    bitrate = <FIBRIL_FCAN_BITRATE>;
+    bitrate-data = <FIBRIL_FCAN_BITRATE_DATA>;
+};

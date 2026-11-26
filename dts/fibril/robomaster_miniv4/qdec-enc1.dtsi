@@ -1,0 +1,30 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Encoder input ENC1 (PB2/PC12) on TIM5, as enc1. See qdec.dtsi for the
+ * settings every input shares.
+ */
+
+#ifndef FIBRIL_MINIV4_QDEC_ENC1_DTSI
+#define FIBRIL_MINIV4_QDEC_ENC1_DTSI
+
+#ifdef FIBRIL_CLAIM_TIM5
+#error "TIM5 claimed twice; ENC1 is one claimant"
+#endif
+#define FIBRIL_CLAIM_TIM5 1
+
+&timers5 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    enc1: encoder1 {
+        compatible = "fibril,stm32-qdec";
+        pinctrl-0 = <&tim5_ch1_pb2 &tim5_ch2_pc12>;
+        pinctrl-names = "default";
+        counts-per-revolution = <2048>;
+        status = "okay";
+    };
+};
+
+#endif /* FIBRIL_MINIV4_QDEC_ENC1_DTSI */

@@ -1,0 +1,24 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# RC26's main node: the six valve outputs and the RobStride actuators on one
+# MainAir V01, as one node on the bus. It carries no transport, so it is
+# layered on the board's transport snippet:
+#
+#   west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-main
+#
+# rc26-air and rc26-robstride are each one of these halves alone. All three
+# claim the node role, so only one of them goes on an image.
+
+name: rc26-main
+
+append:
+  EXTRA_CONF_FILE: main.conf
+
+boards:
+  # A regex, not a bare name: the key is matched against
+  # "<board>/<qualifiers>", so an exact-match key never fires on a board that
+  # names its SoC.
+  /fibril_rc26_mainair_v01.*/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: fibril_rc26_mainair_v01.overlay

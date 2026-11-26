@@ -1,5 +1,7 @@
 # Introduction
 
-This is the Doxygen documentation for [example-application].
+`include/` 以下で公開しているドライバクラスとライブラリの API リファレンス。
 
-[example-application]: https://github.com/zephyrproject-rtos/example-application
+ドライバごとの使い方と配線の要件は、リポジトリの `doc/` にあるガイドを参照する。
+
+- [fibril_zephyr](https://github.com/ForteFibre/fibril_zephyr)

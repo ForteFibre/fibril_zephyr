@@ -1,0 +1,184 @@
+.. _fibril_robomaster_miniv4:
+
+Fibril RoboMaster Mini V4
+#########################
+
+概要
+****
+
+RoboMaster Mini の最新リビジョン。
+MCU とクロック構成は miniv1 と同じ STM32G474VE だが、モータ CAN が 2 系統になり、故障表示用の赤 LED が増えている。
+RS485 バスも USART3 の PB10/PE15 から PC10/PC11 へ移した。
+
+ピン割り当ては先行ファームウェア CanMotorMbed の ``robomaster_miniv4`` ターゲットから移してある。
+
+ハードウェア
+************
+
+- STM32G474VE、Flash 512 KB、SRAM 128 KB
+- HSE 24 MHz 水晶。PLL を経て SYSCLK 160 MHz
+- RGB ステータス LED と、独立した故障表示 LED（いずれもアクティブ Low）
+- 4 ビット BCD ロータリ DIP スイッチ
+- 外部 CAN 1 系統とモータ CAN 2 系統
+- USB デバイスポート
+- 独立ウォッチドッグ（IWDG）
+
+クロック構成
+============
+
+FDCAN のカーネルクロックには PLL_Q を使い、80 MHz に置いている。
+これは FDCAN の上限であると同時に、5 Mbps の FD データフェーズでビットあたりの time quanta が整数になる値でもある（1 Mbps で 80 tq、5 Mbps で 16 tq）。
+このカーネルクロックは SoC 上の全 FDCAN インスタンスで共有される。
+
+HSI48 は有効にしてある。
+
+対応機能
+********
+
+Twister が認識する機能は ``gpio``、``uart``、``dma``、``can``、``adc`` である。
+
+配線とピン
+**********
+
+.. list-table::
+   :header-rows: 1
+
+   * - 機能
+     - ノード
+     - ピン
+     - 既定の状態
+   * - コンソール / シェル
+     - ``usart1``
+     - TX=PA9、RX=PA10、115200 baud
+     - 有効
+   * - RS485（AMT21x エンコーダ）
+     - ``usart3``
+     - TX=PC10、RX=PC11、DE=PB14
+     - 無効
+   * - 外部 CAN
+     - ``fdcan1``
+     - RX=PD0、TX=PD1（STDBY は PB11）
+     - 無効
+   * - モータ CAN 0（MOTCAN0）
+     - ``fdcan2``
+     - RX=PB12、TX=PB13
+     - 無効
+   * - モータ CAN 1（MOTCAN1）
+     - ``fdcan3``
+     - RX=PA8、TX=PA15
+     - 無効
+   * - エンコーダ入力 ENC0
+     - ``timers3`` CH1/CH2
+     - A=PA6、B=PA7
+     - 未定義
+   * - エンコーダ入力 ENC1
+     - ``timers5`` CH1/CH2
+     - A=PB2、B=PC12
+     - 未定義
+   * - エンコーダ入力 ENC2
+     - ``timers4`` CH1/CH2
+     - A=PD12、B=PD13
+     - 未定義
+   * - エンコーダ入力 ENC3
+     - ``timers2`` CH1/CH2（``timers5`` も可）
+     - A=PA0、B=PA1
+     - 未定義
+   * - エンコーダ入力 ENC4
+     - ``timers1`` CH1/CH2
+     - A=PE9、B=PE11
+     - 未定義
+   * - エンコーダ入力 ENC5
+     - ``timers8`` CH1/CH2（``timers3`` も可）
+     - A=PC6、B=PC7
+     - 未定義
+   * - アナログ入力 ADC__0〜ADC__4
+     - ``adc1`` の ch8 / ch9 / ch3 / ch4、``adc2`` の ch17
+     - ADC__0=PC2、ADC__1=PC3、ADC__2=PA4、ADC__3=PA2、ADC__4=PA3
+     - 無効
+   * - USB デバイス
+     - ``usb`` （``zephyr_udc0``）
+     - DM=PA11、DP=PA12
+     - 無効
+   * - ステータス LED
+     - ``led_r`` / ``led_g`` / ``led_b``
+     - PB9 / PB5 / PD7（アクティブ Low）
+     - 有効
+   * - 故障表示 LED
+     - ``led_fault``
+     - PF2（アクティブ Low）
+     - 有効
+   * - ロータリ ID スイッチ
+     - ``rotary_id`` の ROT1 / ROT2 / ROT4 / ROT8
+     - PC0 / PC1 / PE3 / PE2（プルアップ、アクティブ Low）
+     - 有効
+
+``led0`` エイリアスは緑（``led_g``）、``watchdog0`` は ``iwdg`` を指す。
+
+FDCAN と ``usart3``、``usb`` はピンとクロックだけを設定して無効のままにしてある。
+使う側の overlay が ``status`` を ``"okay"`` にし、ボーレートやビットレート、DMA、子ノードを与える。
+
+外部 CAN のトランシーバの STB（PB11）は、ボードの devicetree が gpio-hog で Low にする。
+どの経路の snippet で ``fdcan1`` を使っても、トランシーバは動作状態で始まる。
+fibril_can の boot_id が使う ``rng`` も、ボードの devicetree で有効にしてある。
+
+``usb`` は ``miniv4-usb`` snippet が有効にし、gs_usb として外部 CAN（``fdcan1``）と hub で繋ぐ（:doc:`/apps`）。
+USB のクロックは、ボードが動かしたままにしている HSI48 から取る。
+モータ CAN（``fdcan2``、``fdcan3``）は hub に入れない（:doc:`/adr/0015-hub-joins-fibril-can-only`）。
+
+RS485 の設定例は :doc:`/drivers/amt21`、モータ CAN の使い方は :doc:`/drivers/robomaster` を参照する。
+``dts/fibril/robomaster_miniv4/amt21.dtsi`` が ``usart3`` を 2 Mbps の AMT21 バス（``amt21_bus``）にする。エンコーダはデプロイ snippet（``miniv4-md-amt4`` など）がアドレスとともに足す。
+
+エンコーダ入力のピン名は CanMotorMbed の ``PinNames.h`` に合わせてある。
+ボードの devicetree はこれらのノードを持たない。
+``dts/fibril/robomaster_miniv4/qdec-enc0.dtsi``〜``qdec-enc5.dtsi`` が、表の割り当てで入力 1 本ずつの ``fibril,stm32-qdec`` を定義し、その timer を確保する（ラベルは ``enc0``〜``enc5``、:doc:`/drivers/qdec_stm32`）。
+``qdec.dtsi`` は 6 本をすべて取り込む。
+ENC0 と ENC5、ENC1 と ENC3 は、それぞれ同じ timer（``timers3``、``timers5``）にも載るので、両方を使うときは表の割り当てにする。
+``miniv4-md-qdec4`` snippet はこの断片を include し、ENC0〜ENC3 をモータ 1〜4 と組にする。
+ENC4（``timers1``）と ENC5（``timers8``）は、ビルドが通ることだけを確かめてある。実機で数えたことはまだ無い。
+
+モータ CAN の RoboMaster ESC は ``dts/fibril/robomaster_miniv4/robomaster.dtsi`` が 8 台とも定義する（``rm_motor1``〜``rm_motor8`` と、ロータ角の ``rm_enc1``〜``rm_enc8``）。
+繋がっていない ESC は feedback が無いだけなので、どのデプロイも同じ断片を使う（:doc:`/apps`）。
+
+アナログ入力のピン名も CanMotorMbed の ``PinNames.h`` に合わせてある。
+PA4 は ADC2 にしか、PA2 と PA3 は ADC1 にしか繋がらないので、ADC1 と ADC2 の両方にチャネルを定義してある（12 bit、最長のサンプリング時間）。
+ボードはチャネルを定義するだけで ADC を有効にしない。
+``MdMotor`` のキャリブレーションに使うときは、``miniv4-adc`` snippet が ``fibril,fcan-adc-port`` のノードを置き、``dts/fibril/robomaster_miniv4/adc.dtsi`` で ADC を有効にする（:doc:`/apps`）。
+
+ロータリスイッチは ``fibril,id-switch``（``rotary_id``）として記述し、``chosen`` の ``fibril,node-id`` がこれを指す。
+ROT1 を最下位ビットとする 4 ビットの値として読み、fibril_can の node_id にそのまま使う（``lib/node_id``、:doc:`/apps` の「node_id を ID スイッチから読む」）。
+
+フラッシュのパーティション
+==========================
+
+.. list-table::
+   :header-rows: 1
+
+   * - ラベル
+     - オフセット
+     - サイズ
+   * - ``mcuboot``
+     - 0x00000000
+     - 48 KB（読み出し専用）
+   * - ``image-0``
+     - 0x0000c000
+     - 228 KB
+   * - ``image-1``
+     - 0x00045000
+     - 228 KB
+   * - ``storage``
+     - 0x0007e000
+     - 8 KB
+
+ビルドと書き込み
+****************
+
+.. code-block:: shell
+
+   west build -b fibril_robomaster_miniv4 app
+   west flash
+
+``west flash`` の runner は STM32CubeProgrammer、OpenOCD、pyOCD、J-Link に対応する。
+
+``app/`` は ``robomaster_controller`` のノードを要し、それを書いた overlay は ``app/boards/nucleo_g474re.overlay`` にしか無い。
+そのため、このボードでは ``app/`` をそのままビルドできない。
+ドライバだけを確かめるときは、Zephyr の ``samples/hello_world`` にドライバのノードを書いた overlay を重ねる。

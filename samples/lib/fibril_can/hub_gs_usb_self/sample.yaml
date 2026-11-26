@@ -1,0 +1,38 @@
+sample:
+  name: fibril_can hub + self node via CANnectivity gs_usb external port
+  description: >-
+    Bring up a fibril_can slave whose typed wrappers are generated at build
+    time by fcan_codegen from the shared example schema, embed it as the
+    hub's self node, and expose the hub to a USB host through
+    CANnectivity's gs_usb device class. A host on SocketCAN (or fibril_can_web
+    over WebUSB) sees the self node's traffic combined with anything on the
+    fdcan1 peer segment through a single canX interface.
+
+tests:
+  sample.lib.fibril_can.hub_gs_usb_self:
+    tags:
+      - fibril_can
+      - can
+      - hub
+      - usb
+    # CONFIG_FIBRIL_CAN gates on the fibril_can module being on the west
+    # manifest; the two dt_compat_enabled clauses gate on the board actually
+    # wiring up both the hub and a gs_usb node.
+    filter: CONFIG_FIBRIL_CAN and dt_compat_enabled("fibril,can-hub") and dt_compat_enabled("gs_usb")
+    harness: console
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "hub_gs_usb_self: fcan_init OK"
+        - "hub_gs_usb_self: fcan_hub_attach_self OK"
+        - "hub_gs_usb_self: fcan_register_all OK"
+        - "hub_gs_usb_self: gs_usb_register OK"
+        - "hub_gs_usb_self: usbd_enable OK"
+        - "hub_gs_usb_self: entering main loop"
+    integration_platforms:
+      - fibril_robomaster_miniv1
+    # Twister needs to know where fcan_codegen lives before it can build this
+    # sample. Set FCAN_CODEGEN in the environment before invoking twister:
+    #   FCAN_CODEGEN=/abs/path/fcan_codegen twister -T fibril_zephyr/samples/lib/fibril_can/hub_gs_usb_self
+    # or pass --extra-args=-DFCAN_CODEGEN=... to twister directly.

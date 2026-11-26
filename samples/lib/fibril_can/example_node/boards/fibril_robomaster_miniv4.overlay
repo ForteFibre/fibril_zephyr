@@ -1,0 +1,46 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * fibril_can example_node bring-up on the Fibril RoboMaster Mini V4. The board
+ * DTS already routes fdcan1 pinctrl to PD0/PD1 (external CAN transceiver) and
+ * sources its kernel clock from PLL_Q (80 MHz); this overlay just enables the
+ * controller, picks a bitrate and publishes it as zephyr,canbus. The board
+ * also hogs the transceiver's standby pin (CAN_STB=PB11) low and enables the
+ * on-chip RNG that seeds fcan_config_t::boot_id.
+ */
+
+/ {
+	chosen {
+		zephyr,canbus = &fdcan1;
+	};
+};
+
+&fdcan1 {
+	status = "okay";
+
+	/* 1 Mbps arbitration / 5 Mbps FD data phase. With PLL_Q @ 80 MHz that is
+	 * 80 tq @ 1 Mbps and 16 tq @ 5 Mbps -- comfortable margin for the driver's
+	 * default sample-point picks. If a deployment needs a different bitrate,
+	 * change these two properties only.
+	 */
+	bitrate = <1000000>;
+	bitrate-data = <5000000>;
+};
+
+&clk_hse {
+	status = "disabled";
+};
+
+&clk_hsi {
+	status = "okay";
+};
+
+&pll {
+	div-m = <4>;
+	mul-n = <80>;
+	div-p = <2>;
+	div-q = <4>;
+	div-r = <2>;
+	clocks = <&clk_hsi>;
+	status = "okay";
+};

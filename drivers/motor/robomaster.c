@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <math.h>
+
 #include <drivers/motor.h>
+#include <drivers/motor/robomaster.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/can.h>
@@ -24,12 +27,38 @@ LOG_MODULE_REGISTER(motor_dji_robomaster, CONFIG_MOTOR_LOG_LEVEL);
 #define ROBOMASTER_RX_FILTER_MASK 0x7F0U
 #define ROBOMASTER_ENCODER_WRAP 8192
 #define ROBOMASTER_ENCODER_HALF_WRAP (ROBOMASTER_ENCODER_WRAP / 2)
-#define ROBOMASTER_DEFAULT_MAX_CURRENT 10000
 #define ROBOMASTER_CANBUS_UNKNOWN 0xFF
+#define ROBOMASTER_START_RETRY_MS 500
+
+#define ROBOMASTER_RAD_S_PER_RPM (2.0F * 3.14159265358979F / 60.0F)
 
 enum robomaster_model {
   ROBOMASTER_MODEL_C610 = 0,
   ROBOMASTER_MODEL_C620 = 1,
+};
+
+struct robomaster_model_scale
+{
+  /* Current code per A, the same for the command and the feedback. */
+  float codes_per_amp;
+  /* Largest command code the controller takes. */
+  int16_t full_scale_code;
+  bool reports_temperature;
+};
+
+/* Not yet checked against DJI's documents or a motor; doc/drivers/robomaster.md
+ * says which parts are assumed. */
+static const struct robomaster_model_scale robomaster_model_scales[] = {
+  [ROBOMASTER_MODEL_C610] = {
+    .codes_per_amp = 10000.0F / 10.0F,
+    .full_scale_code = 10000,
+    .reports_temperature = false,
+  },
+  [ROBOMASTER_MODEL_C620] = {
+    .codes_per_amp = 16384.0F / 20.0F,
+    .full_scale_code = 16384,
+    .reports_temperature = true,
+  },
 };
 
 struct robomaster_transport_config
@@ -46,6 +75,9 @@ struct robomaster_transport_data
   const struct device * motors[ROBOMASTER_MAX_MOTORS];
   struct k_work tx_work;
   struct k_timer tx_timer;
+  /* Cleared for a bus that has not been started yet; see the retry below. */
+  bool started[ROBOMASTER_MAX_CANS];
+  int64_t last_start_retry;
 };
 
 struct robomaster_motor_config
@@ -53,7 +85,8 @@ struct robomaster_motor_config
   const struct device * transport;
   uint8_t motor_id;
   enum robomaster_model model;
-  int16_t max_current;
+  /* INFINITY when the node sets no max-current-ma: the model's full range. */
+  float max_current_a;
 };
 
 struct robomaster_motor_data
@@ -65,7 +98,11 @@ struct robomaster_motor_data
   uint16_t last_orientation_raw;
   int16_t requested_current;
   struct motor_feedback feedback;
+  robomaster_rotor_callback_t rotor_callback;
+  void * rotor_user_data;
 };
+
+static const struct motor_driver_api robomaster_motor_api;
 
 static int robomaster_transport_find_can_bus(
   const struct robomaster_transport_config * config, const struct device * can_dev)
@@ -79,6 +116,51 @@ static int robomaster_transport_find_can_bus(
   return -ENODEV;
 }
 
+/*
+ * Bring up any bus that would not start earlier. Called from the transmit work
+ * but throttled to ROBOMASTER_START_RETRY_MS, because can_start() on a
+ * controller stuck in initialisation mode costs a hardware timeout.
+ */
+static void robomaster_transport_retry_start(const struct device * dev)
+{
+  const struct robomaster_transport_config * config = dev->config;
+  struct robomaster_transport_data * data = dev->data;
+  const int64_t now = k_uptime_get();
+
+  if ((now - data->last_start_retry) < ROBOMASTER_START_RETRY_MS) {
+    return;
+  }
+
+  data->last_start_retry = now;
+
+  for (size_t i = 0; i < config->can_count; ++i) {
+    if (data->started[i]) {
+      continue;
+    }
+
+    const int ret = can_start(config->can_devs[i]);
+
+    if ((ret == 0) || (ret == -EALREADY)) {
+      data->started[i] = true;
+      LOG_INF("CAN bus %u started", (unsigned int)i);
+    }
+  }
+}
+
+/*
+ * Passed to can_send() only so that it does not wait. With no completion
+ * callback it blocks until the frame reaches the wire, which would park this
+ * work, and the whole system workqueue with it, on a bus nobody acknowledges.
+ * Nothing is done with the result because the next tick sends the same command
+ * again.
+ */
+static void robomaster_tx_done(const struct device * can_dev, int error, void * user_data)
+{
+  ARG_UNUSED(can_dev);
+  ARG_UNUSED(error);
+  ARG_UNUSED(user_data);
+}
+
 static void robomaster_transport_tx_work_handler(struct k_work * work)
 {
   struct robomaster_transport_data * transport =
@@ -90,7 +172,13 @@ static void robomaster_transport_tx_work_handler(struct k_work * work)
     .flags = 0U,
   };
 
+  robomaster_transport_retry_start(transport_dev);
+
   for (size_t can_bus = 0; can_bus < config->can_count; ++can_bus) {
+    if (!transport->started[can_bus]) {
+      continue;
+    }
+
     for (size_t group = 0; group < ROBOMASTER_GROUP_COUNT; ++group) {
       memset(frame.data, 0, sizeof(frame.data));
 
@@ -117,8 +205,9 @@ static void robomaster_transport_tx_work_handler(struct k_work * work)
       }
 
       frame.id = (group == 0U) ? ROBOMASTER_TX_ID_GROUP0 : ROBOMASTER_TX_ID_GROUP1;
-      // Ignore return value since the transport will retry on the next timer tick if the bus is busy
-      (void)can_send(config->can_devs[can_bus], &frame, K_NO_WAIT, NULL, NULL);
+      /* The result covers queueing only, and a frame the controller would not
+       * take is replaced by the next tick's rather than re-sent from here. */
+      (void)can_send(config->can_devs[can_bus], &frame, K_NO_WAIT, robomaster_tx_done, NULL);
     }
   }
 }
@@ -166,10 +255,14 @@ static void robomaster_rx_callback(
   }
 
   struct robomaster_motor_data * motor = motor_dev->data;
+  const struct robomaster_motor_config * motor_config = motor_dev->config;
+  const struct robomaster_model_scale * scale = &robomaster_model_scales[motor_config->model];
   uint16_t orientation_raw = sys_get_be16(&frame->data[0]);
   int16_t velocity = (int16_t)sys_get_be16(&frame->data[2]);
   int16_t current = (int16_t)sys_get_be16(&frame->data[4]);
   uint8_t temperature = frame->data[6];
+  const uint32_t now_cycle = k_cycle_get_32();
+  const int64_t now_ms = k_uptime_get();
 
   k_spinlock_key_t key = k_spin_lock(&motor->lock);
 
@@ -179,6 +272,18 @@ static void robomaster_rx_callback(
   } else {
     motor->detected_can_bus = (uint8_t)can_bus;
   }
+
+  /* The same test robomaster_motor_get_feedback() applies, taken before this
+   * frame refreshes the timestamp. */
+  const struct robomaster_rotor_sample rotor = {
+    .orientation = orientation_raw,
+    .cycle = now_cycle,
+    .continuous = motor->has_last_orientation &&
+                  ((config->feedback_timeout_ms == 0U) ||
+                   ((now_ms - motor->feedback.timestamp_ms) <= config->feedback_timeout_ms)),
+  };
+  const robomaster_rotor_callback_t rotor_callback = motor->rotor_callback;
+  void * const rotor_user_data = motor->rotor_user_data;
 
   if (motor->has_last_orientation) {
     int32_t delta = (int32_t)orientation_raw - (int32_t)motor->last_orientation_raw;
@@ -195,16 +300,49 @@ static void robomaster_rx_callback(
 
   motor->last_orientation_raw = orientation_raw;
   motor->feedback.valid_mask = MOTOR_FEEDBACK_CURRENT | MOTOR_FEEDBACK_VELOCITY |
-                               MOTOR_FEEDBACK_POSITION | MOTOR_FEEDBACK_ORIENTATION |
-                               MOTOR_FEEDBACK_TEMPERATURE;
-  motor->feedback.current = current;
-  motor->feedback.velocity = velocity;
+                               MOTOR_FEEDBACK_POSITION | MOTOR_FEEDBACK_ORIENTATION;
+  motor->feedback.current = (float)current / scale->codes_per_amp;
+  motor->feedback.velocity = (float)velocity * ROBOMASTER_RAD_S_PER_RPM;
   motor->feedback.orientation = orientation_raw;
-  motor->feedback.temperature = temperature;
+  if (scale->reports_temperature) {
+    motor->feedback.valid_mask |= MOTOR_FEEDBACK_TEMPERATURE;
+    motor->feedback.temperature = (float)temperature;
+  }
   motor->feedback.online = true;
   motor->feedback.stale = false;
-  motor->feedback.timestamp_ms = k_uptime_get();
+  motor->feedback.timestamp_ms = now_ms;
   k_spin_unlock(&motor->lock, key);
+
+  /* Outside the lock, so the listener can read this motor's feedback. */
+  if (rotor_callback != NULL) {
+    rotor_callback(motor_dev, &rotor, rotor_user_data);
+  }
+}
+
+int robomaster_motor_set_rotor_callback(
+  const struct device * motor, robomaster_rotor_callback_t callback, void * user_data)
+{
+  struct robomaster_motor_data * data;
+  k_spinlock_key_t key;
+  int ret = 0;
+
+  if ((motor == NULL) || (motor->api != &robomaster_motor_api)) {
+    return -EINVAL;
+  }
+
+  data = motor->data;
+  key = k_spin_lock(&data->lock);
+
+  if ((callback != NULL) && (data->rotor_callback != NULL)) {
+    ret = -EBUSY;
+  } else {
+    data->rotor_callback = callback;
+    data->rotor_user_data = user_data;
+  }
+
+  k_spin_unlock(&data->lock, key);
+
+  return ret;
 }
 
 static int robomaster_transport_init(const struct device * dev)
@@ -240,13 +378,23 @@ static int robomaster_transport_init(const struct device * dev)
       return filter_id;
     }
 
+    /*
+     * A bus whose transceiver has no power holds RX dominant, and a controller
+     * then never leaves initialisation mode. That is the normal state of a
+     * board powered from the debug probe alone, so it must not be fatal. Keep
+     * the other buses and the motor devices usable and retry the start from
+     * the transmit work, so the bus comes up whenever the motor supply does.
+     */
     int ret = can_start(config->can_devs[i]);
     if ((ret < 0) && (ret != -EALREADY)) {
-      LOG_ERR("Failed to start CAN bus %u (%d)", (unsigned int)i, ret);
-      return ret;
+      LOG_WRN("CAN bus %u not startable yet (%d), retrying", (unsigned int)i, ret);
+      continue;
     }
+
+    data->started[i] = true;
   }
 
+  data->last_start_retry = k_uptime_get();
   k_timer_start(&data->tx_timer, K_MSEC(1), K_MSEC(1));
 
   return 0;
@@ -301,21 +449,27 @@ static int robomaster_motor_disable(const struct device * dev)
 }
 
 static int robomaster_motor_set_output(
-  const struct device * dev, const enum motor_output_mode mode, const int16_t output)
+  const struct device * dev, enum motor_output_mode mode, float value)
 {
   const struct robomaster_motor_config * config = dev->config;
+  const struct robomaster_model_scale * scale = &robomaster_model_scales[config->model];
   struct robomaster_motor_data * data = dev->data;
-  int16_t clamped;
   k_spinlock_key_t key;
 
-  if ((mode != MOTOR_OUTPUT_MODE_CURRENT) && (mode != MOTOR_OUTPUT_MODE_TORQUE)) {
+  if (mode != MOTOR_OUTPUT_MODE_CURRENT) {
     return -ENOTSUP;
   }
 
-  clamped = CLAMP(output, -config->max_current, config->max_current);
+  if (!isfinite(value)) {
+    return -EINVAL;
+  }
+
+  const float limit =
+    MIN(config->max_current_a * scale->codes_per_amp, (float)scale->full_scale_code);
+  const int16_t code = (int16_t)lroundf(CLAMP(value * scale->codes_per_amp, -limit, limit));
 
   key = k_spin_lock(&data->lock);
-  data->requested_current = clamped;
+  data->requested_current = code;
   k_spin_unlock(&data->lock, key);
 
   return 0;
@@ -351,6 +505,19 @@ static int robomaster_motor_get_feedback(const struct device * dev, void * feedb
   return ret;
 }
 
+static int robomaster_motor_get_info(const struct device * dev, struct motor_info * info)
+{
+  ARG_UNUSED(dev);
+
+  info->output_modes = MOTOR_OUTPUT_MODE_CURRENT;
+  info->counts_per_rev = (float)ROBOMASTER_ENCODER_WRAP;
+  /* The accumulator is seeded with the rotor angle, so count 0 is the rotor's
+   * zero in the turn it powered up in. */
+  info->zero_counts = 0.0F;
+
+  return 0;
+}
+
 static int robomaster_motor_init(const struct device * dev)
 {
   const struct robomaster_motor_config * config = dev->config;
@@ -373,6 +540,7 @@ static const struct motor_driver_api robomaster_motor_api = {
   .disable = robomaster_motor_disable,
   .set_output = robomaster_motor_set_output,
   .get_feedback = robomaster_motor_get_feedback,
+  .get_info = robomaster_motor_get_info,
 };
 
 #define DT_DRV_COMPAT dji_robomaster
@@ -402,16 +570,19 @@ DT_INST_FOREACH_STATUS_OKAY(ROBOMASTER_TRANSPORT_DEFINE)
 
 #define ROBOMASTER_MODEL_INIT(inst) DT_INST_ENUM_IDX(inst, model)
 
-#define ROBOMASTER_MAX_CURRENT_INIT(inst) \
-  DT_INST_PROP_OR(inst, max_current, ROBOMASTER_DEFAULT_MAX_CURRENT)
+#define ROBOMASTER_MAX_CURRENT_INIT(inst)                                                  \
+  COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, max_current_ma),                                \
+              ((float)DT_INST_PROP(inst, max_current_ma) / 1000.0F), (INFINITY))
 
 #define ROBOMASTER_MOTOR_DEFINE(inst)                                            \
+  BUILD_ASSERT(DT_INST_PROP_OR(inst, max_current_ma, 1) > 0,                     \
+               "max-current-ma must be positive");                               \
   static struct robomaster_motor_data robomaster_motor_data_##inst;              \
   static const struct robomaster_motor_config robomaster_motor_config_##inst = { \
     .transport = DEVICE_DT_GET(DT_INST_PARENT(inst)),                            \
     .motor_id = DT_INST_REG_ADDR(inst),                                          \
     .model = ROBOMASTER_MODEL_INIT(inst),                                        \
-    .max_current = ROBOMASTER_MAX_CURRENT_INIT(inst),                            \
+    .max_current_a = ROBOMASTER_MAX_CURRENT_INIT(inst),                          \
   };                                                                             \
   DEVICE_DT_INST_DEFINE(                                                         \
     inst, robomaster_motor_init, NULL, &robomaster_motor_data_##inst,            \

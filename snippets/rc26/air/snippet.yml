@@ -1,0 +1,24 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# RC26's pneumatics node: who this board is on the bus, and the six valve
+# outputs it wires. It carries no transport, so it is layered on the board's
+# transport snippet:
+#
+#   west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
+#
+# Boards that carry the same functions with the same wiring share it and are
+# told apart at runtime by their node id.
+
+name: rc26-air
+
+append:
+  EXTRA_CONF_FILE: air.conf
+
+boards:
+  # A regex, not a bare name: the key is matched against
+  # "<board>/<qualifiers>", so an exact-match key never fires on a board that
+  # names its SoC.
+  /fibril_rc26_mainair_v01.*/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: fibril_rc26_mainair_v01.overlay

@@ -1,0 +1,17 @@
+identifier: fibril_canmotor_tourobo2023
+name: Fibril CanMotor Tourobo 2023
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+  - gnuarmemb
+ram: 128
+flash: 1024
+supported:
+  - gpio
+  - uart
+  - spi
+  - pwm
+  - usb_device
+  - dma
+vendor: fibril

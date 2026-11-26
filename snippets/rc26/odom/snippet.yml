@@ -1,0 +1,23 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+#
+# What PCMainFW read for dead reckoning, on the RC26 MainAir V01: the ground
+# encoders on J11 and J12 and an R6093U gyro in J25, as the Odometry block
+# type. It names no node, so it layers on a deployment that does, in either
+# order:
+#
+#   west build -b fibril_rc26_mainair_v01 apps/node \
+#     -S rc26-mainair-usb -S rc26-main -S rc26-odom
+#
+# rc26-air and rc26-robstride take it as well. The node keeps the name and
+# the id the deployment gives it.
+
+name: rc26-odom
+
+boards:
+  # A regex, not a bare name: the key is matched against
+  # "<board>/<qualifiers>", so an exact-match key never fires on a board that
+  # names its SoC.
+  /fibril_rc26_mainair_v01.*/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: fibril_rc26_mainair_v01.overlay

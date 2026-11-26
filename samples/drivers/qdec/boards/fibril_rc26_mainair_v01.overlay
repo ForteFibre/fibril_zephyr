@@ -1,0 +1,60 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Quadrature encoder wiring for the Fibril RC26 MainAir V01. The board brings
+ * two encoder sockets out to timer inputs: J11 (Encoder3) on TIM3_CH1/CH2
+ * (PB4/PB5) and J12 (Encoder4) on TIM4_CH1/CH2 (PB6/PB7). The board DTS leaves
+ * both timers off and carries no pinctrl for them, so this overlay supplies
+ * both.
+ *
+ * The node is named "encoder" rather than "qdec" on purpose: the SoC dtsi
+ * already declares a disabled "qdec" child under every timer for the upstream
+ * st,stm32-qdec driver, and reusing the name would merge into it and drag its
+ * st,* properties along. The names carry the silkscreen numbers so that the two
+ * devices can be told apart at runtime: the device name comes from the node
+ * name, and two identically named nodes produce two devices with one name.
+ */
+
+&timers3 {
+	status = "okay";
+
+	/* The prescaler divides in encoder mode as well, so anything but 0
+	 * would drop counts. The driver refuses to build otherwise.
+	 */
+	st,prescaler = <0>;
+
+	qdec3: encoder3 {
+		compatible = "fibril,stm32-qdec";
+		pinctrl-0 = <&tim3_ch1_pb4 &tim3_ch2_pb5>;
+		pinctrl-names = "default";
+
+		/* PLACEHOLDER. 512 cycles per revolution at x4 is a common
+		 * incremental encoder, but nothing on this board fixes the
+		 * value. Set it from the datasheet of the encoder actually
+		 * plugged into J11 before trusting any converted units.
+		 */
+		counts-per-revolution = <2048>;
+
+		/* 16-bit counter, so this bounds the resolvable speed at
+		 * 32768 counts per sample. At 2048 counts per revolution that
+		 * is 16 revolutions per millisecond, far above the mechanism.
+		 */
+		poll-interval-us = <1000>;
+
+		status = "okay";
+	};
+};
+
+&timers4 {
+	status = "okay";
+	st,prescaler = <0>;
+
+	qdec4: encoder4 {
+		compatible = "fibril,stm32-qdec";
+		pinctrl-0 = <&tim4_ch1_pb6 &tim4_ch2_pb7>;
+		pinctrl-names = "default";
+		counts-per-revolution = <2048>;
+		poll-interval-us = <1000>;
+		status = "okay";
+	};
+};

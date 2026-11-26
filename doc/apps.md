@@ -1,0 +1,771 @@
+# アプリケーションと機能
+
+実機に焼くファームウェアは `apps/` にある。
+そこに何が載るかは、機能ライブラリと snippet の組み合わせで決まる。
+この構成を選んだ理由と却下した案は [ADR 0003](adr/0003-multi-app-structure.md) にある。
+
+## アプリケーションの一覧
+
+| パス | 内容 |
+| --- | --- |
+| `apps/node/` | fibril_can スレーブ。バス上のスレーブはすべてこれ 1 つで焼く |
+| `app/` | ボード持ち込みの動作確認。fibril_can を使わない |
+
+`apps/node/` はブロック型の名前を 1 つも持たない。
+何を担うかは、ビルド時に重ねる snippet が決める。
+
+## イメージが決まる 5 つの軸
+
+```shell
+west build -b fibril_rc26_mainair_v01 apps/node -S rc26-mainair-usb -S rc26-air
+```
+
+| 軸 | 決めるもの | 置き場 |
+| --- | --- | --- |
+| 基板 | ペリフェラルの実体 | `boards/fibril/<board>/` |
+| 機能 | ブロック型とその実装 | `lib/fibril_can_node/<type>/` |
+| トランスポート | フレームがバスに届く経路 | `lib/fcan_transport/`（devicetree が選ぶ） |
+| 焼く単位 | 配線の割り当て、ノード名 | `snippets/<大会>/<名前>/` |
+| 個体 | node_id | 基板の ID スイッチ（無い基板は snippet の Kconfig） |
+
+## snippet を 2 層に重ねる
+
+`-S` は複数渡せて、並べた順に append される。
+これを使って、焼く単位を 2 つの層に割ってある。
+
+| 層 | 決めるもの | 例 |
+| --- | --- | --- |
+| トランスポート | 基板がバスに出る経路 | `rc26-mainair-usb`、`miniv4-can`、`miniv4-usb` |
+| デプロイ | ノード名、どの機能をどのピンに出すか（ID スイッチの無い基板では node_id も） | `rc26-air`、`rc26-robstride`、`rc26-odrive`、`rc26-main`、`miniv4-md-qdec4` |
+
+RC26 MainAir には必ず USB の CAN が載り、電磁弁やエンコーダは搭載の有無が変わる。
+経路を別の層に括り出しておくと、機能の増減がデプロイ snippet 1 つの中で閉じる。
+
+機能側の overlay は、ボードが定義するラベルと、自分で include したハードウェアの断片（次の節）のラベルしか参照しない。
+トランスポート snippet が作るラベル（`fcan_hub` など）には触れない。
+この約束があるので、`-S` の順序を入れ替えても同じ blob が出る。
+
+CAN トランシーバの STB と、boot_id が使う RNG は、どの経路でも要るので、基板の DTS が持つ。
+トランスポート snippet は書かない。
+
+## ハードウェアは共有の断片に書く
+
+基板に繋がりうるハードウェア（RoboMaster のバスとモータ、エンコーダ、ADC）は、snippet ではなく `dts/fibril/` の断片に書く。
+overlay は `#include <fibril/...>` で取り込み、`fibril,fcan-*` のノードだけを自分で書く。
+判断の理由は [ADR 0014](adr/0014-snippet-hardware-fragments.md) にある。
+
+| 断片 | 中身 |
+| --- | --- |
+| `dts/fibril/can-bitrate.h` | fibril_can のバス（1 M / 5 M）と、classic CAN のアクチュエータのバス（1 M）のビットレート |
+| `dts/fibril/robomaster-x8.dtsi` | RoboMaster の ESC 8 台（`rm_motor1..8`、C620）とロータ角（`rm_enc1..8`）。基板に依存しない。`cans` は基板の断片が書く |
+| `dts/fibril/robomaster_miniv4/robomaster.dtsi` | 上を FDCAN2 と FDCAN3 に載せ、両方を 1 Mbps で有効にする。両方を確保するので、片方を別の用途（RobStride など）に使う構成はまだ書けない |
+| `dts/fibril/robomaster_miniv4/qdec-enc0.dtsi`〜`qdec-enc5.dtsi` | 入力 1 本ずつ（`enc0`〜`enc5`）。timer は基板の文書の表の割り当てで、その timer を確保する |
+| `dts/fibril/robomaster_miniv4/qdec.dtsi` | 上の 6 本をすべて取り込む |
+| `dts/fibril/robomaster_miniv4/adc.dtsi` | ADC1 と ADC2 を有効にする（チャネルは基板の DTS が定義する） |
+| `dts/fibril/rc26_mainair_v01/robstride.dtsi` | CAN1（FDCAN2）を classic CAN の 1 Mbps で有効にし、RobStride のバス `robstride0` を載せる。モータは載せない。応答を待つデバイスなので、デプロイが繋いだものだけを足す |
+| `dts/fibril/rc26_mainair_v01/qdec-enc3.dtsi`、`qdec-enc4.dtsi` | J11（Encoder3、TIM3）と J12（Encoder4、TIM4）の入力を 1 本ずつ（`enc3`、`enc4`）。その timer を確保する |
+| `dts/fibril/rc26_mainair_v01/r6093u.dtsi` | J25 のジャイロソケット（UART5、38400 bps）の R6093U（`gyro`）。UART5 を確保するので、J15 は同時に使えない |
+| `dts/fibril/robomaster_miniv4/amt21.dtsi` | RS485（USART3、2 Mbps、DMA）の AMT21 バス `amt21_bus`。エンコーダは載せない。応答を待つデバイスなので、デプロイが繋いだものだけを足す |
+
+**未接続を許し、空回りのコストが小さいデバイスは、最大の構成で定義する。**
+たとえば ESC は 8 台とも定義する。
+繋がっていない ESC は feedback を返さないだけで、ほかのモータに影響しない。
+どのモータを使うかは、デプロイ snippet が `fibril,fcan-*` のノードに並べるものだけで決まる。
+応答を待つデバイス（AMT21、RobStride）は、繋いだものだけを書く。
+
+既定から外れる個体は、断片を include した後でラベルを上書きする。
+
+```dts
+#include <fibril/robomaster_miniv4/robomaster.dtsi>
+
+&rm_motor3 {
+    model = "c610";
+};
+```
+
+断片は、同じ名前で include されるように `<...>` で取り込む。
+2 つの snippet が同じ断片を別の相対パス（`"../x.dtsi"`）で include すると、ビルドの依存の一覧に同じファイルが 2 つの名前で載り、ninja が `multiple rules generate` で止まる。
+断片の include guard は、overlay がすべて 1 回のプリプロセッサの実行で処理されるので効く。
+
+基板を足すときは、`dts/fibril/<board>/` に、その基板のコネクタに繋がるものの断片を置く。
+RoboMaster を載せるなら、`robomaster-x8.dtsi` を include して `&robomaster { cans = <...>; };` を書く。
+
+## 1 つしか持てないものは確保する
+
+snippet を重ねると、1 つの image に 1 つしか持てないものを 2 つの snippet が書くことがある。
+dtc は同じ名前のノードをマージしてプロパティを後勝ちにし、Kconfig の文字列も後勝ちになるので、どちらも黙って通る。
+これを止めるため、断片と overlay は、排他の資源をプリプロセッサのマクロで確保する。
+
+```c
+#ifdef FIBRIL_CLAIM_TIM3
+#error "TIM3 claimed twice; ENC0 is one claimant"
+#endif
+#define FIBRIL_CLAIM_TIM3 1
+```
+
+overlay はすべて 1 回のプリプロセッサの実行に並ぶので、`-S` をどの順に並べても、後から確保した側の `#error` でビルドが止まる。
+メッセージに出るのは後の側だけなので、もう一方は `FIBRIL_CLAIM_<名前>` を grep して探す。
+
+| 確保する名前 | 確保する側 |
+| --- | --- |
+| `NODE_ROLE` | `CONFIG_FIBRIL_NODE_SCHEMA` を決めるデプロイ snippet（`*-md-*`、`rc26-air`、`rc26-robstride`、`rc26-odrive`、`rc26-main`） |
+| `FCAN_MD_MOTOR`、`FCAN_ADC_PORT`、`FCAN_SOLENOID`、`FCAN_ROBSTRIDE`、`FCAN_ODOMETRY` | その `fibril,fcan-*` のノードを書く snippet |
+| `TIM<n>` | qdec の入力の断片（miniv4 と rc26_mainair_v01 の `qdec-encN.dtsi`）。PWM などで timer を使う断片も確保する |
+| `FDCAN<n>` | CAN コントローラを使う断片と snippet（RoboMaster のバス、経路、RobStride） |
+| `USART<n>`、`UART<n>`、`DMA1_CH<n>` | UART と DMA のチャネルを使う断片（AMT21 のバス、R6093U） |
+
+確保は約束であり、強制ではない。
+排他の資源に触れる断片や snippet を足すときは、確保を書く。
+
+## snippet の中身
+
+```text
+snippets/rc26/mainair-usb/
+├── snippet.yml                        name と、何を append するか
+├── mainair-usb.conf                   USB スタックとログ
+└── fibril_rc26_mainair_v01.overlay    gs_usb、hub、CAN
+
+snippets/rc26/air/
+├── snippet.yml
+├── air.conf                           CONFIG_FIBRIL_NODE_SCHEMA と node_id
+├── fibril_rc26_mainair_v01.overlay    機能ノードと配線の割り当て
+└── schema/air.yaml                    node と limits
+
+snippets/rc26/robstride/
+├── snippet.yml
+├── robstride.conf                     CONFIG_FIBRIL_NODE_SCHEMA と node_id
+├── fibril_rc26_mainair_v01.overlay    アクチュエータと fcan-robstride ノード
+└── schema/robstride.yaml              node と limits
+
+snippets/rc26/odrive/
+├── snippet.yml
+├── odrive.conf                        CONFIG_FIBRIL_NODE_SCHEMA と node_id
+├── fibril_rc26_mainair_v01.overlay    ODrive の軸と fcan-odrive ノード
+└── schema/odrive.yaml                 node と limits
+
+snippets/rc26/main/                    rc26-air と rc26-robstride を 1 つのノードにしたもの
+├── snippet.yml
+├── main.conf                          CONFIG_FIBRIL_NODE_SCHEMA と node_id
+├── fibril_rc26_mainair_v01.overlay    電磁弁、アクチュエータ、両方の機能ノード
+└── schema/main.yaml                   node と limits
+
+snippets/rc26/odom/                    デプロイ snippet に重ねる自己位置推定の入力
+├── snippet.yml
+└── fibril_rc26_mainair_v01.overlay    odometry ノード（J11、J12 と J25）
+
+snippets/miniv4/can/
+├── snippet.yml
+└── fibril_robomaster_miniv4.overlay   FDCAN1 を zephyr,canbus に
+
+snippets/miniv4/usb/
+├── snippet.yml
+├── usb.conf                           USB スタックとログ
+└── fibril_robomaster_miniv4.overlay   gs_usb、hub、USB、FDCAN1
+
+snippets/common/md/                    MdMotor の役割。基板によらず *-md-* が共有する
+├── md.conf                            CONFIG_FIBRIL_NODE_SCHEMA と watchdog
+└── schema.yaml                        node と limits
+
+snippets/miniv4/md-qdec4/
+├── snippet.yml                        ../../common/md/md.conf も append する
+└── fibril_robomaster_miniv4.overlay   md_motor ノード（RoboMaster 1〜4 と ENC0〜3）
+
+snippets/miniv4/md-rotor8/
+├── snippet.yml                        ../../common/md/md.conf も append する
+└── fibril_robomaster_miniv4.overlay   md_motor ノード（RoboMaster 1〜8 とロータ角）
+
+snippets/miniv4/md-amt4/
+├── snippet.yml                        ../../common/md/md.conf と amt21.conf を append する
+├── amt21.conf                         CONFIG_UART_ASYNC_API
+└── fibril_robomaster_miniv4.overlay   AMT21x 4 台と md_motor ノード（RoboMaster 1〜4）
+
+snippets/miniv4/adc/
+├── snippet.yml
+└── fibril_robomaster_miniv4.overlay   adc_port ノード（基板で固定の 13 ポート）
+```
+
+`rc26-main` は、`rc26-air` の電磁弁と `rc26-robstride` のアクチュエータを、1 つのノード `rc26_main{i}`（node_id 0x00）に載せる。
+1 つのイメージが名乗れるノードは 1 つなので、2 つのデプロイ snippet は重ねられない。両方を載せるときは、両方の `fibril,fcan-*` ノードを書いた 3 つ目の snippet を選ぶ。
+3 つとも `NODE_ROLE` を確保するので、どれか 1 つだけを選ぶ。
+RobStride のバスは `dts/fibril/rc26_mainair_v01/robstride.dtsi` の断片を共有し、電磁弁の配線とモータは各 overlay に書く。
+
+`rc26-odrive` は、CAN1 に ODrive をつなぐデプロイ snippet で、ノード `rc26_odrive{i}`（node_id 0x22）になる。
+ODrive のバスは `dts/fibril/rc26_mainair_v01/odrive.dtsi` にある。
+MainAir V01 の FDCAN は 2 本で、fibril_can が CAN0 を、RobStride が CAN1 を使う。
+ODrive も CAN1 を使うので、`rc26-robstride` と `rc26-main` とは `FDCAN2` の確保でぶつかり、ビルドが止まる。
+overlay の例は R1 の steering と extend の 6 軸（node_id 0〜5）で、1 本のバスに載る。ドライバのバスあたりの上限（`CONFIG_MOTOR_ODRIVE_MAX_AXES`）は既定が 4 なので、`odrive.conf` で 6 に上げている。
+
+`rc26-odom` は、自己位置推定の入力（`Odometry`）を足すデプロイ snippet で、`rc26-main`、`rc26-air`、`rc26-robstride` のどれとも重ねられる。
+`NODE_ROLE` を確保しないので、ノードの名前と node_id は、重ねた側のものになる。
+PCMainFW が担っていた、接地エンコーダ 2 本（J11、J12）と R6093U（J25）の読み出しを、そのノードに足す。
+重ねる側のスキーマの `max_frames` はそのままにしてある。`Odometry` の 2 本の topic（29 B と 40 B、どちらも 10 ms）は、1 本ずつフレームを使う見込みで、`rc26-main` では 24 に対して約 16、`rc26-robstride` では 16 に対して約 15 になる。
+
+miniv4 の経路は 2 つある。
+`miniv4-can` は外部 CAN（FDCAN1）に直接繋ぐ。
+`miniv4-usb` は、USB を hub の外部 port、FDCAN1 を peer にして、PC に FDCAN1 の先の fibril_can のバスを見せる。
+どちらも FDCAN1 を確保するので、重ねるとビルドが止まる。
+hub は、どのフレームもフィルタせずに CAN FD で中継する。
+そのため、FDCAN1 には fibril_can のデバイスだけを繋ぐ。
+モータのバス（FDCAN2、FDCAN3）は hub に入れない。RoboMaster、RobStride、ODrive のプロトコルは、fibril_can の ID 空間と重なるからである。
+
+`miniv4-md-*` の名前の後半は、モータが閉ループに使うエンコーダを、モータの並び順に `<種類><台数>` で並べたものである。
+`qdec4` は基板の直交エンコーダ入力 4 本、`rotor8` は RoboMaster 8 台それぞれのロータ角（[robomaster_encoder](drivers/robomaster_encoder.md)）を使う。
+`amt4` は RS485 の AMT21x 4 台（[amt21](drivers/amt21.md)）を使う。AMT21x は応答を待つので、断片はバスだけを持ち、エンコーダはアドレスとともにデプロイ snippet が書く。
+snippet が append できる Kconfig の断片は、全ボード向けと各ボード向けで 1 つずつなので、`md.conf` を全ボード向けに、`CONFIG_UART_ASYNC_API` を入れた `amt21.conf` をボード向けに append する。
+同じ基板でもモータとエンコーダの組み合わせは機体ごとに変わるので、組み合わせを増やすときは `miniv4-md-rotor4-qdec4` のように足していく。
+ハードウェアは断片がすでに最大の構成で定義しているので、足す snippet の overlay には `fcan-md-motor` のノードだけを書く。
+
+`miniv4-adc` は、`MdMotor` のキャリブレーションが見る入力（`AdcPort`）を足すデプロイ snippet で、どの `miniv4-md-*` とも重ねられる。
+ポートは基板で固定の番号で、CanMotorMbed の miniv4 と同じく 0〜7 がモータ 1〜8 のトルク、8〜12 が ADC__0〜ADC__4 である。
+13 本とも常に定義するので、ほかにどの snippet を重ねても、ポート番号は同じ入力を指す。
+トルクのポートは、モータが繋がっていない、offline、または feedback が古いときにサンプル無しになる。繋がっているモータは、このイメージが駆動しているかによらず電流を報告し、そのポートにはサンプルが出る。
+どのポートも、`adc/port` でそれを指すモータが無ければ判定されない。
+ただし、サンプリングは見られているかによらない。
+AdcPort は 5 ms ごとに全ポートを読み、ADC__0〜ADC__4 の 5 本はそのたびに変換する（トルクのポートは feedback を写すだけ）。
+キャリブレーションを使わないイメージには `miniv4-adc` を重ねない。
+
+ポートの番号は ROS 側の `adc/port` との約束なので、組み合わせごとに並びを変える snippet は作らない。
+基板を足すときも、その基板が出せる入力を 1 つの並びに固定する。
+
+`snippet.yml` の `boards:` キーは正規表現にする。
+比較の対象が `<board>/<qualifiers>` なので、ボード名そのままの完全一致キーは、SoC 名を持つボードに当たらない。
+
+```yaml
+boards:
+  /fibril_rc26_mainair_v01.*/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: fibril_rc26_mainair_v01.overlay
+```
+
+## schema は 3 種類の断片から組む
+
+codegen は複数のファイルを決定的にマージする。
+`apps/node` はそれを使って、手で書く部分を最小にしている。
+
+| 断片 | 出どころ | 中身 |
+| --- | --- | --- |
+| ノードヘッダ | `CONFIG_FIBRIL_NODE_SCHEMA` が指す YAML | `node:`、`protocol:`、`limits:` |
+| ブロック型 | 各機能の `type.yaml` | `types:` |
+| インスタンス | 各機能が devicetree から生成 | `instances:` |
+| 組み込みのインスタンス | `can_diag` がトランスポートから生成 | `instances:` |
+
+ブロック型は実装済みのものを全部渡す。
+インスタンス化されない型は blob を作る前に落とされるので、渡す一覧を誰も管理しなくてよい。
+
+**このイメージが何を担うかは devicetree だけが決める。**
+`fibril,fcan-*` のノードを置くと、そのノードから `instances:` の断片が生成され、機能のソースがコンパイルされる。
+ノードを消せば両方消える。
+
+例外は、CAN の健全性を出す `can_diag` である（下の「CAN の健全性（can_diag）」）。
+devicetree が選んだトランスポートから instances を作り、全てのイメージに入る。
+`apps/node` の「何も有効にしていないイメージを拒む」検査は、devicetree 由来の instances だけで行う。
+
+手で書くのはノードヘッダだけになる。
+
+```yaml
+node: rc26_air{i}
+protocol: 2
+
+limits:
+  max_frames: 16
+  max_copy_entries: 128
+```
+
+ノード名の `{i}` は起動時の node_id で置換される。
+schema はロボット 1 台の役割を述べるもので、基板 1 枚を述べるものではない。
+
+## node_id を ID スイッチから読む
+
+基板の devicetree が `chosen { fibril,node-id = ...; }` で `fibril,id-switch` のノードを指していれば、`CONFIG_FIBRIL_NODE_ID_SWITCH` が立ち、`apps/node` は起動時にそのスイッチを読んで node_id にする（`lib/node_id/`）。
+スイッチの値がそのまま node_id になる。
+ロータリスイッチ（4 bit）なら 0〜15 で、ノード名は `md_controller0`〜`md_controller15` になる。
+CanMotorMbed の fibril_can 版と同じ割り当てである。
+判断の理由は [ADR 0012](adr/0012-node-id-switch-and-watchdog.md) にある。
+
+ID スイッチの無い基板（RC26 MainAir）は、今までどおりデプロイ snippet の `CONFIG_FIBRIL_NODE_ID` で決める。
+スイッチを読む基板では、このシンボルは現れない。
+
+## watchdog を tick で叩く
+
+`CONFIG_WATCHDOG` を立て、ボードに `watchdog0` の alias があると、`CONFIG_APP_WATCHDOG` が立つ。
+`apps/node` は transport に処理を渡す直前に watchdog を `CONFIG_APP_WATCHDOG_TIMEOUT_MS`（既定 1000 ms）で起動し、機能の `tick` を回すたびに叩く。
+`tick` が止まると、基板がリセットされ、モータに最後の出力が残らない。
+
+`fcan_poll` が止まったことを捉えるかは、トランスポートで変わる。
+直結では `tick` と `fcan_poll` が同じスレッドで回るので、どちらが止まっても watchdog は叩かれなくなる。
+hub 構成では `fcan_poll` が hub のドライバのスレッドで回るので（「tick の契約」）、`fcan_poll` だけが止まっても `tick` が watchdog を叩き続ける。
+デバッガで止めている間は watchdog も止まる（`WDT_OPT_PAUSE_HALTED_BY_DBG`）。
+
+`tick` を持つ機能が無いイメージでは叩く場所が無いので、watchdog を起動せず、ログに残す。
+`can_diag`（既定で全てのイメージに入る）が `tick` を持つので、これは `CONFIG_FIBRIL_CAN_NODE_CAN_DIAG=n` にしたイメージだけで起きる。
+STM32 の IWDG は `wdt_setup` で初めて動き出すので、`CONFIG_WATCHDOG` を立てただけで勝手にリセットがかかることはない。
+
+## fibril_can のノードに割く RAM
+
+`apps/node` は、fibril_can のノード本体と、`fcan_init` がバッファを切り出すアリーナを、起動時に 1 回だけ `fcan_heap` から確保する。
+大きさは `CONFIG_APP_FCAN_HEAP_SIZE`（既定 16384 バイト）で決まる。
+アリーナは schema の `limits` と、基板が配線したインスタンスの数に応じて大きくなる。
+既定値は、どの配置でも足りるように余裕を持たせた値である。
+
+RAM の少ない基板では、デプロイ snippet の `.conf` でこれを下げる。
+`CONFIG_SYS_HEAP_RUNTIME_STATS=y` を重ねると、`fcan_init` の後に実際に使った量がログに出る（`fcan_heap: <使った量> of <確保した量> bytes used`）。
+`fcan_init` の後は確保しないので、これが最大の使用量である。
+足りなければ `fibril_fcan_node_init` が失敗し、transport を attach する前に `main` が戻るので、ノードはバスに出ない。
+ログと戻り値は、どちらの確保で足りなくなったかで分かれる。
+
+| 足りなくなった確保 | ログ | `fibril_fcan_node_init` の戻り値 |
+| --- | --- | --- |
+| ノード本体（先に確保する） | `out of memory for the node` | `-ENOMEM` |
+| `fcan_init` のアリーナ | `fcan_init failed`（fault は NOMEM） | `-EIO` |
+
+## 実装済みの機能
+
+| ブロック型 | compatible | 駆動するもの |
+| --- | --- | --- |
+| `Solenoid` | `fibril,fcan-solenoid` | GPIO の電磁弁。Service で開閉し、状態を publish する |
+| `RobstrideMotor` | `fibril,fcan-robstride` | RobStride アクチュエータ。指令、feedback、診断、再ゼロ |
+| `MdMotor` | `fibril,fcan-md-motor` | エンコーダで閉ループにした電流指令のモータ。CanMotorMbed の後継 |
+| `AdcPort` | `fibril,fcan-adc-port` | `MdMotor` のキャリブレーションが見る入力。ADC のチャネルか、モータが報告する電流 |
+| `ODriveMotor` | `fibril,fcan-odrive` | ODrive の軸。`fibril_odrive_adapter` の後継。指令、feedback、診断。下の「ODrive（ODriveMotor）」 |
+| `Odometry` | `fibril,fcan-odometry` | 接地エンコーダ 2 本とジャイロ。PCMainFW が自己位置推定のために送っていた値。下の「自己位置推定の入力（Odometry）」 |
+| `CanPortDiag`、`CanHubDiag` | なし（トランスポートから決まる） | この基板の CAN コントローラと hub の健全性。下の「CAN の健全性（can_diag）」 |
+
+`RobstrideMotor` は `robstride_actuator_bridge_ros2` が ROS グラフに出していたインタフェースをそのまま名乗る。
+モータを PC の SocketCAN から基板に移しても購読側は変わらない、というのがこの型の目的である。
+判断の理由と再現しない点は [ADR 0006](adr/0006-robstride-fcan-node-parity.md) にある。
+
+RobStride のバスは classic CAN なので、fibril_can が使うコントローラとは別のものを割り当てる（[doc/drivers/robstride.md](drivers/robstride.md)）。
+`fibril,fcan-robstride` は `motors` に `robstride,motor` のノードを並べるだけで、モータ自身の配線と上限は `robstride,bus` の側に残る。
+
+モータに書くゲインと加速度は、ROS 2 実装と同じ名前と既定値の param で、run mode ごとに持つ（`motion/`、`position/`、`trajectory/`、`velocity/`、`current/`）。
+ドライバはモードを切り替えるたびにそのモードの値を書き、読み戻して確かめてから有効化する（[ADR 0019](adr/0019-robstride-mode-params-readback.md)）。
+`feedback` の `is_ready` は、それが済んで Running になってから立つ。
+`diagnostics` の `configure_failures` は、設定をやり直した回数を起動から数える。
+
+`MdMotor` は CanMotorMbed がしていた速度と位置の制御を基板で回す（`lib/motor_control`、[ADR 0009](adr/0009-motor-control-core.md)）。
+`fibril,fcan-md-motor` は `motors` と `encoders` を同じ位置どうしで組にし、1 組を 1 インスタンスにする。
+ROS 側は ros2_can_toolbox の `can_md_controller` に寄せてあり、メッセージの型、topic と param の名前、ゲインの単位はそのまま使える。
+ただし次の点が違う。判断の理由は [ADR 0010](adr/0010-md-motor-block-type.md) にある。
+
+- param は bridge の node に `<node>.motorN.velocity.kp` の形で載る。`can_md_controller` は自分の node に `motorN.velocity.kp` を持っていた。
+- `trajectory`（`JointTrajectoryPoint`）は `positions`、`velocities`、`accelerations` をどれも 1 要素以上埋める。短い配列のメッセージは bridge が捨てる。
+- `invert`、`use_cascade_position`、`accel_ff_gain` は node 側の param になった。`can_md_controller` は host で処理していた。
+- `encoder.offset` の param は無い。`reset_encoder` を呼ぶ。
+- `trigger`（`WaitSensorTrigger`）は、待つ時間に上限が無い。`can_md_controller` と同じく、`trigger_cancel` か 2 回目の `trigger` で `success=false` で終わる。加えて、master がノードを止めたとき（STOP、再 DISCOVER）にも終わる。`adc/direction` の 2 は、`can_md_controller` では一致しない値だったが、ここではどちらの向きでも一致する。
+- しきい値は `AdcPort` の `adcN/threshold` に、どのポートを見るかは `motorN/adc/port` に置く。`can_md_controller` の `adc{N}.threshold` は起動時だけ送る read only の param だったが、ここではいつでも変えられる。
+- `sensor` の `edge_position` には `invert` が掛かる。`can_md_controller` は掛けていなかった。
+- 電流は A で表す。`feedback.current` と `current/offset`、モータのポートの `adcN/threshold` がそうである。`can_md_controller` では、`feedback.current` と `current/offset` が生の値 / 1000、しきい値が生の値 / 10000 だった。仮の係数で同じ電流を表すには、`feedback.current` と `current/offset` は C620 で約 1.22 倍、C610 で 1 倍にする。しきい値は C620 で約 12.2 倍、C610 で 10 倍にする（C620 の 0.5 は約 6.1 A）。モータのポートの `threshold` の既定 0.5 は 0.5 A なので、設定し直す。理由は [ADR 0024](adr/0024-motor-class-si-units.md) にある。
+- duty 1.0 に当たる電流は、devicetree の `duty-full-scale-ma` にモータごとに書く。CanMotorMbed の duty 1.0（生の値 10000）と同じにするなら、C620 で 12207、C610 で 10000 である。
+- `calibrate_current_baseline` は測り終えてから応答し、静止していなかったら失敗を返す。測る時間は 0.05〜1 s（CanMotorMbed は 0.5〜5 s）。
+- `can_md_controller` には無かった `command_timeout_ms` がある。DUTY と VELOCITY で 200 ms 指令が来なければ DUTY 0 に落とす。速度を流す master は、それより短い間隔で送り続ける（下の「指令が途絶えたとき」）。
+
+`encoders` には、基板のエンコーダ入力（`fibril,stm32-qdec`、`cui,amt21-encoder`）のほか、RoboMaster のロータ角（`dji,robomaster-encoder`）を置ける。
+ロータ角のカウントは減速前の 8192 counts/rev なので、`encoder/gain` に減速比を含める。
+
+### ODrive（ODriveMotor）
+
+`ODriveMotor` は、PC の `odrive_can_node`（ros_odrive）と fibril_ros の `fibril_odrive_adapter` の組を置き換える。
+ROS からは adapter と同じに見える。モータごとに `target`（`fibril_control_msgs/msg/Target`）、`feedback`（`Feedback`）、`diagnostics` を出す。
+adapter の状態機械（キャリブレーション、closed loop、IDLE を経由するモードの切り替え、エラーからの復帰）は `lib/odrive_sequencer` に移した。
+判断の理由は [ADR 0023](adr/0023-odrive-adapter-block-type.md) にある。
+
+- `fibril,fcan-odrive` は `axes` に `odrive,axis` を並べる。軸は複数の `odrive,bus` にまたがってよい。`axes` の 1 つ目が `motor0` になる。
+- param の `encoder_gain`、`invert`、`use_full_calibration`、`switch_stop_velocity_threshold`、`use_input_vel_ramp` は、adapter と同じ名前と意味である。bridge の node に `<node>.motorN.encoder_gain` の形で載る。
+- キャリブレーションは、master が RUNNING になってから始める。closed loop には `target` が来てから入れる。`feedback.is_ready` はそれまで false である。adapter は指令を待たずに closed loop に入れていた。
+- `target` の `type` が変わると、IDLE にして速度が `switch_stop_velocity_threshold`（rev/s）を下回るのを待ち、closed loop に戻してから新しい指令を送る。待つ間に来た指令は最新のものだけを残す。
+- DUTY は -1..1 で、`duty_full_scale`（Nm）を掛けたトルク指令になる。既定の 0 では DUTY を断る。adapter は DUTY の値をそのまま Nm にしていた。
+- `feedback.output` はトルクの推定値（`Get_Torques`）、`current` は `Iq_Measured` で、どちらも `invert` を掛ける。ODrive の encoder estimates が無いか古い間は、すべて 0 を出す。
+- `diagnostics.state` は adapter の状態機械と同じ番号である（0 が UNKNOWN、6 が READY、10 が ERROR）。
+- ODrive 側では、heartbeat、encoder、iq、torques、error の `*_msg_rate_ms` を有効にする。CAN のビットレートは `odrive.dtsi` に合わせる（1 Mbps）。
+
+### 自己位置推定の入力（Odometry）
+
+`Odometry` は、PCMainFW と PC の `pc_main_interface` が fibril_localization に渡していた 2 本の topic を、同じ型と同じ中身で出す。
+判断の理由と、再現しない点は [ADR 0021](adr/0021-odometry-block-type.md) にある。
+
+| topic | 型 | 中身 |
+| --- | --- | --- |
+| `/<node>/odom/encoder` | `fibril_localization/msg/OdometryEncoder` | `encoder0`、`encoder1`（生のカウント、起動時に 0）、roll、pitch、yaw（rad、yaw は折り返さない）、`is_connecting` |
+| `/<node>/odom/imu` | `sensor_msgs/msg/Imu` | orientation、角速度、加速度。ジャイロの軸のまま。covariance は 0 |
+
+- どちらも 10 ms ごと（PCMainFW と同じ）。値は tick（約 1 ms）ごとに読み直す。
+- `fibril,fcan-odometry` は `encoders` に 2 つのエンコーダを、`imu` に IMU クラスの device を指す。`encoders` の 1 つ目が `encoder0` になる。
+- カウントはエンコーダの `position` を差分で追う。エンコーダが積算をやり直しても（`position_epoch`）、カウントは跳ばずに続く。読めない間は最後の値のまま。
+- yaw はジャイロの向きのままである。R6093U は機体と逆向きなので、`basic_deadreckoning` は今と同じく `-yaw` で使う。
+- `is_connecting` は、ジャイロの値が新しい（`imu_get_feedback()` が 0 を返す）ときに true になる。PCMainFW の host は 100 ms 以内にフレームが届いたかで決めていた。ここでは R6093U の `stale-timeout-ms`（既定 50 ms）で決まる。
+- ジャイロから 1 度も値が来ていない間は、roll、pitch、yaw が 0 で、orientation は回転なし（w = 1）になる。PCMainFW は全成分が 0 のクオータニオンを出していた。
+- orientation は roll、pitch、折り返さない yaw から作る（固定軸の roll、pitch、yaw の順。PCMainFW と同じ式）。
+- Imu の covariance は 0 のまま出す。fibril_localization の `imu_covariance` が `imu/raw_data` を受けて covariance と `frame_id` を埋めるので、そこへ remap する。
+
+ROS 側は、`pc_main_interface` の driver を外し、bridge の topic を remap でつなぐ。
+
+| bridge の topic | つなぎ先 |
+| --- | --- |
+| `/<node>/odom/encoder` | `encoder`（`basic_deadreckoning`） |
+| `/<node>/odom/imu` | `imu/raw_data`（`imu_covariance`） |
+
+どちらの型も `std_msgs/Header` を持つが、スキーマは `header` を写さない。
+`header.stamp` は、fibril_can の bridge が受信時刻で埋める（fibril_can の ADR-0021。bridge の v0.4.3 から）。
+`basic_deadreckoning` は受けた `header.stamp` を TF の時刻にするので、それより前の bridge では TF の時刻が 0 になる。
+この topic で TF を出すなら、bridge を v0.4.3 以上にする。
+ワイヤと slave には何も足していないので、`west.yml` が固定する fibril_can の版（slave の runtime）とは関係しない。
+`imu` の `frame_id` は `imu_covariance` が埋め直すので、bridge の `frame_id` の param は要らない。
+
+### CAN の健全性（can_diag）
+
+`can_diag`（`lib/fibril_can_node/can_diag/`）は、この基板が fibril_can のバスに出るのに使う CAN コントローラの健全性を、fibril_can のブロック型 `CanPortDiag` と `CanHubDiag` で出す。
+ブロック型の定義（`type.yaml` にあたる `zephyr/schema/can_diag.yaml`）と、値を読む関数は fibril_can にある。
+bridge と `fibril_can_diagnostics` が同じ型を使うためで、このリポジトリには実装だけを置く。
+
+devicetree のノードと binding は無い。
+instances はトランスポートが決める。
+
+| トランスポート | instances | ROS の topic |
+| --- | --- | --- |
+| direct | `CanPortDiag` 1 つ（`zephyr,canbus`） | `/<node>/can0/diag` |
+| hub | peer ごとに `CanPortDiag`、`CanHubDiag` 1 つ | `/<node>/can{i}/diag`、`/<node>/can_hub/diag` |
+
+hub の `can{i}` は `peers` の i 番目で、hub の port i + 1 にあたる（port 0 は USB の外部 face）。
+
+- 値は `tick` で 1 秒ごとに読み直す。topic の周期も 1 秒である。
+- CAN_STATS（bit、stuff、CRC、form、ack の各エラー、`rx_overrun`）は、`CONFIG_STATS` と `CONFIG_CAN_STATS` を `imply` で入れる。ドライバは `can_start()` で CAN_STATS を 0 に戻すので、コントローラごとに持ち越して起動からの単調増加にする。
+- bus-off に入った回数は、direct では `can_diag` がコントローラの state change callback で数え、hub では hub のドライバが数えた値を読む。どちらも、ほかに callback を置くものが無いことが前提である。
+- `CanHubDiag` は 8 port までしか表せないので、`CONFIG_FCAN_HUB_MAX_PORTS` が 8 を超えるとビルドが止まる。
+
+外すときは `CONFIG_FIBRIL_CAN_NODE_CAN_DIAG=n` にする。
+RAM が足りないときは、`CONFIG_CAN_STATS=n` でエラーカウンタだけを外せる（`stats_valid` が false になる）。
+全ての基板に入れる判断の理由は [ADR 0017](adr/0017-can-diag-builtin-function.md) にある。
+
+### キャリブレーションと電流
+
+`MdMotor` は CanMotorMbed の ADC のキャリブレーションと電流ベースラインを持つ。
+判断の理由は [ADR 0013](adr/0013-md-motor-calibration-and-current.md) にある。
+
+- `sensor_state` を true にすると、`adc/port` が指す `AdcPort` の値を 5 ms ごとに見る。|値| がしきい値をまたぐたびに、向き（RISE か FALL）とその時点の位置を `sensor` に出す。有効にした直後の最初のサンプルでも、そのときの向きを 1 回出す。位置は変えない。原点を合わせるなら、host が `edge_position` を見て `reset_encoder` を呼ぶ。
+- `adc/port` の既定（255）は、モータと同じ番号のポートを指す。監視中に `adc/port` を変えると、新しいポートの最初のサンプルで、そのときの向きを 1 回出す（有効にした直後と同じ）。
+- エンコーダの値が無効な間は、ポートの値を見ない。その間にしきい値をまたいでいたら、エンコーダが戻った最初のサンプルで、そのときの位置を付けて出す。
+- `feedback.current` は、モータが報告する電流（A）である。CanMotorMbed の `read_current()` の生の値 / 1000 ではない（[ADR 0024](adr/0024-motor-class-si-units.md)）。`current/polarity` の符号を掛け、`current/offset` と、最後に測ったベースラインを引き、最後に `invert` を掛ける。結果が有限でなければ（`current/offset` が NaN など）、電流は無効とし、`feedback.current` は 0 にする。測っているベースラインは中止する。
+- `calibrate_current_baseline` は、`current/baseline_duration_s` の間、DUTY 0 で止まっているモータの電流を平均する。測り終えてから応答を返す（ACCEPTED の後に最終応答）。
+- `trigger` は、`adc/port` のポートが、`adc/direction`（0 が FALL、1 が RISE、2 がどちらでも）の向きにしきい値をまたぐまで待ち、そのときの位置を `triggered_position` に入れて返す。数えるのは待ち始めた後にまたいだときだけで、待ち始めたときの向きでは返らない。待ち始めたときの向きはその時点で最新のサンプルから取るので、待ち始める直前の 1 周期（5 ms）の間にまたいだときも数える。`sensor_state` とは別に監視するので、`sensor` の配信と同時に使える。`trigger_cancel` と 2 回目の `trigger` は、待っている `trigger` を `success=false` で終わらせる。エッジとほぼ同時（1 ms 以内）に届くと、取り消した方が `success=true` で返ることがある。待つ時間に上限は無い。master がノードを止めると（STOP、再 DISCOVER）、fibril_can の runtime が呼び出しを破棄し、master も同じ呼び出しを失敗で返す。master を見失って SUSPENDED になっても、待ち続ける。判断の理由は [ADR 0018](adr/0018-md-motor-trigger-in-firmware.md) にある。
+
+### 指令が途絶えたとき
+
+モータを駆動する型は、指令の途絶を 2 段で捉えて出力を止める。
+判断の理由は [ADR 0016](adr/0016-command-loss-stop.md) にある。
+
+| | `MdMotor` | `RobstrideMotor` | `ODriveMotor` |
+| --- | --- | --- | --- |
+| master 全体の途絶（ノードが RUNNING でなくなる。`apps/node` では 300 ms） | すべてのモードで DUTY 0 | 出力を切る | IDLE にする |
+| `command_timeout_ms`（既定 200 ms、0 で無効） | DUTY と VELOCITY だけ DUTY 0。POSITION と trajectory は保持する | すべての指令で出力を切る | すべての指令で IDLE にする |
+| 再開 | 新しい `target` か `trajectory` | 新しい `target` か `motion_target`。`enable` だけでは戻らない | 新しい `target`。closed loop に入れ直してから送る |
+
+- 新しい指令は topic の世代で判断し、届いた tick に 1 度だけ適用する。同じ値を送り直しても、新しい指令として数える。値が NaN の指令や、扱えない `type` の指令は、拒否して指令として数えない。
+- `RobstrideMotor` の `enable` は、出力が切れる前なら期限を延ばすが、切れた後は出力を戻さない。ドライバが切れる前の目標を持ったままなので、戻すと古い目標へ動く。
+- DUTY 0 は slew 制限を越えてその場で落とし、`trajectory` のフィードフォワードも捨てる。ゲイン、エンコーダ、失速ブレーカの状態は残す。
+- `RobstrideMotor` は保持中の目標を当て直さないので、`reset_encoder`、`gear_ratio`、`invert` の変更は次の指令から効く。
+- `Solenoid` は止めない。master が途絶えても、弁の状態を保持する。
+
+### ROS から見た名前と単位
+
+モータを駆動する型（`MdMotor`、`RobstrideMotor`、`ODriveMotor`）は、ROS への出方に次の約束を共有する。
+どの型も前の実装と同じメッセージの型と param の名前を名乗るので、購読側と調整したゲインの表は名前を変えずに移せる。
+変わるのは topic の頭と param の置き場所である。
+
+- topic と service は `/<node>/motor<N>/<名前>` に出る。`target`（`fibril_control_msgs/msg/Target`）と `feedback`（`fibril_control_msgs/msg/Feedback`）はどの型にもある。頭は fibril_can の bridge の `name_remap` で前の実装の名前に付け替えられる。
+- param は bridge の node に `<node>.motor<N>.<名前>` で載る。`type.yaml` の `/` は `.` になる。起動の YAML のキーも、`ros2 param set` の宛先もこの名前である。
+- param の `min` と `max` はマスターが検査し、slave は検査しない。範囲を検査しないマスターから範囲外の値が届いたときの扱いは型ごとに違う。たとえば `RobstrideMotor` は、モードごとの値の負の値と NaN をドライバが断り、`mode N parameters rejected` のログを出して前の値を残すが、`gear_ratio` の 0 は断らずに、その値で割る。
+- `feedback.is_ready` は、型が指令を受けられる状態かを表す。`MdMotor` はエンコーダの値が有効で失速ブレーカが落ちていない間、`RobstrideMotor` は設定を読み戻して Running になってから、`ODriveMotor` は最初の `target` で closed loop に入ってから立つ。`is_ready` は指令を送ってよいかの合図ではない。`RobstrideMotor` は出力を入れてから（最初の `target`、`motion_target`、または `enable(on=true)` の後で）、`ODriveMotor` は最初の `target` の後でしか立たないので、`is_ready` を待ってから最初の指令を送る master では、どちらもいつまでも始まらない。
+
+ROS に出す値の単位は次のとおりで、正本は各 `type.yaml` のコメントである。
+
+| 値 | `MdMotor` | `RobstrideMotor` | `ODriveMotor` |
+| --- | --- | --- | --- |
+| 位置、速度（`target`、`feedback`） | `encoder/gain` × カウント、`encoder/gain` × カウント/s（利用者が決める） | 関節側の rad、rad/s（指令は `gear_ratio` を掛けてモータへ送り、feedback はモータの値を `gear_ratio` で割る） | `encoder_gain` × rev、`encoder_gain` × rev/s |
+| `feedback.output` | duty（-1..1） | 関節側のトルク（Nm） | トルクの推定値（Nm、`Get_Torques`） |
+| `feedback.current` | A（モータが報告する電流） | 無い（スキーマが持たず、bridge が 0 で埋める） | A（`Iq_Measured`） |
+| `target` の DUTY | duty | devicetree の `max-current-ma` に対する比 | `duty_full_scale`（Nm）を掛けたトルク。既定の 0 では断る |
+
+`RobstrideMotor` で `gear_ratio` が掛かるのは関節側の値だけである。
+`*/max_vel`、`*/acc` と、`motion_target` の `position`、`velocity`、`torque_ff` には掛かる。
+ループのゲイン（`*_kp`、`*_ki`）と、`motion_target` と `motion/*` の `kp`、`kd` はモータ側で、掛からない。
+前の ROS 2 実装と同じ扱いにして、調整した値をそのまま移せるようにしてある。
+
+型、単位、param の意味を変えるときは、ADR を書き、この節と各型の節を同じ PR で直す。
+ROS の側で値を読んでいるところ（機体の param の YAML、しきい値、記録のスクリプト、シミュレータ）も洗い出す。
+
+## 機能を 1 つ足す
+
+`lib/fibril_can_node/<type>/` に 4 つのファイルと、binding を 1 つ置く。
+アプリケーションには触らない。
+
+機能は C++17 で書く。
+codegen には `LANGUAGE CXX` を渡してあるので、生成物は `schema_gen.hpp` の
+`namespace fcan_gen` になる（[ADR 0007](adr/0007-cpp-node-implementation.md)）。
+
+| ファイル | 内容 |
+| --- | --- |
+| `type.yaml` | ブロック型の定義。バスから見た姿 |
+| `impl.cpp` | ハンドラと publish の実装 |
+| `Kconfig` | devicetree にノードがあるときだけ y になる真偽値と、`_MAX` |
+| `CMakeLists.txt` | ソースの登録、`type.yaml` の登録、`fibril_can_node_instances()` |
+| `dts/bindings/fibril_can_node/fibril,fcan-<type>.yaml` | ハードウェアの記述と `fcan-ns` |
+
+`type.yaml` に param を足すときは、末尾に足す。
+宣言の順が、params-changed のハンドラが受け取る変更のマスクのビットの位置になる。
+並べ替えると、黙ってすべてのビットがずれる。
+
+`CMakeLists.txt` はこの形になる。
+
+```cmake
+zephyr_library_sources_ifdef(CONFIG_FIBRIL_CAN_NODE_SOLENOID solenoid.cpp)
+
+set_property(GLOBAL APPEND PROPERTY fibril_can_node_type_schemas
+             "${CMAKE_CURRENT_SOURCE_DIR}/type.yaml")
+
+if(CONFIG_FIBRIL_CAN_NODE_SOLENOID)
+  fibril_can_node_instances(
+    TYPE       Solenoid
+    COMPATIBLE "fibril,fcan-solenoid"
+    MAX        ${CONFIG_FIBRIL_CAN_NODE_SOLENOID_MAX})
+endif()
+```
+
+`type.yaml` の登録だけ guard の外にある。
+型は実装済みのものを全部渡すのが約束で、載るかどうかは `instances:` が決めるためである。
+`fibril_can_node_instances()` を包んでいるのは、`MAX` が読む Kconfig が機能を無効にすると存在しなくなるからにすぎない。
+
+`fibril_can_node_instances()` は devicetree から `fcan-ns` を読んで `instances:` の断片を吐く。
+compatible を持つノードが 2 つ以上 okay なら、その場でビルドを止める。
+実装は devicetree インスタンス 0 しか駆動しないので、2 つ目はハンドラの無いインスタンス群になるためである。
+
+### `max_count` を Kconfig で持つ理由
+
+`max_count` は静的確保の上限であって、個数ではない。
+blob には現れず、バスと ROS グラフに出るのは実行時のインスタンス数だけである。
+6 と 16 で生成物を比べても、`schema_blob.c` は完全に一致し、変わるのは状態配列の長さ 1 行だけだった。
+
+余らせたコストは `.bss` に収まる。
+機能側の `sizeof(state)` × 余り個数に加えて、生成コードがハンドラを置く
+`std::function` のスロット（サービス 1 つと params-changed 1 つにつき
+32 bit ARM で 16 B）× 余り個数がかかる。
+一方、CMake の devicetree API は phandle 配列を読めない（`dt_prop` が扱うのは string、int、boolean、array、uint8-array、string-array、path）。
+配線の本数を CMake から数える手段がない以上、devicetree に本数を重複して書くより、Kconfig の上限で済ませるほうが行が減る。
+
+`impl.cpp` の `BUILD_ASSERT` が、配線が上限を超えたときに落とす。
+
+```cpp
+static const struct gpio_dt_spec valves[] = {
+  DT_INST_FOREACH_PROP_ELEM_SEP(0, gpios, GPIO_DT_SPEC_GET_BY_IDX, (, ))
+};
+
+BUILD_ASSERT(ARRAY_SIZE(valves) <= fcan_gen::solenoid::max_count,
+             "more gpios wired than CONFIG_FIBRIL_CAN_NODE_SOLENOID_MAX");
+```
+
+インスタンスとハードウェアの対応は devicetree が持つ。
+phandle 配列の並びがそのままバス上のインスタンス番号になるので、並べ替えると全部の名前が変わる。
+
+最後に自分を登録する。
+
+```cpp
+FIBRIL_FCAN_FUNC_DEFINE(
+  solenoid,
+  .array = fcan_gen::solenoid::block_array_index,
+  .count = (uint8_t)ARRAY_SIZE(valves),
+  .init = solenoid_init,
+  .start = solenoid_start);
+```
+
+`init` はハードウェアを掴む（`fcan_init` の前）、`start` はバスに最初に触る（`fcan_gen::register_all` の後）、`tick` は約 1 kHz で呼ばれる。
+どれも省略できる。
+
+### サービスハンドラは start で登録する
+
+C++ ラッパのサービスハンドラは実行時登録である。
+**登録し忘れてもリンクは通り、その呼び出しが BAD_INDEX で返る。**
+気付ける場所を 1 つにするため、登録は `start` に集める。
+
+```cpp
+static int solenoid_start(void)
+{
+  for (uint8_t i = 0; i < (uint8_t)ARRAY_SIZE(valves); i++) {
+    fcan_gen::solenoid(i).on_set(
+      [i](const set_req & req, set_resp & resp, fcan_gen::call_handle) noexcept {
+        return set_valve(i, req, resp);
+      });
+
+    publish_state(i);
+  }
+
+  return 0;
+}
+```
+
+`start` が登録の場所として正しいのは、`register_all` がディスパッチャを据えた後で、かつ `fcan_transport_attach` がノードをバスに開く前だからである。
+この窓の外で登録すると、ハンドラが載る前に要求が届きうる。
+
+**λ が捕捉してよいのはインスタンス番号までにする。**
+`std::function` はキャプチャが大きいとヒープを使う。
+状態はファイルスコープの配列に置き、λ は番号で引く。
+
+ハンドラをインスタンスごとに登録するので、インスタンス番号の範囲検査は要らない。
+誰も登録していないスロットはランタイムが BAD_INDEX で返す。
+
+## 周期送信を持たせない
+
+状態がサービス呼び出しでしか変わらない機能は、`tick` を書かずに `period_us: 0` を使う。
+このトピックはスケジューラの周期送信から外れ、`commit` を呼んだ回だけ 1 発送られる。
+
+```yaml
+state:
+  dir: s2m
+  period_us: 0
+  fields: { on: bool }
+```
+
+publish はハンドラの中と `start` の 2 か所からになる。
+`start` の時点ではノードがまだ RUNNING でないが、送信要求は保持され、送信できる最初の `fcan_poll` で出る。
+だからマスターの最初の読み取りが既定値ではなく実際の状態になる。
+
+`tick` を持つ機能が 1 つも無いイメージでは、アプリケーションが 1 kHz のタイマを起動しない。
+`fcan_poll` はランタイム自身の期限（ハートビート、ANNOUNCE、周期 S2M スロット）と、RX・TX 完了・commit の 3 つのイベントで回るので、タイマが無くても止まらない。
+
+## トランスポートを差し替える
+
+ノードのフレームがバスに届く経路は 2 通りある。
+CAN コントローラに直結する形と、複数のセグメントを橋渡しする hub の self port になる形である。
+
+**選ぶのは devicetree で、アプリケーションも機能も書き換えない。**
+
+| overlay に書くもの | 選ばれるもの |
+| --- | --- |
+| `chosen { zephyr,canbus = &fdcanN; }` | `lib/fcan_transport/direct.c` |
+| `compatible = "fibril,can-hub"` のノード | `lib/fcan_transport/hub.c` |
+| `compatible = "gs_usb"` のノード | `lib/fcan_transport/gs_usb.c` を重ねる |
+
+`fibril,can-hub` のノードを置くと `CONFIG_CAN_FCAN_HUB` が自動で立ち、それが
+`CONFIG_FCAN_TRANSPORT_HUB` を選ぶ。conf に書き足すことはない。
+
+2 つの違いは 2 点に尽きる。
+
+**HAL の出どころ。** 直結は `fcan_zephyr_can_hal_get()`、hub は
+`fcan_hub_get_self_hal()` である。後者は Zephyr の CAN device のラッパではない。
+hub の self は「自分も port の 1 つ」の対称モデルに従い、送信を全 live port に
+broadcast する。方向を知らずに済むので、USB が繋がっている port を静的に決めなくてよい。
+
+**`fcan_poll` を回すスレッド。** 直結はアプリケーションのループが回す。
+hub は **ドライバのスレッドが回す**（`fcan_hub_poll` が attach 済みの self を駆動する）。
+`fcan_hub_on_rx` は内部ロックを持たず、呼ぶスレッドを 1 本に保つ約束なので、
+hub 構成でアプリケーションが並行して poll してはいけない。
+`fcan_transport_run()` が hub では即座に返るのはこのためである。
+
+hub 構成では `can_start()` を呼ばない。
+外部 port を開けるのはゲートウェイの仕事で、peer はドライバの init で既に上がっている。
+ホストを繋がない基板でも peer セグメントにハートビートが流れる。
+
+### 外部 port を USB に向ける
+
+hub の外部 port は配線を持たない。ここに CANnectivity の gs_usb を被せると、
+PC は SocketCAN からこのノードのバス全体を 1 本の canX として見る。
+自分自身のトラフィックも同じインタフェースに乗る。
+
+これも devicetree で決まる。`gs_usb` のノードを置くと `CONFIG_USBD_GS_USB` が
+既定で立ち、それが `CONFIG_FCAN_TRANSPORT_GS_USB` を選ぶ。
+conf 側で明示するのは `CONFIG_USB_DEVICE_STACK_NEXT=y` だけである。
+
+```dts
+gs_usb0: gs_usb0 {
+    compatible = "gs_usb";
+    label = "gs_usb";
+};
+
+fcan_hub: fcan_hub {
+    compatible = "fibril,can-hub";
+    status = "okay";
+    peers = <&fdcan3>;
+};
+```
+
+USB を有効にする順序に制約がある。
+ホストが列挙できるようになるのは attach の後でなければならない。
+`fcan_transport_attach()` が attach に続けて gs_usb を立ち上げるのはこのためで、
+アプリケーションから順序を間違える余地を消してある。
+
+その attach 自体を、アプリケーションは起動の最後に置く。
+機能の `start` はすべてその前に走らせる。
+attach はノードをバスに開く操作でもあるので、`start` を後に回すと、
+ホストやピアからの要求が初期状態の publish と並んで走り、
+命令したばかりの出力が上書きされうる。
+
+`CONFIG_FCAN_TRANSPORT_GS_USB` は hub バックエンドに依存する。
+直結のノードには被せる外部 port が無く、class を登録する者がいないまま
+USB デバイスだけが build に入ることになるので、その組み合わせは選べない。
+gs_usb のノードが無ければ、この呼び出しは何もしない `static inline` になる。
+呼び出し側に条件分岐は要らない。
+
+VID/PID と文字列は CANnectivity の既定値に揃えてある。
+ホスト側の udev ルールや gs_usb の pid フィルタがそのまま効く。
+DFU と MSOSV2 記述子は持たないので、WinUSB の自動バインドや USB 経由の
+ファーム更新が要る基板は CANnectivity 本体のアプリケーションを使う。
+
+### tick の契約
+
+hub 構成では、周期処理が `fcan_poll` とは別のスレッドで走る。
+ドライバのループにアプリケーション用のフックが無いためである。
+
+周期は直結と同じく 1 ms で、周期 1 ms の `k_timer` に合わせて回す。
+hub のスレッドが `fcan_hub_poll` を回す周期（fibril_can の `CONFIG_CAN_FCAN_HUB_POLL_INTERVAL_US`）とは別物で、そちらを変えても `tick` の周期は変わらない。
+`tick` が 1 ms を超えて周期を取りこぼしたら、取りこぼした分はまとめて呼ばずに捨て、数を警告のログに出す。
+続けて呼ぶと、新しいフィードバックを待たずにモータへ指令を重ねて送ることになるためである。
+
+publish は安全側にある。トピックの commit は、commit する側とスケジューラが別の
+コンテキストで走る前提で作られている。
+service の後送の応答（`*_complete`）も、fibril_can v0.3.3 からは安全側にある。
+応答をランタイムに預けるだけで、送るのは `fcan_poll` である。
+預け先が空いていなければ `FCAN_E_BUSY` が返るので、呼ぶ側は次の周期にやり直す。
+ただし **`tick` は `fcan_poll` と同じスレッドにいると仮定してはいけない。**
+`func.h` の `tick` の説明はこの前提で書いてある。
+
+ノードの状態は `fibril_fcan_node_state()` で読める。
+fibril_can v0.3.4 から `fcan_state` を別のスレッドから呼べるようになったので、hub 構成の `tick` からも読める。
+機能には `fcan_node_t` を渡さず、この関数だけを出している。ほかのランタイムの API は `tick` から安全に呼べるとは限らないためである。
+ノードは `fibril_can_node` が 1 イメージに 1 つだけ作る（`fibril_fcan_node_init()`）。アプリケーションはノードを自分で確保して `fcan_init` を呼ぶ代わりにこれを呼び、返ってきたノードを `fcan_gen::register_all` と transport に渡す。ノードを作る場所が 1 つなので、状態を読む側にノードを登録し忘れることが起きない。
+master からのフレームが `master_lost_us`（`apps/node` では 300 ms）途絶えると `FCAN_STATE_SUSPENDED` になり、次のフレームで `FCAN_STATE_RUNNING` に戻る。
+出力を master の指令より長く残したくない機能は、SUSPENDED かどうかではなく、RUNNING かどうかで判断する。master がまだノードを起動していない UNPROVISIONED と PROVISIONED も、同じ判定で止められる。
+
+## `instance_counts` の埋め方
+
+ブロック配列の並びは schema から導かれる。
+`apps/node/` では機能が `fcan_gen::<type>::block_array_index` を自分で申告し、アプリケーションがそれを添字に数を埋めるので、この配列を手で書く場所は残っていない。
+
+生成された `make_instance_counts` は使わない。
+全ブロック型を呼び出し側が名指しする `static_assert` を持つので、アプリケーションが機能の一覧を知ることになるためである（[ADR 0007](adr/0007-cpp-node-implementation.md)）。
+
+`samples/lib/fibril_can/` のサンプルは C ラッパのままで、自前の schema を持つ。
+そちらは位置指定の初期化子に `FCAN_ARRAY_<TYPE>` を使う形で書く。
+
+```c
+static const uint8_t counts[FCAN_NUM_BLOCK_ARRAYS] = {
+  [FCAN_ARRAY_MOTORDRIVER] = 1U,
+  [FCAN_ARRAY_IMU] = 1U,
+};
+```
+
+## codegen の場所
+
+`fcan_codegen` は `ros-jazzy-fibril-can-codegen` パッケージが `/opt/ros/jazzy/lib/fibril_can_codegen/` に置く。
+このパスは既定で探されるので、パッケージが入っている機械では何も渡さなくてよい。
+
+見つからなければ、`fcan_invoke_codegen` が `modules/lib/fibril_can` から host 向けに CLI をビルドする。
+置き場所はビルドディレクトリの `fcan_codegen_host/` で、`west build -p` のたびにビルドし直す。
+protobuf と yaml-cpp が要る（macOS は `brew install protobuf yaml-cpp`、Ubuntu は `protobuf-compiler libprotobuf-dev libyaml-cpp-dev`）。
+ROS 2 の無い Mac では、これで `west build` が通る。
+この CLI は `west.yml` が固定した fibril_can と同じ版なので、deb の版がずれる心配が無い。
+
+手元の CLI を使うときは絶対パスを、deb があっても木からのビルドを使うときは `FCAN_CODEGEN_FROM_SOURCE` を渡す。twister には環境変数で渡す。
+
+```shell
+west build -b <board> apps/node -S <transport> -S <deployment> -- -DFCAN_CODEGEN=/abs/path/fcan_codegen
+west build -b <board> apps/node -S <transport> -S <deployment> -- -DFCAN_CODEGEN_FROM_SOURCE=ON
+FCAN_CODEGEN=/abs/path/fcan_codegen west twister -T apps
+```

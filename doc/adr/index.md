@@ -1,0 +1,93 @@
+# 設計判断の記録（ADR）
+
+コードを読むだけでは辿れない**選択の理由**と**却下した選択肢**を残す場所。
+ガイド本文が「いまどうなっているか」を書くのに対し、ADR は「なぜそうしたか」「ほかの案がなぜ採られなかったか」を書く。
+
+## いつ書くか
+
+- ドライバクラスやボード定義の約束事を増やす、変える、やめる
+- ビルド構成やディレクトリの責務を変える
+- 外部依存を増やす（新しい Zephyr module、ホスト側ツール）
+- 互換性を壊す（公開ヘッダ、devicetree binding、ビルド手順）
+- 性能や決定性のために非自明な実装を選ぶ
+
+命名の整理、内部リファクタ、テスト追加は ADR にしない。
+コミットメッセージとガイドの更新で足りる。
+
+## 書き方
+
+ファイル名は `NNNN-kebab-title.md`（4 桁ゼロ埋め、空き番号は使わない）。
+下の一覧と、このページ末尾の toctree に 1 行足す。
+
+採用後の本文は書き換えない。
+判断が覆ったときは新しい ADR を起こし、古い方のステータスを `Superseded by NNNN` に変える。
+
+## ステータス
+
+- **Proposed**: 提案。合意形成中か、実装前。
+- **Accepted**: 受理済み。実装と一致している。
+- **Deprecated**: もう守らなくてよい。理由を一文添える。
+- **Superseded by NNNN**: 別の ADR に置き換わった。
+
+## 一覧
+
+| 番号 | 表題 | ステータス |
+| --- | --- | --- |
+| [0001](0001-doc-structure.md) | ドキュメントを doc/ に一本化し、ボード文書は Zephyr 慣習に従う | Accepted |
+| [0002](0002-encoder-feedback-layering.md) | encoder feedback を積算位置と速度で表し、積算の責務をドライバに置く | Accepted |
+| [0003](0003-multi-app-structure.md) | 複数用途のファームウェアを 1 つのアプリケーションと機能ライブラリで構成する | Proposed |
+| [0004](0004-robstride-control-api-layering.md) | RobStride の制御 API を汎用 motor クラスと機種固有ヘッダに分ける | Proposed |
+| [0005](0005-motor-position-64bit.md) | motor_feedback.position を 64 bit の積算カウントにする | Proposed |
+| [0006](0006-robstride-fcan-node-parity.md) | RobStride を fibril_can のブロック型として載せ、ROS 2 実装のインタフェースに合わせる | Proposed |
+| [0007](0007-cpp-node-implementation.md) | fibril_can スレーブを C++17 で書き、codegen の C++ ラッパを使う | Proposed |
+| [0008](0008-fibril-common-integration.md) | fibril_common を Zephyr module として取り込む | Proposed |
+| [0009](0009-motor-control-core.md) | CanMotorMbed の制御のコアを、1 kHz 固定の tick で回る C++ ライブラリとして移す | Proposed |
+| [0010](0010-md-motor-block-type.md) | CanMotorMbed の後継を MdMotor ブロック型として載せ、can_md_controller に寄せる | Proposed |
+| [0011](0011-robomaster-rotor-encoder.md) | RoboMaster のロータ角を、受信経路から通知を受ける encoder device として見せる | Proposed |
+| [0012](0012-node-id-switch-and-watchdog.md) | node_id を基板の ID スイッチの値そのままにし、watchdog を tick で叩く | Proposed |
+| [0013](0013-md-motor-calibration-and-current.md) | MdMotor の ADC キャリブレーションを AdcPort ブロック型で入れ替え可能にし、電流ベースラインは測り終えてから応答する | Proposed |
+| [0014](0014-snippet-hardware-fragments.md) | 基板に繋がるハードウェアを共有の devicetree 断片に切り出し、未接続を許すデバイスは最大の構成で書く | Proposed |
+| [0015](0015-hub-joins-fibril-can-only.md) | hub が繋ぐバスは fibril_can のデバイスだけにし、モータのバスへの生の転送はしない | Proposed |
+| [0016](0016-command-loss-stop.md) | 指令の途絶を、master 全体の途絶と topic ごとの途絶の 2 段で捉えて出力を止める | Proposed |
+| [0017](0017-can-diag-builtin-function.md) | CAN の健全性は、devicetree に書かない組み込みの機能として全てのイメージで出す | Proposed |
+| [0018](0018-md-motor-trigger-in-firmware.md) | MdMotor の trigger をファームウェアに入れる | Proposed |
+| [0019](0019-robstride-mode-params-readback.md) | RobStride の設定をモードごとに書き、読み戻して確かめてから有効化する | Proposed |
+| [0020](0020-imu-driver-class.md) | ジャイロを、SI 単位と連続した yaw のスナップショットを返す IMU クラスで見せる | Proposed |
+| [0021](0021-odometry-block-type.md) | 自己位置推定の入力を、PCMainFW の host が出していた topic と同じ形のブロック型にする | Proposed |
+| [0022](0022-odrive-control-api-layering.md) | ODrive の制御 API を push 型 feedback と機種固有ヘッダで載せる | Proposed |
+| [0023](0023-odrive-adapter-block-type.md) | ODrive を fibril_odrive_adapter の後継のブロック型として載せる | Proposed |
+| [0024](0024-motor-class-si-units.md) | 汎用 motor クラスの指令と feedback を float の SI 単位にする | Proposed |
+| [0025](0025-runtime-device-connection.md) | 機器の接続を、ビルドではなく起動時の param で決める | Proposed |
+| [0026](0026-composite-encoder-and-motor.md) | 合成エンコーダと合成モータを、MdMotor とは別のブロック型にし、MdMotor は速度を別のエンコーダから取れるようにする | Proposed |
+
+```{toctree}
+:maxdepth: 1
+:hidden:
+
+0001-doc-structure
+0002-encoder-feedback-layering
+0003-multi-app-structure
+0004-robstride-control-api-layering
+0005-motor-position-64bit
+0006-robstride-fcan-node-parity
+0007-cpp-node-implementation
+0008-fibril-common-integration
+0009-motor-control-core
+0010-md-motor-block-type
+0011-robomaster-rotor-encoder
+0012-node-id-switch-and-watchdog
+0013-md-motor-calibration-and-current
+0014-snippet-hardware-fragments
+0015-hub-joins-fibril-can-only
+0016-command-loss-stop
+0017-can-diag-builtin-function
+0018-md-motor-trigger-in-firmware
+0019-robstride-mode-params-readback
+0020-imu-driver-class
+0021-odometry-block-type
+0022-odrive-control-api-layering
+0023-odrive-adapter-block-type
+0024-motor-class-si-units
+0025-runtime-device-connection
+0026-composite-encoder-and-motor
+```

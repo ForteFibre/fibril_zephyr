@@ -1,0 +1,23 @@
+menuconfig IMU
+	bool "IMU driver support"
+	help
+	  Enable inertial measurement unit and attitude sensor driver support
+
+if IMU
+
+config IMU_INIT_PRIORITY
+	int "IMU driver init priority"
+	default 85
+	help
+	  IMU driver initialization priority.
+
+module = IMU
+module-str = imu
+source "subsys/logging/Kconfig.template.log_config"
+
+# zephyr-keep-sorted-start
+rsource "Kconfig.r6093u"
+
+# zephyr-keep-sorted-stop
+
+endif # IMU

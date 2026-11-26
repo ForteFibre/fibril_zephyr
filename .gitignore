@@ -17,3 +17,6 @@ __pycache__/
 
 # clangd
 .cache/
+
+# claude
+/.claude/worktrees

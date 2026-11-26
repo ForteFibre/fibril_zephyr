@@ -11,6 +11,24 @@
  * @ingroup encoder_interface
  * @brief Diagnostics specific to the Same Sky AMT21x driver
  *
+ * @defgroup imu_interface IMU driver class
+ * @brief Inertial measurement unit and attitude sensor interface
+ *
+ * @defgroup motor_interface Motor driver class
+ * @brief Generic motor interface
+ *
+ * @defgroup motor_robomaster RoboMaster driver
+ * @ingroup motor_interface
+ * @brief Rotor angle stream specific to the RoboMaster driver
+ *
+ * @defgroup motor_odrive ODrive driver
+ * @ingroup motor_interface
+ * @brief Targets, callbacks and parameters specific to the ODrive driver
+ *
+ * @defgroup motor_robstride RobStride driver
+ * @ingroup motor_interface
+ * @brief Targets and parameters specific to the RobStride driver
+ *
  * @}
  */
 
@@ -19,6 +37,21 @@
  * @{
  *
  * @brief Custom libraries
+ *
+ * @defgroup fibril_can_node fibril_can node functions
+ * @brief Registration of a schema block type's implementation
+ *
+ * @defgroup fcan_transport fibril_can node transport
+ * @brief How a node's frames reach the bus
+ *
+ * @defgroup motor_control Motor control core
+ * @brief Duty, speed and position control of one motor, once per tick
+ *
+ * @defgroup node_id Node id switch
+ * @brief The node id a board's switch is set to
+ *
+ * @defgroup odrive_sequencer ODrive axis sequencer
+ * @brief Calibration, arming, mode switches and error recovery of one ODrive axis
  *
  * @}
  */

@@ -1,0 +1,18 @@
+/ {
+	test_uart: uart_emul {
+		compatible = "zephyr,uart-emul";
+		status = "okay";
+		current-speed = <38400>;
+		rx-fifo-size = <128>;
+		tx-fifo-size = <64>;
+
+		gyro: r6093u {
+			compatible = "cruizcore,r6093u";
+			stale-timeout-ms = <30>;
+			/* Far below the binding default, so the tests that wait for
+			 * the device to go offline stay short.
+			 */
+			offline-timeout-ms = <100>;
+		};
+	};
+};

@@ -1,0 +1,41 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * What RC26's pneumatics node drives. The transport snippet decides how it
+ * reaches the bus, so nothing here mentions a controller.
+ */
+
+/* One node schema per image; see doc/apps.md. */
+#ifdef FIBRIL_CLAIM_NODE_ROLE
+#error "NODE_ROLE claimed twice; rc26-air is one claimant"
+#endif
+#define FIBRIL_CLAIM_NODE_ROLE 1
+
+#ifdef FIBRIL_CLAIM_FCAN_SOLENOID
+#error "FCAN_SOLENOID claimed twice; rc26-air is one claimant"
+#endif
+#define FIBRIL_CLAIM_FCAN_SOLENOID 1
+
+/ {
+    /* The six +12 V outputs J18-J23, in silkscreen order. The pins are not
+     * consecutive on the port because the TBD62783A inputs were placed to
+     * keep the +12 V traces short; taking them from the board's air0..air5
+     * nodes is not possible, since those are gpio-leds children rather than
+     * a GPIO phandle-array.
+     */
+    fcan_solenoid: fcan-solenoid {
+        compatible = "fibril,fcan-solenoid";
+
+        /* Becomes air0..air5 on the ROS side, matching the silkscreen. */
+        fcan-ns = "air{i}";
+
+        gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>,   /* Air0 - J18 */
+                <&gpioa 6 GPIO_ACTIVE_HIGH>,   /* Air1 - J19 */
+                <&gpioa 0 GPIO_ACTIVE_HIGH>,   /* Air2 - J20 */
+                <&gpioa 5 GPIO_ACTIVE_HIGH>,   /* Air3 - J21 */
+                <&gpioa 7 GPIO_ACTIVE_HIGH>,   /* Air4 - J22 */
+                <&gpioa 4 GPIO_ACTIVE_HIGH>;   /* Air5 - J23 */
+        status = "okay";
+    };
+};

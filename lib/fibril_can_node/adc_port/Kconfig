@@ -1,0 +1,31 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config FIBRIL_CAN_NODE_ADC_PORT
+	bool
+	default y
+	depends on DT_HAS_FIBRIL_FCAN_ADC_PORT_ENABLED
+	imply ADC
+	imply MOTOR
+	help
+	  Compiled whenever the devicetree lists calibration inputs under a
+	  fibril,fcan-adc-port node, which is also what puts AdcPort instances
+	  into the schema. MdMotor's calibration reads its inputs through this;
+	  without it, sensor_state answers that the node has no ports.
+
+	  ADC and MOTOR are implied rather than selected: a port list made of
+	  only one kind needs only that subsystem, and the build of the other
+	  kind fails loudly if it is turned off.
+
+config FIBRIL_CAN_NODE_ADC_PORT_MAX
+	int "AdcPort instances to allocate for"
+	default 16
+	range 1 32
+	depends on FIBRIL_CAN_NODE_ADC_PORT
+	help
+	  The schema's max_count for AdcPort: how many instances the generated
+	  code reserves state for. It is a ceiling, not a count, and never
+	  reaches the schema blob.
+
+	  16 covers CanMotorMbed's miniv4 layout of 13 ports. Lowering it below
+	  the devicetree's child count fails the BUILD_ASSERT in adc_port.cpp.

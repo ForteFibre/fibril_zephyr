@@ -15,7 +15,9 @@ module-str = motor
 source "subsys/logging/Kconfig.template.log_config"
 
 # zephyr-keep-sorted-start
+rsource "Kconfig.odrive"
 rsource "Kconfig.robomaster"
+rsource "Kconfig.robstride"
 
 # zephyr-keep-sorted-stop
 
