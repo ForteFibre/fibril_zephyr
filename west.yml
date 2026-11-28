@@ -87,7 +87,11 @@ manifest:
       # arrived. The codegen package must be at least v0.3.3: an older
       # fcan_codegen emits a *_complete that returns nothing, and apps/node with
       # MdMotor fails to compile. v0.3.4 changes the runtime only.
-      revision: v0.4.2
+      #
+      # Pinned to a commit, not a tag: lib/fcan_transport and the samples need
+      # fcan_zephyr_can_hal_init(h, dev) and the HAL's critical section, which
+      # no release has yet. Replace with the release tag before merging.
+      revision: 25d8d914448c294b9c2f094d087ce1345932f86f
       url: https://github.com/ForteFibre/fibril_can.git
       path: modules/lib/fibril_can
     - name: fibril_common

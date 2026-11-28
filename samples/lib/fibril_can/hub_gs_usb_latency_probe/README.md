@@ -82,7 +82,7 @@ FCAN_CODEGEN=/abs/path/fcan_codegen \
 
 commit → emit dwell について:
 - **単一 bus**: main loop で
-  `drain_rx → probe_logic_tick (commit) → fcan_poll (emit) → sleep` の順に
+  `probe_logic_tick (commit) → fcan_poll (emit) → sleep` の順に
   running するので、commit と emit が同 tick に載る。§3.4.1 recommendation。
 - **hub**: `probe_logic_tick` は app thread、`fcan_poll(self)` は hub
   driver thread。両者は `CONFIG_CAN_FCAN_HUB_POLL_INTERVAL_US` (default 1000 µs)
@@ -114,7 +114,7 @@ USB FS の bulk 転送は 1 ms frame 単位。したがって minimum RTT は
 ## §6 — Node ID / warmup
 
 - 既定 node ID: **0x20**。
-  `-DCONFIG_EXTRA_CFLAGS="-DNODE_ID=0x??"` で上書き可。
+  `-DEXTRA_CFLAGS="-DNODE_ID=0x??"` で上書き可。
 - Boot から echo 周期送信開始まで:
   T_listen 300 ms + boot_id ジッタ + USB enumerate/bind (~500 ms)
   ≒ **≦ 2 s** 見積もり。probe launch は `--slave-warmup-s 2` 推奨。

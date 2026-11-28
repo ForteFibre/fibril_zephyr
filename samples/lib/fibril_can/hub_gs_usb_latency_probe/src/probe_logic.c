@@ -3,9 +3,9 @@
  *
  * Hub-variant tick logic. On-wire behaviour is identical to
  * samples/lib/fibril_can/latency_probe_node/src/probe_logic.c — the fcan
- * topic begin/commit/read API is seqlock-protected so it is safe to call
- * from the app thread while the hub driver thread runs fcan_poll(self)
- * asynchronously.
+ * topic begin/commit/read API runs in the runtime's critical section, so it
+ * is safe to call from the app thread while the hub driver thread runs
+ * fcan_poll(self) asynchronously.
  *
  * Firmware-requirements alignment mirrors the single-bus sample:
  *

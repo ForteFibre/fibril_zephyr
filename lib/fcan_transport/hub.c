@@ -98,8 +98,7 @@ void fcan_transport_run(fcan_node_t * node, void (*tick)(void))
 
   /* Periodic work runs on this thread, not on the hub thread, because the
    * driver's loop offers no application hook. That is safe for publishing:
-   * fcan_topic_commit is built for a committer and a scheduler in different
-   * contexts. It does mean a tick must not assume it shares a thread with
+   * the runtime guards its topics with a critical section. It does mean a tick must not assume it shares a thread with
    * fcan_poll.
    *
    * A periodic timer rather than a sleep after each tick, so the tick's own

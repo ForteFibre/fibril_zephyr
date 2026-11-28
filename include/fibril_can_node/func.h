@@ -49,8 +49,7 @@ struct fibril_fcan_func
    * Publish periodic S2M topics. Called at roughly 1 kHz from a single
    * thread, which is not necessarily the one running fcan_poll() — behind a
    * CAN hub the poll belongs to the driver thread. Publishing is safe either
-   * way, because a topic commit is built for a committer and a scheduler in
-   * different contexts. The node's state is readable through
+   * way, because the runtime guards its topics with a critical section. The node's state is readable through
    * fibril_fcan_node_state(); nothing else about the node is, so a tick must
    * not assume it shares a thread with the poll.
    *

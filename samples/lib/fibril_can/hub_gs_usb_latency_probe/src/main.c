@@ -14,8 +14,7 @@
  * The hub driver thread owns fcan_hub_on_rx() and calls
  * fcan_poll(self) at CONFIG_CAN_FCAN_HUB_POLL_INTERVAL_US granularity.
  * This main thread only calls probe_logic_tick() (topic begin/commit/read,
- * all seqlock-protected). Do NOT add fcan_svc_* calls here — they would
- * race the hub thread's fcan_service_poll() slots.
+ * each in the runtime's critical section).
  *
  * Latency vs the single-bus sample
  * --------------------------------
@@ -62,7 +61,7 @@ LOG_MODULE_REGISTER(fcan_hub_latency_probe, LOG_LEVEL_INF);
 #define HUB_DEV DEVICE_DT_GET(HUB_NODE)
 
 /* §6 default; probe launch expects --node-id 0x20. Override via
- * -DCONFIG_EXTRA_CFLAGS=-DNODE_ID=0x?? when running two boards side by side. */
+ * -DEXTRA_CFLAGS=-DNODE_ID=0x?? when running two boards side by side. */
 #ifndef NODE_ID
 #define NODE_ID 0x20
 #endif

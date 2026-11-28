@@ -52,7 +52,7 @@ west build -b native_sim samples/lib/fibril_can/example_node -- \
 
 | ファイル | 役割 |
 | --- | --- |
-| `src/main.c` | `fcan_init`、`fcan_register_all`、`scheduler_wait` と `drain_rx` と `fcan_poll` の 3 点セットによるメインループ |
+| `src/main.c` | `fcan_init`、`fcan_register_all`、`scheduler_wait` と `fcan_poll` の組によるメインループ |
 | `src/app_logic.c` | 生成された service ハンドラの実装と、S2M テレメトリを publish するティック |
 | `src/rgb_state.c` | ノードの状態を RGB LED に出す |
 

@@ -37,13 +37,21 @@ seq 変化で重複除外するので、warmup と実サンプルは seq==0 で�
 
 - 1 kHz 周期の `echo` は `latency_probe.yaml` の `period_us: 1000` に従い
   常に flush される (ping 未着でも継続)。
-- Main loop は `drain_rx → probe_logic_tick (commit) → fcan_poll (emit) → sleep`。
+- Main loop は `probe_logic_tick (commit) → fcan_poll (emit) → sleep`。
   §3.4.1 の recommendation どおり change-driven `echo_change` を同 tick で
   emit する構成。
 - Tick rate は build option `TICK_HZ` で上書き可 (§3.4.3):
 
   ```sh
-  west build ... -- -DCONFIG_EXTRA_CFLAGS="-DTICK_HZ=5000"
+  west build ... -- -DEXTRA_CFLAGS="-DTICK_HZ=5000"
+  ```
+
+- build option `WAKE_ON_RX=1` にすると、ping が届いたとき（ランタイムの
+  `notify_rx`）にも tick を回し、次の tick を待たずに `echo_change` を出す。
+  0（既定）と 1 の `echo_change` のレイテンシを比べると、到着で起こす効果が分かる。
+
+  ```sh
+  west build ... -- -DEXTRA_CFLAGS="-DWAKE_ON_RX=1"
   ```
 
 ## §4 — スレーブタイムスタンプ
@@ -66,7 +74,7 @@ seq 変化で重複除外するので、warmup と実サンプルは seq==0 で�
 ## §6 — Node ID / warmup
 
 - 既定 node ID: **0x20** (probe launch の `--node-id 0x20` と一致)。
-  `-DCONFIG_EXTRA_CFLAGS="-DNODE_ID=0x??"` で上書き可。
+  `-DEXTRA_CFLAGS="-DNODE_ID=0x??"` で上書き可。
 - Boot から `echo` 周期送信開始までの想定時間: **≦ 1 s**
   (T_listen 300 ms + boot_id ジッタ + fcan_init + fcan_register_all)。
   probe launch は `--slave-warmup-s 1` を推奨。

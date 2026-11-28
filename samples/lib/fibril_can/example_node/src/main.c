@@ -57,7 +57,7 @@ LOG_MODULE_REGISTER(fcan_example_node, LOG_LEVEL_INF);
 #define CAN_BUS_DEV    DEVICE_DT_GET(CAN_NODE)
 
 /* Default 0x10 keeps this sample self-contained; override without patching
- * the source by passing -DCONFIG_EXTRA_CFLAGS=-DNODE_ID=0x?? on the west
+ * the source by passing -DEXTRA_CFLAGS=-DNODE_ID=0x?? on the west
  * build line, or by adding the same via a board-specific overlay conf. */
 #ifndef NODE_ID
 #define NODE_ID        0x10
@@ -70,12 +70,6 @@ LOG_MODULE_REGISTER(fcan_example_node, LOG_LEVEL_INF);
  * headroom absorbs future schema growth without a re-tune. */
 K_HEAP_DEFINE(fcan_heap, 16 * 1024);
 
-/* Enough slots for a burst of provisioning frames arriving faster than main
- * can drain them. Loss on overflow is preferable to blocking the CAN driver
- * thread, and the runtime tolerates dropped frames — masters retry. */
-#define FCAN_RX_QUEUE_DEPTH 32
-K_MSGQ_DEFINE(fcan_rx_msgq, sizeof(struct fcan_zephyr_can_rx_item), FCAN_RX_QUEUE_DEPTH, 4);
-
 static void *heap_alloc(size_t size, size_t align, void *ctx)
 {
 	ARG_UNUSED(ctx);
@@ -87,7 +81,7 @@ static void *heap_alloc(size_t size, size_t align, void *ctx)
  * UNPROVISIONED, where the ANNOUNCE cadence is much slower). Fires the
  * runtime's public TX-ready signal, which fcan_zephyr_can_hal wires to
  * k_event_post — ISR-safe, and coalesces cleanly with the wake bits already
- * posted by RX enqueue / TX complete / topic commit. */
+ * posted by queued control frames / TX complete / topic commit. */
 static struct k_timer app_tick_timer;
 
 static void app_tick_expiry(struct k_timer *timer)
@@ -124,7 +118,7 @@ int main(void)
 		return rc;
 	}
 
-	rc = fcan_zephyr_can_hal_init(&hal, can_dev, &fcan_rx_msgq);
+	rc = fcan_zephyr_can_hal_init(&hal, can_dev);
 	if (rc != 0) {
 		return rc;
 	}
@@ -138,7 +132,7 @@ int main(void)
 	/* fcan_node_storage_size() is a runtime function (returns
 	 * sizeof(fcan_node_t) — opaque on purpose), so we heap-allocate the
 	 * node instead of trying to size a static array. 8-byte alignment
-	 * satisfies the seqlock and u64-hash fields the runtime keeps inside. */
+	 * satisfies the pointer and u64-hash fields the runtime keeps inside. */
 	fcan_node_t *node = k_heap_aligned_alloc(&fcan_heap, 8,
 						 fcan_node_storage_size(),
 						 K_NO_WAIT);
@@ -214,20 +208,18 @@ int main(void)
 	uint32_t last_led_ms = 0;
 	uint32_t last_tick_ms = k_uptime_get_32();
 	while (true) {
-		/* Event-driven wake triple: block on the HAL's k_event (posted
-		 * by RX enqueue, TX complete, topic commit, plus the 1 kHz
-		 * app_tick_timer above) or fcan's next runtime deadline,
-		 * drain the RX msgq onto this thread so fcan_on_can_rx()
-		 * never races fcan_poll(), then let fcan_poll() advance the
-		 * state machine and TX scheduler. */
+		/* Block on the HAL's k_event (posted by a queued config
+		 * command or service request, TX complete, topic commit, plus
+		 * the 1 kHz app_tick_timer above) or fcan's next runtime
+		 * deadline, then let fcan_poll() handle the queued frames and
+		 * advance the state machine and TX scheduler. */
 		fcan_zephyr_can_hal_scheduler_wait(&hal, node);
-		fcan_zephyr_can_hal_drain_rx(&hal);
 		fcan_poll(node);
 
 		const uint32_t now_ms = k_uptime_get_32();
 		/* app_logic_tick shares this thread with fcan_poll (app_logic.h
 		 * contract) and expects ~1 kHz pacing. scheduler_wait can
-		 * return more often on RX/TX bursts; gate on the ms boundary
+		 * return more often on control/TX bursts; gate on the ms boundary
 		 * so bursts don't over-integrate the toy dynamics. */
 		if ((int32_t)(now_ms - last_tick_ms) > 0) {
 			app_logic_tick(0.001f);

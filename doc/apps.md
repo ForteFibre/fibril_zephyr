@@ -718,9 +718,8 @@ hub のスレッドが `fcan_hub_poll` を回す周期（fibril_can の `CONFIG_
 `tick` が 1 ms を超えて周期を取りこぼしたら、取りこぼした分はまとめて呼ばずに捨て、数を警告のログに出す。
 続けて呼ぶと、新しいフィードバックを待たずにモータへ指令を重ねて送ることになるためである。
 
-publish は安全側にある。トピックの commit は、commit する側とスケジューラが別の
-コンテキストで走る前提で作られている。
-service の後送の応答（`*_complete`）も、fibril_can v0.3.3 からは安全側にある。
+publish は安全側にある。ランタイムは、トピックの commit と read を critical section の中で行う。
+service の後送の応答（`*_complete`）も安全側にある。
 応答をランタイムに預けるだけで、送るのは `fcan_poll` である。
 預け先が空いていなければ `FCAN_E_BUSY` が返るので、呼ぶ側は次の周期にやり直す。
 ただし **`tick` は `fcan_poll` と同じスレッドにいると仮定してはいけない。**

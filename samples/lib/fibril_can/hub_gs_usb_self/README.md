@@ -18,9 +18,8 @@ The self node reuses the codegen output and application logic from
 `samples/lib/fibril_can/example_node` almost verbatim; the only fork is
 `src/app_logic.c`, which completes the `motordriver_home` service
 synchronously instead of handing a call handle from the hub thread to the
-app thread. Since fibril_can v0.3.3, `fcan_svc_complete` from the app thread
-would be safe too: it only stages the reply, and the hub thread's
-`fcan_poll(self)` sends it. The other differences are in
+app thread. `fcan_svc_complete` from the app thread would be safe too: it
+only stages the reply, and the hub thread's `fcan_poll(self)` sends it. The other differences are in
 `main.c` (three-step hub+self init, no HAL wrapper around a physical CAN
 device, no manual `fcan_poll` on the app thread) and in `src/usbd_setup.c`
 (minimal USBD next boilerplate).

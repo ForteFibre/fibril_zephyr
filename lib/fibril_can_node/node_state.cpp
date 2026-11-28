@@ -29,7 +29,7 @@ int fibril_fcan_node_init(const fcan_config_t * cfg, fcan_node_t ** out)
   }
 
   /* From the allocator fcan_init is about to carve its arena from, so the
-   * node needs no heap of its own. 8-byte alignment satisfies the seqlock and
+   * node needs no heap of its own. 8-byte alignment satisfies the pointer and
    * u64 hash fields the runtime keeps inside.
    */
   auto * node = static_cast<fcan_node_t *>(
