@@ -17,6 +17,7 @@ source "subsys/logging/Kconfig.template.log_config"
 
 # zephyr-keep-sorted-start
 rsource "Kconfig.amt21"
+rsource "Kconfig.as5047p"
 rsource "Kconfig.qdec_stm32"
 rsource "Kconfig.robomaster"
 

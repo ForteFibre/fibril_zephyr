@@ -1,0 +1,55 @@
+description: |
+  ams AS5047P 14-bit on-axis magnetic angle sensor, read over SPI.
+
+  The angle is absolute within one turn. The driver accumulates it into a
+  continuous position, so the node is used through the generic encoder class.
+
+    &spi1 {
+        cs-gpios = <&gpioa 4 GPIO_ACTIVE_LOW>;
+
+        angle0: as5047p@0 {
+            compatible = "ams,as5047p";
+            reg = <0>;
+            spi-max-frequency = <8000000>;
+        };
+    };
+
+  The device accepts up to 10 MHz on SCLK.
+
+compatible: "ams,as5047p"
+
+include: [spi-device.yaml]
+
+properties:
+  poll-interval-us:
+    type: int
+    default: 1000
+    description: |
+      Interval between two reads of the angle, in microseconds.
+
+      The driver reads on its own rather than when a reading is requested,
+      because the angle has to be observed at least twice per turn for the
+      accumulated position to stay continuous. The interval therefore bounds
+      the speed that can be resolved: less than half a turn per interval,
+      which is 30000 rpm at the default.
+
+      An interval shorter than one kernel tick is rounded up to a tick.
+
+  offline-threshold:
+    type: int
+    default: 3
+    description: |
+      Number of consecutive failed reads after which the encoder is reported
+      offline and its accumulated position is rebuilt on the next good
+      reading. Below this the last good reading is kept and reported as
+      stale, so a single corrupted frame does not disturb a control loop.
+
+  invert-direction:
+    type: boolean
+    description: |
+      Report motion with the opposite sign.
+
+      This flips the accumulated position and velocity in software. The
+      single-turn angle is still what the device reported. The driver does
+      not touch the device's DIR setting, so the direction is flipped the
+      same way as on the other encoder drivers.

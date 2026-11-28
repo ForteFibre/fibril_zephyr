@@ -111,6 +111,7 @@ deb の codegen は版が runtime とずれることがある（`west.yml` は f
 | クラス | 実装 | 文書 |
 | --- | --- | --- |
 | エンコーダ | AMT21x アブソリュートエンコーダ（RS485） | [doc/drivers/amt21.md](doc/drivers/amt21.md) |
+| エンコーダ | ams AS5047P 磁気角度センサ（SPI） | [doc/drivers/as5047p.md](doc/drivers/as5047p.md) |
 | エンコーダ | DJI RoboMaster のロータ角 | [doc/drivers/robomaster_encoder.md](doc/drivers/robomaster_encoder.md) |
 | IMU | CruizCore R6093U ジャイロ（UART） | [doc/drivers/r6093u.md](doc/drivers/r6093u.md) |
 | モータ | DJI RoboMaster C610 / C620（CAN） | [doc/drivers/robomaster.md](doc/drivers/robomaster.md) |

@@ -10,5 +10,6 @@ zephyr_library_sources(encoder_accum.c)
 
 zephyr_library_sources_ifdef(CONFIG_ENCODER_AMT21 amt21.c)
 zephyr_library_sources_ifdef(CONFIG_ENCODER_AMT21_SHELL amt21_shell.c)
+zephyr_library_sources_ifdef(CONFIG_ENCODER_AS5047P as5047p.c)
 zephyr_library_sources_ifdef(CONFIG_ENCODER_QDEC_STM32 qdec_stm32.c)
 zephyr_library_sources_ifdef(CONFIG_ENCODER_ROBOMASTER robomaster_encoder.c)

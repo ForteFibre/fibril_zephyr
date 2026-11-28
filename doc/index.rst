@@ -19,6 +19,7 @@ API リファレンスは Doxygen が別に生成する。
    :caption: ドライバ
 
    drivers/amt21
+   drivers/as5047p
    drivers/odrive
    drivers/qdec_stm32
    drivers/r6093u

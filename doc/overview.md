@@ -120,6 +120,7 @@ codegen が決めるブロック配列の並びはワイヤの契約の一部で
 | クラス | 実装 | ドキュメント |
 | --- | --- | --- |
 | エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/amt21.c` | [AMT21x](drivers/amt21.md) |
+| エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/as5047p.c` | [AS5047P](drivers/as5047p.md) |
 | エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/qdec_stm32.c` | [直交エンコーダ](drivers/qdec_stm32.md) |
 | エンコーダ（`include/drivers/encoder.h`） | `drivers/encoder/robomaster_encoder.c` | [RoboMaster のロータ角](drivers/robomaster_encoder.md) |
 | IMU（`include/drivers/imu.h`） | `drivers/imu/r6093u.c` | [R6093U](drivers/r6093u.md) |

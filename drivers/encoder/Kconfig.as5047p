@@ -1,0 +1,27 @@
+config ENCODER_AS5047P
+	bool "ams AS5047P magnetic angle sensor driver"
+	default y
+	depends on DT_HAS_AMS_AS5047P_ENABLED
+	select SPI
+	help
+	  Enable support for the ams AS5047P 14-bit magnetic angle sensor on
+	  SPI. A thread per device polls the angle so that the accumulated
+	  position stays continuous across the turn.
+
+if ENCODER_AS5047P
+
+config ENCODER_AS5047P_THREAD_STACK_SIZE
+	int "AS5047P poll thread stack size"
+	default 768
+	help
+	  Stack size of the thread that polls one AS5047P.
+
+config ENCODER_AS5047P_THREAD_PRIORITY
+	int "AS5047P poll thread priority"
+	default 5
+	help
+	  Priority of the thread that polls one AS5047P. The interval it
+	  measures between two readings feeds the velocity, so a priority that
+	  lets other work delay it makes the velocity noisier, not wrong.
+
+endif # ENCODER_AS5047P
